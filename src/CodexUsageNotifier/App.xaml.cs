@@ -1,0 +1,123 @@
+using System.Windows;
+using CodexUsageNotifier.Application.Abstractions;
+using CodexUsageNotifier.Domain.Models;
+using CodexUsageNotifier.Infrastructure.Logging;
+using CodexUsageNotifier.Infrastructure.Persistence;
+using CodexUsageNotifier.Presentation.Tray;
+using CodexUsageNotifier.Presentation.ViewModels;
+using CodexUsageNotifier.Presentation;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+
+namespace CodexUsageNotifier;
+
+/// <summary>
+/// アプリケーションの起動、依存関係の構築、および終了処理を管理します。
+/// </summary>
+public partial class App : System.Windows.Application
+{
+    private static readonly Action<ILogger, Exception?> LogApplicationStopping =
+        LoggerMessage.Define(LogLevel.Information, new EventId(1002, "ApplicationStopping"), "アプリケーションを終了します。");
+
+    private static readonly Action<ILogger, Exception?> LogApplicationStarting =
+        LoggerMessage.Define(LogLevel.Information, new EventId(1000, "ApplicationStarting"), "アプリケーションを起動します。");
+
+    private static readonly Action<ILogger, Exception?> LogInitializationCompleted =
+        LoggerMessage.Define(LogLevel.Information, new EventId(1001, "InitializationCompleted"), "設定と状態の読み込みが完了しました。");
+
+    private ServiceProvider? serviceProvider;
+
+    /// <summary>
+    /// DIコンテナを構築し、永続化基盤とタスクトレイを初期化します。
+    /// </summary>
+    /// <param name="e">起動時の引数です。</param>
+    protected override async void OnStartup(StartupEventArgs e)
+    {
+        base.OnStartup(e);
+
+        try
+        {
+            AppDataPaths paths = AppDataPaths.CreateDefault();
+            paths.EnsureDirectories();
+            serviceProvider = BuildServiceProvider(paths);
+
+            await InitializePersistenceAsync(serviceProvider, CancellationToken.None);
+
+            MainWindow mainWindow = serviceProvider.GetRequiredService<MainWindow>();
+            mainWindow.Show();
+            serviceProvider.GetRequiredService<TrayIconService>().Initialize();
+        }
+        catch (Exception exception)
+        {
+            System.Windows.MessageBox.Show(
+                $"アプリケーションを起動できませんでした。{Environment.NewLine}{exception.Message}",
+                "Codex Usage Notifier",
+                System.Windows.MessageBoxButton.OK,
+                System.Windows.MessageBoxImage.Error);
+            Shutdown(-1);
+        }
+    }
+
+    /// <summary>
+    /// 起動時に使用するサービスを登録してDIコンテナを生成します。
+    /// </summary>
+    /// <param name="paths">アプリケーションデータの保存先です。</param>
+    /// <returns>構築済みのサービスプロバイダーです。</returns>
+    private static ServiceProvider BuildServiceProvider(AppDataPaths paths)
+    {
+        ArgumentNullException.ThrowIfNull(paths);
+
+        ServiceCollection services = new();
+        services.AddSingleton(paths);
+        services.AddSingleton<IAppDataPaths>(paths);
+        services.AddLogging(builder =>
+        {
+            builder.SetMinimumLevel(LogLevel.Information);
+            builder.AddProvider(new DailyFileLoggerProvider(paths.LogDirectory));
+        });
+
+        services.AddSingleton<ISettingsRepository, JsonSettingsRepository>();
+        services.AddSingleton<IApplicationStateRepository, JsonApplicationStateRepository>();
+        services.AddSingleton<ApplicationLifetime>();
+        services.AddSingleton<StatusViewModel>();
+        services.AddSingleton<MainWindow>();
+        services.AddSingleton<TrayIconService>();
+        return services.BuildServiceProvider();
+    }
+
+    /// <summary>
+    /// 永続化済みの設定と状態を読み込み、状態画面へ反映します。
+    /// </summary>
+    /// <param name="provider">登録済みサービスの取得元です。</param>
+    /// <param name="cancellationToken">処理のキャンセル通知です。</param>
+    private static async Task InitializePersistenceAsync(
+        IServiceProvider provider,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(provider);
+
+        ILogger<App> logger = provider.GetRequiredService<ILogger<App>>();
+        LogApplicationStarting(logger, null);
+        AppSettings settings = await provider.GetRequiredService<ISettingsRepository>()
+            .LoadAsync(cancellationToken);
+        ApplicationState state = await provider.GetRequiredService<IApplicationStateRepository>()
+            .LoadAsync(cancellationToken);
+        provider.GetRequiredService<StatusViewModel>().Initialize(settings, state);
+        LogInitializationCompleted(logger, null);
+    }
+
+    /// <summary>
+    /// DIコンテナと、その配下の破棄可能なサービスを解放します。
+    /// </summary>
+    /// <param name="e">終了時の引数です。</param>
+    protected override void OnExit(ExitEventArgs e)
+    {
+        ILogger<App>? logger = serviceProvider?.GetService<ILogger<App>>();
+        if (logger is not null)
+        {
+            LogApplicationStopping(logger, null);
+        }
+        serviceProvider?.Dispose();
+        base.OnExit(e);
+    }
+}

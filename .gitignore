@@ -1,0 +1,10 @@
+bin/
+obj/
+.vs/
+*.user
+*.suo
+
+# OAuthクライアント設定と認証情報はGit管理しません。
+client_secret*.json
+credentials*.json
+auth/

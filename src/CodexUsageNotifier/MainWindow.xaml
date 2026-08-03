@@ -1,0 +1,68 @@
+<Window x:Class="CodexUsageNotifier.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d"
+        Title="Codex Usage Notifier"
+        Width="720"
+        Height="620"
+        MinWidth="620"
+        MinHeight="520"
+        WindowStartupLocation="CenterScreen">
+    <Grid Background="#F3F5F7">
+        <ScrollViewer VerticalScrollBarVisibility="Auto">
+            <StackPanel Margin="28">
+                <TextBlock FontSize="26" FontWeight="SemiBold" Text="Codex Usage Notifier" />
+                <TextBlock Margin="0,6,0,24"
+                           Foreground="#5B6573"
+                           Text="Phase 1 基盤稼働中 — 利用枠の取得は Phase 2 で追加します。" />
+
+                <Border Padding="22" Background="White" CornerRadius="10">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="190" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+
+                        <TextBlock Grid.Row="0" FontWeight="SemiBold" Text="5時間枠" />
+                        <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding PrimaryRateLimit}" />
+                        <TextBlock Grid.Row="1" Margin="0,14,0,0" FontWeight="SemiBold" Text="週間枠" />
+                        <TextBlock Grid.Row="1" Grid.Column="1" Margin="0,14,0,0" Text="{Binding SecondaryRateLimit}" />
+                        <TextBlock Grid.Row="2" Margin="0,14,0,0" FontWeight="SemiBold" Text="リセット回数" />
+                        <TextBlock Grid.Row="2" Grid.Column="1" Margin="0,14,0,0" Text="{Binding ResetCredits}" />
+                        <TextBlock Grid.Row="3" Margin="0,14,0,0" FontWeight="SemiBold" Text="監視状態" />
+                        <TextBlock Grid.Row="3" Grid.Column="1" Margin="0,14,0,0" Text="{Binding MonitoringStatus}" />
+                        <TextBlock Grid.Row="4" Margin="0,14,0,0" FontWeight="SemiBold" Text="最終取得" />
+                        <TextBlock Grid.Row="4" Grid.Column="1" Margin="0,14,0,0" Text="{Binding LastSuccessfulFetch}" />
+                        <TextBlock Grid.Row="5" Margin="0,14,0,0" FontWeight="SemiBold" Text="次回確認" />
+                        <TextBlock Grid.Row="5" Grid.Column="1" Margin="0,14,0,0" Text="{Binding NextCheck}" />
+                        <TextBlock Grid.Row="6" Margin="0,14,0,0" FontWeight="SemiBold" Text="Gmail" />
+                        <TextBlock Grid.Row="6" Grid.Column="1" Margin="0,14,0,0" Text="{Binding GmailStatus}" />
+                        <TextBlock Grid.Row="7" Margin="0,14,0,0" FontWeight="SemiBold" Text="最終通知" />
+                        <TextBlock Grid.Row="7" Grid.Column="1" Margin="0,14,0,0" Text="{Binding LastNotification}" />
+                        <TextBlock Grid.Row="8" Margin="0,14,0,0" FontWeight="SemiBold" Text="連続失敗" />
+                        <TextBlock Grid.Row="8" Grid.Column="1" Margin="0,14,0,0" Text="{Binding ConsecutiveFailures}" />
+                    </Grid>
+                </Border>
+
+                <Border Margin="0,18,0,0" Padding="18" Background="#E8F0FE" CornerRadius="8">
+                    <TextBlock Foreground="#244A7C"
+                               Text="この画面を閉じてもアプリは終了せず、タスクトレイに常駐します。終了はトレイメニューから行ってください。"
+                               TextWrapping="Wrap" />
+                </Border>
+            </StackPanel>
+        </ScrollViewer>
+    </Grid>
+</Window>
