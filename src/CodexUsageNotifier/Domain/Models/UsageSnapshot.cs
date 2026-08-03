@@ -34,6 +34,11 @@ public sealed class UsageSnapshot
     /// App Serverが返した制限識別子を取得または設定します。
     /// </summary>
     public string? RawLimitId { get; init; }
+
+    /// <summary>
+    /// 既知の5時間枠・週間枠として識別できなかった利用枠を取得または設定します。
+    /// </summary>
+    public IReadOnlyList<RateLimitWindow> UnknownWindows { get; init; } = Array.Empty<RateLimitWindow>();
 }
 
 /// <summary>

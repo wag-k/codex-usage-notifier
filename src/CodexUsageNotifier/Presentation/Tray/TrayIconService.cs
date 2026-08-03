@@ -1,5 +1,7 @@
 using System.Diagnostics;
 using CodexUsageNotifier.Application.Abstractions;
+using CodexUsageNotifier.Application.Monitoring;
+using CodexUsageNotifier.Domain.Models;
 using Microsoft.Extensions.Logging;
 using Forms = System.Windows.Forms;
 
@@ -16,9 +18,13 @@ public sealed class TrayIconService : IDisposable
     private static readonly Action<ILogger, Exception?> LogOpenLogDirectoryFailed =
         LoggerMessage.Define(LogLevel.Error, new EventId(3001, "OpenLogDirectoryFailed"), "ログフォルダーを開けませんでした。");
 
+    private static readonly Action<ILogger, Exception?> LogManualRefreshFailed =
+        LoggerMessage.Define(LogLevel.Error, new EventId(3002, "ManualRefreshFailed"), "手動の利用枠確認に失敗しました。");
+
     private readonly MainWindow mainWindow;
     private readonly ApplicationLifetime applicationLifetime;
     private readonly IAppDataPaths paths;
+    private readonly UsageMonitor usageMonitor;
     private readonly ILogger<TrayIconService> logger;
     private Forms.NotifyIcon? notifyIcon;
     private bool disposed;
@@ -29,21 +35,25 @@ public sealed class TrayIconService : IDisposable
     /// <param name="mainWindow">表示対象の状態ウィンドウです。</param>
     /// <param name="applicationLifetime">アプリケーションの終了制御です。</param>
     /// <param name="paths">アプリケーションデータの保存先です。</param>
+    /// <param name="usageMonitor">手動確認を受け付ける利用枠監視です。</param>
     /// <param name="logger">操作結果を記録するロガーです。</param>
     public TrayIconService(
         MainWindow mainWindow,
         ApplicationLifetime applicationLifetime,
         IAppDataPaths paths,
+        UsageMonitor usageMonitor,
         ILogger<TrayIconService> logger)
     {
         ArgumentNullException.ThrowIfNull(mainWindow);
         ArgumentNullException.ThrowIfNull(applicationLifetime);
         ArgumentNullException.ThrowIfNull(paths);
+        ArgumentNullException.ThrowIfNull(usageMonitor);
         ArgumentNullException.ThrowIfNull(logger);
 
         this.mainWindow = mainWindow;
         this.applicationLifetime = applicationLifetime;
         this.paths = paths;
+        this.usageMonitor = usageMonitor;
         this.logger = logger;
     }
 
@@ -60,6 +70,7 @@ public sealed class TrayIconService : IDisposable
 
         Forms.ContextMenuStrip menu = new();
         menu.Items.Add("状態を開く", image: null, OnOpenStatus);
+        menu.Items.Add("今すぐ確認", image: null, OnRefreshNow);
         menu.Items.Add("ログフォルダーを開く", image: null, OnOpenLogDirectory);
         menu.Items.Add(new Forms.ToolStripSeparator());
         menu.Items.Add("終了", image: null, OnExit);
@@ -73,6 +84,25 @@ public sealed class TrayIconService : IDisposable
         };
         notifyIcon.DoubleClick += OnOpenStatus;
         LogTrayStarted(logger, null);
+    }
+
+    /// <summary>
+    /// ユーザー操作による利用枠の再取得を要求します。
+    /// </summary>
+    /// <param name="sender">イベント送信元です。</param>
+    /// <param name="e">イベント引数です。</param>
+    private async void OnRefreshNow(object? sender, EventArgs e)
+    {
+        try
+        {
+            await usageMonitor.RequestRefreshAsync(UsageCheckTrigger.Manual, CancellationToken.None);
+        }
+        catch (Exception exception) when (
+            exception is not OperationCanceledException
+                && exception is not ObjectDisposedException)
+        {
+            LogManualRefreshFailed(logger, exception);
+        }
     }
 
     /// <summary>

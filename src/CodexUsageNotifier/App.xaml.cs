@@ -1,9 +1,11 @@
 using System.Windows;
 using CodexUsageNotifier.Application.Abstractions;
 using CodexUsageNotifier.Application.State;
+using CodexUsageNotifier.Application.Monitoring;
 using CodexUsageNotifier.Domain.Models;
 using CodexUsageNotifier.Infrastructure.Logging;
 using CodexUsageNotifier.Infrastructure.Persistence;
+using CodexUsageNotifier.Infrastructure.Codex;
 using CodexUsageNotifier.Presentation.Tray;
 using CodexUsageNotifier.Presentation.ViewModels;
 using CodexUsageNotifier.Presentation;
@@ -47,6 +49,7 @@ public partial class App : System.Windows.Application
             MainWindow mainWindow = serviceProvider.GetRequiredService<MainWindow>();
             mainWindow.Show();
             serviceProvider.GetRequiredService<TrayIconService>().Initialize();
+            serviceProvider.GetRequiredService<UsageMonitor>().Start();
         }
         catch (Exception exception)
         {
@@ -82,8 +85,15 @@ public partial class App : System.Windows.Application
         services.AddSingleton<ISettingsRepository, JsonSettingsRepository>();
         services.AddSingleton<IApplicationStateRepository, JsonApplicationStateRepository>();
         services.AddSingleton<ApplicationStateStore>();
+        services.AddSingleton<TimeProvider>(TimeProvider.System);
+        services.AddSingleton(new CodexAppServerOptions());
+        services.AddSingleton<ICodexAppServerProcessFactory, CodexAppServerProcessFactory>();
+        services.AddSingleton<CodexAppServerClient>();
+        services.AddSingleton<ICodexRateLimitClient>(provider => provider.GetRequiredService<CodexAppServerClient>());
         services.AddSingleton<ApplicationLifetime>();
         services.AddSingleton<StatusViewModel>();
+        services.AddSingleton<IUsageStatusSink>(provider => provider.GetRequiredService<StatusViewModel>());
+        services.AddSingleton<UsageMonitor>();
         services.AddSingleton<MainWindow>();
         services.AddSingleton<TrayIconService>();
         return services.BuildServiceProvider();
@@ -140,7 +150,7 @@ public partial class App : System.Windows.Application
         {
             LogApplicationStopping(logger, null);
         }
-        serviceProvider?.Dispose();
+        serviceProvider?.DisposeAsync().AsTask().GetAwaiter().GetResult();
         base.OnExit(e);
     }
 }

@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
+using CodexUsageNotifier.Application.Abstractions;
 using CodexUsageNotifier.Domain.Models;
 
 namespace CodexUsageNotifier.Presentation.ViewModels;
@@ -7,12 +8,13 @@ namespace CodexUsageNotifier.Presentation.ViewModels;
 /// <summary>
 /// 基本状態画面に表示する値を管理します。
 /// </summary>
-public sealed class StatusViewModel : INotifyPropertyChanged
+public sealed class StatusViewModel : INotifyPropertyChanged, IUsageStatusSink
 {
-    private string primaryRateLimit = "未取得（Phase 2で実装）";
-    private string secondaryRateLimit = "未取得（Phase 2で実装）";
-    private string resetCredits = "未取得（Phase 2で実装）";
-    private string monitoringStatus = "未開始（Phase 2で実装）";
+    private string primaryRateLimit = "未取得";
+    private string secondaryRateLimit = "未取得";
+    private string unknownRateLimits = "なし";
+    private string resetCredits = "未取得";
+    private string monitoringStatus = "開始待ち";
     private string lastSuccessfulFetch = "未取得";
     private string nextCheck = "未設定（Phase 3で実装）";
     private string gmailStatus = "未設定（Phase 4で実装）";
@@ -40,6 +42,15 @@ public sealed class StatusViewModel : INotifyPropertyChanged
     {
         get => secondaryRateLimit;
         private set => SetProperty(ref secondaryRateLimit, value);
+    }
+
+    /// <summary>
+    /// 識別できなかった利用枠の表示文字列を取得します。
+    /// </summary>
+    public string UnknownRateLimits
+    {
+        get => unknownRateLimits;
+        private set => SetProperty(ref unknownRateLimits, value);
     }
 
     /// <summary>
@@ -125,6 +136,45 @@ public sealed class StatusViewModel : INotifyPropertyChanged
     }
 
     /// <summary>
+    /// 利用枠の取得開始をUIスレッドへ通知します。
+    /// </summary>
+    public void SetChecking()
+    {
+        RunOnUiThread(() => MonitoringStatus = "利用枠を確認中…");
+    }
+
+    /// <summary>
+    /// 正常に取得した利用枠をUIスレッドへ反映します。
+    /// </summary>
+    /// <param name="snapshot">取得した利用枠です。</param>
+    public void SetSnapshot(UsageSnapshot snapshot)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+        RunOnUiThread(() =>
+        {
+            ApplyUsageSnapshot(snapshot);
+            LastSuccessfulFetch = FormatLocalDateTime(snapshot.CapturedAtUtc, "未取得");
+            MonitoringStatus = "監視中（App Server接続済み）";
+            ConsecutiveFailures = "0回";
+        });
+    }
+
+    /// <summary>
+    /// 利用枠取得の失敗をUIスレッドへ反映します。
+    /// </summary>
+    /// <param name="consecutiveFailures">現在の連続失敗回数です。</param>
+    /// <param name="message">機密情報を含まないエラー概要です。</param>
+    public void SetFailure(int consecutiveFailures, string message)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(message);
+        RunOnUiThread(() =>
+        {
+            MonitoringStatus = $"再接続待ち：{message}";
+            ConsecutiveFailures = $"{consecutiveFailures}回";
+        });
+    }
+
+    /// <summary>
     /// 保存済みの利用枠があれば基本表示へ反映します。
     /// </summary>
     /// <param name="snapshot">保存済みの利用枠です。</param>
@@ -137,6 +187,7 @@ public sealed class StatusViewModel : INotifyPropertyChanged
 
         PrimaryRateLimit = FormatRateLimit(snapshot.Primary);
         SecondaryRateLimit = FormatRateLimit(snapshot.Secondary);
+        UnknownRateLimits = FormatUnknownRateLimits(snapshot.UnknownWindows);
         ResetCredits = snapshot.ResetCredits?.ToString(System.Globalization.CultureInfo.CurrentCulture) ?? "未取得";
     }
 
@@ -154,6 +205,42 @@ public sealed class StatusViewModel : INotifyPropertyChanged
 
         string reset = FormatLocalDateTime(window.ResetsAtUtc, "不明");
         return $"残り {window.RemainingPercent:0.#}% / 使用 {window.UsedPercent:0.#}% / 次回リセット {reset}";
+    }
+
+    /// <summary>
+    /// 未識別の利用枠を診断可能な表示文字列へ変換します。
+    /// </summary>
+    /// <param name="windows">未識別の利用枠です。</param>
+    /// <returns>limitId、位置、ウィンドウ長を含む表示文字列です。</returns>
+    private static string FormatUnknownRateLimits(IReadOnlyList<RateLimitWindow> windows)
+    {
+        ArgumentNullException.ThrowIfNull(windows);
+        if (windows.Count == 0)
+        {
+            return "なし";
+        }
+
+        return string.Join(
+            Environment.NewLine,
+            windows.Select(window =>
+                $"LimitId={window.LimitId ?? "不明"}, {window.Source}, {window.WindowDurationMinutes?.ToString(System.Globalization.CultureInfo.CurrentCulture) ?? "不明"}分, 残り{window.RemainingPercent:0.#}%"));
+    }
+
+    /// <summary>
+    /// WPFのUIスレッド上で表示更新処理を実行します。
+    /// </summary>
+    /// <param name="action">実行する表示更新処理です。</param>
+    private static void RunOnUiThread(Action action)
+    {
+        ArgumentNullException.ThrowIfNull(action);
+        System.Windows.Threading.Dispatcher? dispatcher = System.Windows.Application.Current?.Dispatcher;
+        if (dispatcher is null || dispatcher.CheckAccess())
+        {
+            action();
+            return;
+        }
+
+        _ = dispatcher.BeginInvoke(action);
     }
 
     /// <summary>
