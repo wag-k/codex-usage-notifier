@@ -1,5 +1,6 @@
 using System.Windows;
 using CodexUsageNotifier.Application.Abstractions;
+using CodexUsageNotifier.Application.State;
 using CodexUsageNotifier.Domain.Models;
 using CodexUsageNotifier.Infrastructure.Logging;
 using CodexUsageNotifier.Infrastructure.Persistence;
@@ -68,16 +69,19 @@ public partial class App : System.Windows.Application
         ArgumentNullException.ThrowIfNull(paths);
 
         ServiceCollection services = new();
+        DailyFileLoggerProvider fileLoggerProvider = new(paths.LogDirectory);
         services.AddSingleton(paths);
         services.AddSingleton<IAppDataPaths>(paths);
+        services.AddSingleton(fileLoggerProvider);
         services.AddLogging(builder =>
         {
-            builder.SetMinimumLevel(LogLevel.Information);
-            builder.AddProvider(new DailyFileLoggerProvider(paths.LogDirectory));
+            builder.SetMinimumLevel(LogLevel.Trace);
+            builder.AddProvider(fileLoggerProvider);
         });
 
         services.AddSingleton<ISettingsRepository, JsonSettingsRepository>();
         services.AddSingleton<IApplicationStateRepository, JsonApplicationStateRepository>();
+        services.AddSingleton<ApplicationStateStore>();
         services.AddSingleton<ApplicationLifetime>();
         services.AddSingleton<StatusViewModel>();
         services.AddSingleton<MainWindow>();
@@ -100,10 +104,29 @@ public partial class App : System.Windows.Application
         LogApplicationStarting(logger, null);
         AppSettings settings = await provider.GetRequiredService<ISettingsRepository>()
             .LoadAsync(cancellationToken);
-        ApplicationState state = await provider.GetRequiredService<IApplicationStateRepository>()
+        ApplyLogLevel(settings, provider.GetRequiredService<DailyFileLoggerProvider>());
+        ApplicationState state = await provider.GetRequiredService<ApplicationStateStore>()
             .LoadAsync(cancellationToken);
         provider.GetRequiredService<StatusViewModel>().Initialize(settings, state);
         LogInitializationCompleted(logger, null);
+    }
+
+    /// <summary>
+    /// 保存済み設定のログレベルをファイルロガーへ反映します。
+    /// </summary>
+    /// <param name="settings">読み込んだアプリケーション設定です。</param>
+    /// <param name="provider">ログレベルを変更するファイルロガーです。</param>
+    private static void ApplyLogLevel(AppSettings settings, DailyFileLoggerProvider provider)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+        ArgumentNullException.ThrowIfNull(provider);
+
+        if (!Enum.TryParse(settings.MinimumLogLevel, ignoreCase: true, out LogLevel minimumLevel))
+        {
+            throw new InvalidOperationException("設定されたログレベルを解釈できません。");
+        }
+
+        provider.MinimumLevel = minimumLevel;
     }
 
     /// <summary>

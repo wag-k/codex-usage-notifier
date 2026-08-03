@@ -5,6 +5,17 @@ namespace CodexUsageNotifier.Domain.Models;
 /// </summary>
 public sealed class AppSettings
 {
+    private static readonly HashSet<string> SupportedLogLevels = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "Trace",
+        "Debug",
+        "Information",
+        "Warning",
+        "Error",
+        "Critical",
+        "None",
+    };
+
     /// <summary>
     /// 現在の設定スキーマのバージョンです。
     /// </summary>
@@ -104,6 +115,6 @@ public sealed class AppSettings
             && ResetCheckDelaySeconds >= 0
             && HistoryRetentionDays >= 1
             && LogRetentionDays >= 1
-            && !string.IsNullOrWhiteSpace(MinimumLogLevel);
+            && SupportedLogLevels.Contains(MinimumLogLevel);
     }
 }

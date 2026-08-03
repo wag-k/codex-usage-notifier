@@ -126,7 +126,11 @@ public sealed class TrayIconService : IDisposable
                 UseShellExecute = true,
             });
         }
-        catch (Exception exception) when (exception is InvalidOperationException or System.ComponentModel.Win32Exception)
+        catch (Exception exception) when (
+            exception is IOException
+                or UnauthorizedAccessException
+                or InvalidOperationException
+                or System.ComponentModel.Win32Exception)
         {
             LogOpenLogDirectoryFailed(logger, exception);
         }

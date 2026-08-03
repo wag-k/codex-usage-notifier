@@ -3,7 +3,7 @@ namespace CodexUsageNotifier.Domain.Models;
 /// <summary>
 /// アプリケーション再起動後も維持する実行状態を表します。
 /// </summary>
-public sealed class ApplicationState
+public sealed record ApplicationState
 {
     /// <summary>
     /// 現在の状態スキーマのバージョンです。

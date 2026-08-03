@@ -1,6 +1,7 @@
 using CodexUsageNotifier.Domain.Models;
 using CodexUsageNotifier.Infrastructure.Persistence;
 using Microsoft.Extensions.Logging.Abstractions;
+using System.Text.Json;
 
 namespace CodexUsageNotifier.Tests.Infrastructure.Persistence;
 
@@ -76,6 +77,51 @@ public sealed class JsonSettingsRepositoryTests
 
         await Assert.ThrowsExceptionAsync<ArgumentException>(
             () => repository.SaveAsync(invalid, CancellationToken.None));
+    }
+
+    /// <summary>
+    /// 未対応のログレベルは設定として保存できないことを確認します。
+    /// </summary>
+    [TestMethod]
+    public async Task SaveAsync_UnknownLogLevel_ThrowsArgumentException()
+    {
+        using TemporaryDirectory temporaryDirectory = new();
+        JsonSettingsRepository repository = CreateRepository(temporaryDirectory.Path);
+        AppSettings invalid = new() { MinimumLogLevel = "Verbose" };
+
+        await Assert.ThrowsExceptionAsync<ArgumentException>(
+            () => repository.SaveAsync(invalid, CancellationToken.None));
+    }
+
+    /// <summary>
+    /// 配布用の既定設定JSONがコード上の初期値と一致することを確認します。
+    /// </summary>
+    [TestMethod]
+    public async Task DefaultSettingsFile_MatchesCodeDefaults()
+    {
+        string path = System.IO.Path.Combine(AppContext.BaseDirectory, "appsettings.default.json");
+        await using FileStream stream = File.OpenRead(path);
+        AppSettings? fileSettings = await JsonSerializer.DeserializeAsync<AppSettings>(
+            stream,
+            new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        AppSettings codeSettings = AppSettings.CreateDefault();
+
+        Assert.IsNotNull(fileSettings);
+        Assert.AreEqual(codeSettings.SchemaVersion, fileSettings.SchemaVersion);
+        Assert.AreEqual(codeSettings.NotificationThresholdPercent, fileSettings.NotificationThresholdPercent);
+        Assert.AreEqual(codeSettings.WeeklyWarningThresholdPercent, fileSettings.WeeklyWarningThresholdPercent);
+        Assert.AreEqual(codeSettings.WindowsNotificationEnabled, fileSettings.WindowsNotificationEnabled);
+        Assert.AreEqual(codeSettings.GmailNotificationEnabled, fileSettings.GmailNotificationEnabled);
+        Assert.AreEqual(codeSettings.GmailRecipient, fileSettings.GmailRecipient);
+        Assert.AreEqual(codeSettings.QuietHoursEnabled, fileSettings.QuietHoursEnabled);
+        Assert.AreEqual(codeSettings.QuietHoursStart, fileSettings.QuietHoursStart);
+        Assert.AreEqual(codeSettings.QuietHoursEnd, fileSettings.QuietHoursEnd);
+        Assert.AreEqual(codeSettings.FallbackPollingMinutes, fileSettings.FallbackPollingMinutes);
+        Assert.AreEqual(codeSettings.ResetCheckDelaySeconds, fileSettings.ResetCheckDelaySeconds);
+        Assert.AreEqual(codeSettings.HistoryRetentionDays, fileSettings.HistoryRetentionDays);
+        Assert.AreEqual(codeSettings.LogRetentionDays, fileSettings.LogRetentionDays);
+        Assert.AreEqual(codeSettings.AutoStartEnabled, fileSettings.AutoStartEnabled);
+        Assert.AreEqual(codeSettings.MinimumLogLevel, fileSettings.MinimumLogLevel);
     }
 
     /// <summary>

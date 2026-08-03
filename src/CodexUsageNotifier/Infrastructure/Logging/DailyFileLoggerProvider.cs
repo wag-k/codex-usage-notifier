@@ -12,6 +12,7 @@ public sealed class DailyFileLoggerProvider : ILoggerProvider
 {
     private readonly string logDirectory;
     private readonly object writeLock = new();
+    private int minimumLevel = (int)LogLevel.Information;
     private bool disposed;
 
     /// <summary>
@@ -25,6 +26,15 @@ public sealed class DailyFileLoggerProvider : ILoggerProvider
     }
 
     /// <summary>
+    /// ファイルへ出力する最小ログレベルを取得または設定します。
+    /// </summary>
+    public LogLevel MinimumLevel
+    {
+        get => (LogLevel)Volatile.Read(ref minimumLevel);
+        set => Volatile.Write(ref minimumLevel, (int)value);
+    }
+
+    /// <summary>
     /// 指定カテゴリのファイルロガーを生成します。
     /// </summary>
     /// <param name="categoryName">ログカテゴリ名です。</param>
@@ -33,7 +43,7 @@ public sealed class DailyFileLoggerProvider : ILoggerProvider
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(categoryName);
         ObjectDisposedException.ThrowIf(disposed, this);
-        return new DailyFileLogger(categoryName, WriteEntry);
+        return new DailyFileLogger(categoryName, IsEnabled, WriteEntry);
     }
 
     /// <summary>
@@ -66,21 +76,37 @@ public sealed class DailyFileLoggerProvider : ILoggerProvider
     }
 
     /// <summary>
+    /// 指定されたログレベルが現在の出力対象かどうかを判定します。
+    /// </summary>
+    /// <param name="logLevel">判定するログレベルです。</param>
+    /// <returns>出力対象ならtrueです。</returns>
+    private bool IsEnabled(LogLevel logLevel)
+    {
+        return logLevel != LogLevel.None && logLevel >= MinimumLevel;
+    }
+
+    /// <summary>
     /// 1カテゴリのログを整形してプロバイダーへ渡します。
     /// </summary>
     private sealed class DailyFileLogger : ILogger
     {
         private readonly string categoryName;
+        private readonly Func<LogLevel, bool> isEnabled;
         private readonly Action<string> writer;
 
         /// <summary>
         /// カテゴリと書き込み処理を指定してロガーを初期化します。
         /// </summary>
         /// <param name="categoryName">ログカテゴリ名です。</param>
+        /// <param name="isEnabled">ログレベルの出力可否を判定する処理です。</param>
         /// <param name="writer">整形済みログの書き込み処理です。</param>
-        internal DailyFileLogger(string categoryName, Action<string> writer)
+        internal DailyFileLogger(
+            string categoryName,
+            Func<LogLevel, bool> isEnabled,
+            Action<string> writer)
         {
             this.categoryName = categoryName;
+            this.isEnabled = isEnabled;
             this.writer = writer;
         }
 
@@ -100,8 +126,8 @@ public sealed class DailyFileLoggerProvider : ILoggerProvider
         /// 指定ログレベルが出力対象かどうかを返します。
         /// </summary>
         /// <param name="logLevel">確認するログレベルです。</param>
-        /// <returns>None以外ならtrueです。</returns>
-        public bool IsEnabled(LogLevel logLevel) => logLevel != LogLevel.None;
+        /// <returns>現在の最小ログレベル以上ならtrueです。</returns>
+        public bool IsEnabled(LogLevel logLevel) => isEnabled(logLevel);
 
         /// <summary>
         /// ログメッセージと例外を1行以上のテキストへ整形して出力します。

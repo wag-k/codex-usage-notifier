@@ -11,16 +11,16 @@ namespace CodexUsageNotifier.Tests.Infrastructure.Persistence;
 public sealed class JsonApplicationStateRepositoryTests
 {
     /// <summary>
-    /// 通知状態と最終取得値を保存して読み戻せることを確認します。
+    /// 既存の状態ファイルを置換し、最新状態を読み戻せることを確認します。
     /// </summary>
     [TestMethod]
-    public async Task SaveAsync_StateWithSnapshot_CanLoadSavedState()
+    public async Task SaveAsync_ExistingState_ReplacesWithLatestState()
     {
         using TemporaryDirectory temporaryDirectory = new();
         AppDataPaths paths = new(temporaryDirectory.Path);
         JsonApplicationStateRepository repository = CreateRepository(paths);
         DateTimeOffset capturedAtUtc = new(2026, 8, 4, 0, 0, 0, TimeSpan.Zero);
-        ApplicationState expected = new()
+        ApplicationState initial = new()
         {
             LastNotifiedRecoveryWindowId = "window-1",
             LastSuccessfulFetchAtUtc = capturedAtUtc,
@@ -40,6 +40,13 @@ public sealed class JsonApplicationStateRepositoryTests
             FailureNotificationSent = true,
         };
 
+        await repository.SaveAsync(initial, CancellationToken.None);
+        ApplicationState expected = initial with
+        {
+            LastNotifiedRecoveryWindowId = "window-2",
+            ConsecutiveFailures = 3,
+            FailureNotificationSent = false,
+        };
         await repository.SaveAsync(expected, CancellationToken.None);
         ApplicationState actual = await repository.LoadAsync(CancellationToken.None);
 
@@ -48,8 +55,8 @@ public sealed class JsonApplicationStateRepositoryTests
         Assert.AreEqual(99, actual.LastUsageSnapshot?.Primary?.RemainingPercent);
         Assert.AreEqual(2, actual.LastUsageSnapshot?.ResetCredits);
         Assert.AreEqual(UsageCheckTrigger.Startup, actual.LastUsageSnapshot?.Trigger);
-        Assert.AreEqual(2, actual.ConsecutiveFailures);
-        Assert.IsTrue(actual.FailureNotificationSent);
+        Assert.AreEqual(3, actual.ConsecutiveFailures);
+        Assert.IsFalse(actual.FailureNotificationSent);
         Assert.IsFalse(Directory.EnumerateFiles(temporaryDirectory.Path, "*.tmp").Any());
     }
 

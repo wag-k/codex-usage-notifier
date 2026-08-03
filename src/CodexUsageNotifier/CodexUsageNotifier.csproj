@@ -17,6 +17,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- AppSettings.CreateDefaultを正とし、この配布用参照設定との一致を単体テストで保証します。 -->
     <None Update="appsettings.default.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
