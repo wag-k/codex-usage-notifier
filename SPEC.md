@@ -76,7 +76,51 @@ Codexの短期利用枠が完全に回復していても、ユーザーがその
 
 App Serverの仕様変更に備え、JSON-RPC通信とレスポンス解釈は専用クラスへ分離する。
 
-#### Gmail API
+### 4.3 Phase 2で確定したCodex連携仕様
+
+Phase 1完了時の懸念点1「App Serverのプロセス所有権」と懸念点2「複数契機による同時取得」は、次の方針で解消する。
+
+#### JSON-RPC通信
+
+1. `codex app-server --listen stdio://`を子プロセスとして起動する。
+2. stdin/stdoutをJSONL専用とし、1行を1つのJSON-RPCメッセージとして扱う。
+3. App Serverのワイヤー形式に合わせ、`jsonrpc: "2.0"`フィールドは送信しない。
+4. `initialize`の成功応答を受信してから`initialized`通知を送信する。
+5. App Server起動タイムアウトと`initialize`タイムアウトは15秒、通常要求タイムアウトは10秒とする。
+6. タイムアウトと終了処理には`CancellationToken`を使用する。
+7. 要求IDごとに`TaskCompletionSource`を保持し、対応する応答だけで要求を完了する。
+8. プロセス終了時は待機中の全要求を失敗させる。
+9. 不正なJSONや未知の通知を受信してもアプリ全体を終了しない。
+10. stderrは機密情報の可能性がある行をマスクし、診断ログへ転送する。
+
+#### プロセス所有権
+
+1. 本アプリが起動したApp Serverだけを管理し、プロセスIDを保持する。
+2. 既存のCodexプロセスを検索、再利用、終了しない。
+3. アプリ終了時は所有プロセスのstdinを閉じて正常終了を要求する。
+4. 5秒以内に終了しない場合は、所有するプロセスツリーだけを強制終了する。
+5. App Serverが予期せず終了した場合は、FR-014の1分、5分、15分の再試行方針を使用する。
+
+#### 利用枠の識別
+
+1. `rateLimitsByLimitId["codex"]`が存在する場合はそれを優先する。
+2. 存在しない場合は後方互換用の`rateLimits`を使用する。
+3. `primary`と`secondary`の位置だけでは枠の種類を決定しない。
+4. `windowDurationMins == 300`を5時間枠候補とする。
+5. `windowDurationMins == 10080`を週間枠候補とする。
+6. それ以外の長さ、同じ既知長の重複、および選択対象外のlimitIdはUnknownとして保持・表示・ログ出力する。
+7. `account/rateLimits/updated`の通知内容だけでは状態を確定せず、1秒のデバウンス後に`account/rateLimits/read`を再実行する。
+8. 診断ログには`limitId`、`primary`／`secondary`の由来、`windowDurationMins`、使用率、リセット時刻、識別結果だけを出力し、認証情報や生JSONは出力しない。
+9. 実アカウントのレスポンス確認後に、最終識別ルールを単体テストへ追加できるよう、レスポンスDTOと識別処理を分離する。
+
+#### 同時要求の集約
+
+1. 利用枠取得は常に最大1件だけ実行する。
+2. 取得中の追加要求は、取得契機の数にかかわらず再取得要求1件へ集約する。
+3. 現在の取得終了後、再取得要求があればもう1回取得する。
+4. タイマー、スリープ復帰、手動更新、更新通知が重なっても要求を無制限に積まない。
+
+### 4.4 Gmail API
 
 Gmail通知にはGmail APIを使用する。
 
@@ -459,6 +503,7 @@ Codex App Serverまたは利用枠取得に失敗した場合、次の処理を�
 | ResetCredits | int? | リセット回数 |
 | Trigger | UsageCheckTrigger | 取得契機 |
 | RawLimitId | string? | 元の制限識別子 |
+| UnknownWindows | IReadOnlyList&lt;RateLimitWindow&gt; | 識別できなかった枠。破棄せず保持する |
 
 ### 8.2 RateLimitWindow
 
@@ -468,6 +513,10 @@ Codex App Serverまたは利用枠取得に失敗した場合、次の処理を�
 | RemainingPercent | double | 残量 |
 | WindowDurationMinutes | int? | ウィンドウ長 |
 | ResetsAtUtc | DateTimeOffset? | リセット時刻 |
+| Kind | RateLimitWindowKind | FiveHour、Weekly、Unknownの識別結果 |
+| LimitId | string? | App Serverが返したlimitId |
+| LimitName | string? | App Serverが返した表示名 |
+| Source | RateLimitWindowSource | primary／secondaryの由来 |
 
 ### 8.3 NotificationState
 
@@ -744,6 +793,12 @@ Codex実行用ワークスペースを準備
 - 利用枠取得
 - 画面表示
 - エラー表示
+- 更新通知を契機としたデバウンス再取得
+- 同時要求の集約
+- 自動再接続
+- 現在のCodex CLIに対応するJSON Schemaの保存
+
+Phase 2では通知判定、Windows通知、Gmail通知、履歴グラフを実装しない。
 
 ### Phase 3：監視とWindows通知
 
@@ -778,7 +833,7 @@ Codex実行用ワークスペースを準備
 1. Windows通知に使用する具体的なライブラリ
 2. タスクトレイに使用する具体的なライブラリ
 3. Gmail OAuthトークン保存の具体的なファイル形式
-4. Codex App Serverレスポンス内で5時間枠と週間枠を識別する最終ロジック
+4. 実アカウントで観測した複数プラン・複数limitIdに対して、300分／10080分の識別ルールを最終確定できるか
 5. 自分宛てGmailのスマートフォン通知の実機挙動
 6. 配布形式
 7. アプリ名・アイコン

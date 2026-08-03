@@ -57,6 +57,21 @@ Codexの5時間枠が回復しました
 - Codex CLIでChatGPTアカウントにログイン済み
 - Gmail通知を使う場合はGoogleアカウントとGoogle Cloudプロジェクトが必要
 
+## 現在の実装状況
+
+Phase 1の基盤に加え、Phase 2のうちCodex App Serverから利用枠を取得して状態画面へ表示する範囲まで実装しています。
+
+- `codex app-server`を本アプリ所有の子プロセスとして起動
+- stdin/stdoutのJSONL形式で`initialize`、`initialized`、`account/rateLimits/read`を実行
+- `rateLimitsByLimitId["codex"]`を優先し、なければ`rateLimits`へフォールバック
+- 300分を5時間枠候補、10080分を週間枠候補として位置に依存せず識別
+- 未識別の枠を破棄せず、画面と機密情報を除いた診断ログへ表示
+- 同時取得要求の集約、更新通知後のデバウンス再取得、段階的な再接続
+
+通知判定、Windows通知、Gmail通知、履歴グラフは未実装です。
+
+Codex App Serverの生成済みJSON Schemaは[`docs/codex-app-server-schema`](./docs/codex-app-server-schema)に保存しています。
+
 ## 技術構成
 
 ```text
