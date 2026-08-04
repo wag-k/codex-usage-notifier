@@ -42,6 +42,22 @@ public sealed class NotificationTargetSelectorTests
     }
 
     /// <summary>
+    /// 比較可能な正のウィンドウ長がない場合は自動選択しないことを検証します。
+    /// </summary>
+    [TestMethod]
+    public void Select_AutomaticWithoutComparableDuration_ReturnsNull()
+    {
+        RateLimitWindow missing = CreateWindow("missing", RateLimitPosition.Primary, null);
+        RateLimitWindow invalid = CreateWindow("invalid", RateLimitPosition.Secondary, 0);
+
+        RateLimitWindow? result = NotificationTargetSelector.Select(
+            [missing, invalid],
+            new NotificationTargetSelection());
+
+        Assert.IsNull(result);
+    }
+
+    /// <summary>
     /// 手動選択ではLimitId、位置、ウィンドウ長がすべて一致する枠だけを返すことを検証します。
     /// </summary>
     [TestMethod]
@@ -72,7 +88,7 @@ public sealed class NotificationTargetSelectorTests
     private static RateLimitWindow CreateWindow(
         string limitId,
         RateLimitPosition position,
-        int durationMinutes)
+        int? durationMinutes)
     {
         return new RateLimitWindow
         {

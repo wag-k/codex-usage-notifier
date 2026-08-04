@@ -33,8 +33,9 @@ public static class NotificationTargetSelector
     private static RateLimitWindow? SelectAutomatically(IReadOnlyList<RateLimitWindow> rateLimits)
     {
         return rateLimits
+            .Where(window => window.WindowDurationMinutes is > 0)
             .OrderBy(window => window.WindowDurationMinutes == 300 ? 0 : 1)
-            .ThenBy(window => window.WindowDurationMinutes ?? int.MaxValue)
+            .ThenBy(window => window.WindowDurationMinutes)
             .ThenBy(window => window.LimitId, StringComparer.Ordinal)
             .ThenBy(window => window.Position)
             .FirstOrDefault();
