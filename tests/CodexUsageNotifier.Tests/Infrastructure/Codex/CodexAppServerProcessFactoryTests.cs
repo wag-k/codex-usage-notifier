@@ -46,9 +46,10 @@ public sealed class CodexAppServerProcessFactoryTests
             CodexAppServerProcessFactory.CreateStartInfo(executablePath);
 
         Assert.AreEqual("cmd.exe", Path.GetFileName(result.FileName), ignoreCase: true);
-        CollectionAssert.AreEqual(
-            new[] { "/d", "/s", "/c", $"\"{executablePath}\" app-server --listen stdio://" },
-            result.ArgumentList.ToArray());
+        Assert.AreEqual(
+            $"/d /s /c \"\"{executablePath}\" app-server --listen stdio://\"",
+            result.Arguments);
+        Assert.AreEqual(0, result.ArgumentList.Count);
         AssertRedirectsStandardStreams(result);
     }
 
@@ -68,6 +69,47 @@ public sealed class CodexAppServerProcessFactoryTests
             new[] { "app-server", "--listen", "stdio://" },
             result.ArgumentList.ToArray());
         AssertRedirectsStandardStreams(result);
+    }
+
+    /// <summary>
+    /// 空白を含むパスのcmdファイルを実際に起動し、標準入出力を往復できることを検証します。
+    /// </summary>
+    [TestMethod]
+    public async Task CreateStartInfo_CmdFile_CanExchangeStandardStreams()
+    {
+        string directory = Path.Combine(Path.GetTempPath(), $"codex process test {Guid.NewGuid():N}");
+        Directory.CreateDirectory(directory);
+        string scriptPath = Path.Combine(directory, "codex.cmd");
+        File.WriteAllText(scriptPath, "@echo off\r\nset /p input=\r\necho %input%\r\n");
+        using System.Diagnostics.Process process = new()
+        {
+            StartInfo = CodexAppServerProcessFactory.CreateStartInfo(scriptPath),
+        };
+        bool processStarted = false;
+        try
+        {
+            processStarted = process.Start();
+            Assert.IsTrue(processStarted);
+            await process.StandardInput.WriteLineAsync("json-rpc-test");
+            await process.StandardInput.FlushAsync();
+            string? output = await process.StandardOutput.ReadLineAsync()
+                .WaitAsync(TimeSpan.FromSeconds(5));
+
+            Assert.AreEqual("json-rpc-test", output);
+            process.StandardInput.Close();
+            await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.AreEqual(0, process.ExitCode);
+        }
+        finally
+        {
+            if (processStarted && !process.HasExited)
+            {
+                process.Kill(entireProcessTree: true);
+                await process.WaitForExitAsync();
+            }
+
+            Directory.Delete(directory, recursive: true);
+        }
     }
 
     /// <summary>

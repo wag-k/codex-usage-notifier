@@ -142,10 +142,7 @@ public sealed partial class CodexAppServerProcessFactory : ICodexAppServerProces
         {
             startInfo.FileName = Environment.GetEnvironmentVariable("COMSPEC")
                 ?? Path.Combine(Environment.SystemDirectory, "cmd.exe");
-            startInfo.ArgumentList.Add("/d");
-            startInfo.ArgumentList.Add("/s");
-            startInfo.ArgumentList.Add("/c");
-            startInfo.ArgumentList.Add($"\"{executablePath}\" app-server --listen stdio://");
+            startInfo.Arguments = $"/d /s /c \"\"{executablePath}\" app-server --listen stdio://\"";
             return startInfo;
         }
 
