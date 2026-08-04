@@ -36,6 +36,12 @@ public sealed record ApplicationState
     public DeferredNotificationState? DeferredNotification { get; init; }
 
     /// <summary>
+    /// 利用枠・リセット期間・通知種別・通知段階ごとの通知状態を取得または設定します。
+    /// </summary>
+    public IReadOnlyList<RateLimitNotificationState> RateLimitNotificationStates { get; init; } =
+        Array.Empty<RateLimitNotificationState>();
+
+    /// <summary>
     /// 最後に利用枠を正常取得したUTC時刻を取得または設定します。
     /// </summary>
     public DateTimeOffset? LastSuccessfulFetchAtUtc { get; init; }
@@ -97,6 +103,11 @@ public enum DeliveryStatus
     /// まだ送信を試みていない状態を表します。
     /// </summary>
     NotAttempted,
+
+    /// <summary>
+    /// 重複送信を防ぐため、送信前に処理中として保存した状態を表します。
+    /// </summary>
+    InProgress,
 
     /// <summary>
     /// 送信が成功した状態を表します。

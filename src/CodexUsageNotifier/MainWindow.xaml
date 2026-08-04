@@ -16,7 +16,7 @@
                 <TextBlock FontSize="26" FontWeight="SemiBold" Text="Codex Usage Notifier" />
                 <TextBlock Margin="0,6,0,24"
                            Foreground="#5B6573"
-                           Text="Phase 2 Codex App Server連携 — 利用枠を取得して表示します。" />
+                           Text="Phase 3 利用枠監視 — 短期回復と長期リセットを通知します。" />
 
                 <Border Padding="22" Background="White" CornerRadius="10">
                     <Grid>

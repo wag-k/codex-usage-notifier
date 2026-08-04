@@ -2,10 +2,12 @@ using System.Windows;
 using CodexUsageNotifier.Application.Abstractions;
 using CodexUsageNotifier.Application.State;
 using CodexUsageNotifier.Application.Monitoring;
+using CodexUsageNotifier.Application.Notifications;
 using CodexUsageNotifier.Domain.Models;
 using CodexUsageNotifier.Infrastructure.Logging;
 using CodexUsageNotifier.Infrastructure.Persistence;
 using CodexUsageNotifier.Infrastructure.Codex;
+using CodexUsageNotifier.Infrastructure.WindowsNotifications;
 using CodexUsageNotifier.Presentation.Tray;
 using CodexUsageNotifier.Presentation.ViewModels;
 using CodexUsageNotifier.Presentation;
@@ -87,6 +89,10 @@ public partial class App : System.Windows.Application
         services.AddSingleton<IUsageHistoryRepository, JsonUsageHistoryRepository>();
         services.AddSingleton<ApplicationStateStore>();
         services.AddSingleton<TimeProvider>(TimeProvider.System);
+        services.AddSingleton<IPowerEventSource, SystemPowerEventSource>();
+        services.AddSingleton<TrayIconHost>();
+        services.AddSingleton<IWindowsNotificationSender, WindowsBalloonNotificationSender>();
+        services.AddSingleton<RateLimitNotificationProcessor>();
         services.AddSingleton(new CodexAppServerOptions());
         services.AddSingleton<ICodexAppServerProcessFactory, CodexAppServerProcessFactory>();
         services.AddSingleton<CodexAppServerClient>();
@@ -119,6 +125,13 @@ public partial class App : System.Windows.Application
         ApplyLogLevel(settings, provider.GetRequiredService<DailyFileLoggerProvider>());
         ApplicationState state = await provider.GetRequiredService<ApplicationStateStore>()
             .LoadAsync(cancellationToken);
+        if (!state.InitialSetupCompleted)
+        {
+            state = await provider.GetRequiredService<ApplicationStateStore>().UpdateAsync(
+                current => current with { InitialSetupCompleted = true },
+                cancellationToken);
+        }
+
         provider.GetRequiredService<StatusViewModel>().Initialize(settings, state);
         LogInitializationCompleted(logger, null);
     }

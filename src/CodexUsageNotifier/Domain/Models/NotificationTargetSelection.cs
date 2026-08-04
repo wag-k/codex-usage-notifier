@@ -1,7 +1,7 @@
 namespace CodexUsageNotifier.Domain.Models;
 
 /// <summary>
-/// 将来の回復通知で監視対象にする利用枠の選択設定を表します。
+/// 通知判定で監視対象にする利用枠の選択設定を表します。
 /// </summary>
 public sealed class NotificationTargetSelection
 {

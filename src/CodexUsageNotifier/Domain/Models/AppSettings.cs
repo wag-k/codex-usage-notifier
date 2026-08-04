@@ -32,19 +32,64 @@ public sealed class AppSettings
     public string CodexExecutablePath { get; init; } = "codex";
 
     /// <summary>
-    /// 将来の回復通知で監視対象にする利用枠の選択設定を取得または設定します。
+    /// 通知判定で監視対象にする利用枠の選択設定を取得または設定します。
     /// </summary>
     public NotificationTargetSelection NotificationTarget { get; init; } = new();
 
     /// <summary>
-    /// 選択された利用枠の通知閾値を取得または設定します。
+    /// 短期枠の回復通知が有効かどうかを取得または設定します。
     /// </summary>
-    public int NotificationThresholdPercent { get; init; } = 99;
+    public bool ShortWindowRecoveryEnabled { get; init; } = true;
 
     /// <summary>
-    /// 週間枠の警告閾値を取得または設定します。
+    /// 短期枠の回復通知に使用する残量閾値を取得または設定します。
     /// </summary>
-    public int WeeklyWarningThresholdPercent { get; init; } = 20;
+    public int ShortWindowRecoveryThresholdPercent { get; init; } = 99;
+
+    /// <summary>
+    /// 長期枠のリセット前通知が有効かどうかを取得または設定します。
+    /// </summary>
+    public bool LongWindowPreResetNotificationEnabled { get; init; } = true;
+
+    /// <summary>
+    /// 長期枠の早期通知に使用する残量閾値を取得または設定します。
+    /// </summary>
+    public int LongWindowEarlyWarningThresholdPercent { get; init; } = 50;
+
+    /// <summary>
+    /// 長期枠の早期通知を開始する残り時間を時間単位で取得または設定します。
+    /// </summary>
+    public int LongWindowEarlyWarningHours { get; init; } = 48;
+
+    /// <summary>
+    /// 長期枠の通常通知に使用する残量閾値を取得または設定します。
+    /// </summary>
+    public int LongWindowStandardWarningThresholdPercent { get; init; } = 20;
+
+    /// <summary>
+    /// 長期枠の通常通知を開始する残り時間を時間単位で取得または設定します。
+    /// </summary>
+    public int LongWindowStandardWarningHours { get; init; } = 24;
+
+    /// <summary>
+    /// 長期枠の最終通知に使用する残量閾値を取得または設定します。
+    /// </summary>
+    public int LongWindowFinalWarningThresholdPercent { get; init; } = 10;
+
+    /// <summary>
+    /// 長期枠の最終通知を開始する残り時間を時間単位で取得または設定します。
+    /// </summary>
+    public int LongWindowFinalWarningHours { get; init; } = 6;
+
+    /// <summary>
+    /// 長期枠のリセット完了通知が有効かどうかを取得または設定します。
+    /// </summary>
+    public bool LongWindowResetCompletedNotificationEnabled { get; init; } = true;
+
+    /// <summary>
+    /// Unknown枠を通知対象に含めるかどうかを取得または設定します。
+    /// </summary>
+    public bool IncludeUnknownRateLimitsInNotifications { get; init; }
 
     /// <summary>
     /// Windows通知が有効かどうかを取得または設定します。
@@ -122,8 +167,13 @@ public sealed class AppSettings
             && !string.IsNullOrWhiteSpace(CodexExecutablePath)
             && NotificationTarget is not null
             && NotificationTarget.IsValid()
-            && NotificationThresholdPercent is >= 1 and <= 100
-            && WeeklyWarningThresholdPercent is >= 0 and <= 100
+            && ShortWindowRecoveryThresholdPercent is >= 1 and <= 100
+            && LongWindowEarlyWarningThresholdPercent is >= 0 and <= 100
+            && LongWindowStandardWarningThresholdPercent is >= 0 and <= 100
+            && LongWindowFinalWarningThresholdPercent is >= 0 and <= 100
+            && LongWindowEarlyWarningHours > LongWindowStandardWarningHours
+            && LongWindowStandardWarningHours > LongWindowFinalWarningHours
+            && LongWindowFinalWarningHours > 0
             && FallbackPollingMinutes >= 1
             && ResetCheckDelaySeconds >= 0
             && HistoryRetentionDays >= 1

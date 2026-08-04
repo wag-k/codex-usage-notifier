@@ -16,8 +16,18 @@ public interface IUsageStatusSink
     /// 正常に取得した利用枠を通知します。
     /// </summary>
     /// <param name="snapshot">取得した利用枠です。</param>
-    /// <param name="notificationTarget">現在の設定で選択された将来の通知対象です。</param>
-    void SetSnapshot(UsageSnapshot snapshot, RateLimitWindow? notificationTarget);
+    /// <param name="notificationTarget">現在の設定で選択された通知対象です。</param>
+    /// <param name="state">通知状態と直近送信結果を含む最新アプリケーション状態です。</param>
+    void SetSnapshot(
+        UsageSnapshot snapshot,
+        RateLimitWindow? notificationTarget,
+        ApplicationState state);
+
+    /// <summary>
+    /// 次に利用枠を確認する予定時刻を通知します。
+    /// </summary>
+    /// <param name="nextCheckAtUtc">次回確認UTC時刻です。予約がなければnullです。</param>
+    void SetNextCheck(DateTimeOffset? nextCheckAtUtc);
 
     /// <summary>
     /// 利用枠取得の失敗を通知します。

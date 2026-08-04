@@ -1,6 +1,7 @@
 using CodexUsageNotifier.Application.Abstractions;
 using CodexUsageNotifier.Application.Monitoring;
 using CodexUsageNotifier.Application.State;
+using CodexUsageNotifier.Application.Notifications;
 using CodexUsageNotifier.Domain.Models;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -24,11 +25,19 @@ public sealed class UsageMonitorTests
         InMemorySettingsRepository settingsRepository = new();
         RecordingHistoryRepository historyRepository = new();
         RecordingStatusSink statusSink = new();
+        FakePowerEventSource powerEventSource = new();
+        RateLimitNotificationProcessor notificationProcessor = new(
+            stateStore,
+            new RecordingWindowsNotificationSender(),
+            TimeProvider.System,
+            NullLogger<RateLimitNotificationProcessor>.Instance);
         await using UsageMonitor monitor = new(
             client,
             stateStore,
             settingsRepository,
             historyRepository,
+            powerEventSource,
+            notificationProcessor,
             statusSink,
             TimeProvider.System,
             NullLogger<UsageMonitor>.Instance);
@@ -61,11 +70,73 @@ public sealed class UsageMonitorTests
     }
 
     /// <summary>
+    /// 複数利用枠のうち最も早いリセット時刻の60秒後を次回確認にすることを検証します。
+    /// </summary>
+    [TestMethod]
+    public void GetNextResetCheckAtUtc_ReturnsEarliestFutureResetWithDelay()
+    {
+        DateTimeOffset nowUtc = new(2026, 8, 5, 0, 0, 0, TimeSpan.Zero);
+        UsageSnapshot snapshot = new()
+        {
+            RateLimits =
+            [
+                new RateLimitWindow { ResetsAtUtc = nowUtc.AddHours(24) },
+                new RateLimitWindow { ResetsAtUtc = nowUtc.AddHours(5) },
+                new RateLimitWindow { ResetsAtUtc = nowUtc.AddMinutes(-1) },
+            ],
+        };
+
+        DateTimeOffset? result = UsageMonitor.GetNextResetCheckAtUtc(
+            snapshot,
+            AppSettings.CreateDefault(),
+            nowUtc);
+
+        Assert.AreEqual(nowUtc.AddHours(5).AddMinutes(1), result);
+    }
+
+    /// <summary>
+    /// スリープ復帰イベントでResume契機の即時取得を行うことを検証します。
+    /// </summary>
+    [TestMethod]
+    public async Task PowerResumed_RequestsImmediateRefresh()
+    {
+        BlockingRateLimitClient client = new();
+        InMemoryStateRepository repository = new();
+        using ApplicationStateStore stateStore = new(repository);
+        InMemorySettingsRepository settingsRepository = new();
+        RecordingStatusSink statusSink = new();
+        FakePowerEventSource powerEventSource = new();
+        RateLimitNotificationProcessor notificationProcessor = new(
+            stateStore,
+            new RecordingWindowsNotificationSender(),
+            TimeProvider.System,
+            NullLogger<RateLimitNotificationProcessor>.Instance);
+        await using UsageMonitor monitor = new(
+            client,
+            stateStore,
+            settingsRepository,
+            new RecordingHistoryRepository(),
+            powerEventSource,
+            notificationProcessor,
+            statusSink,
+            TimeProvider.System,
+            NullLogger<UsageMonitor>.Instance);
+
+        powerEventSource.RaiseResumed();
+        await client.FirstRequestStarted.Task.WaitAsync(TimeSpan.FromSeconds(1));
+        client.ReleaseFirstRequest.TrySetResult();
+        await statusSink.SnapshotReceived.Task.WaitAsync(TimeSpan.FromSeconds(1));
+
+        Assert.AreEqual(UsageCheckTrigger.Resume, client.LastTrigger);
+    }
+
+    /// <summary>
     /// 最初の要求だけを任意の時点まで停止できる利用枠クライアントです。
     /// </summary>
     private sealed class BlockingRateLimitClient : ICodexRateLimitClient
     {
         private int callCount;
+        private UsageCheckTrigger lastTrigger;
 
         /// <summary>
         /// 利用枠更新通知です。
@@ -88,6 +159,11 @@ public sealed class UsageMonitorTests
         public int CallCount => Volatile.Read(ref callCount);
 
         /// <summary>
+        /// 最後に受け取った取得契機を取得します。
+        /// </summary>
+        public UsageCheckTrigger LastTrigger => lastTrigger;
+
+        /// <summary>
         /// 最初の要求が始まったことを通知します。
         /// </summary>
         public TaskCompletionSource FirstRequestStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -108,6 +184,7 @@ public sealed class UsageMonitorTests
             CancellationToken cancellationToken)
         {
             int currentCall = Interlocked.Increment(ref callCount);
+            lastTrigger = trigger;
             if (currentCall == 1)
             {
                 FirstRequestStarted.TrySetResult();
@@ -230,6 +307,11 @@ public sealed class UsageMonitorTests
         private int snapshotCount;
 
         /// <summary>
+        /// 最初の正常取得表示を通知します。
+        /// </summary>
+        public TaskCompletionSource SnapshotReceived { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        /// <summary>
         /// 取得開始通知の回数を取得します。
         /// </summary>
         public int CheckingCount => Volatile.Read(ref checkingCount);
@@ -249,10 +331,24 @@ public sealed class UsageMonitorTests
         /// </summary>
         /// <param name="snapshot">取得した利用枠です。</param>
         /// <param name="notificationTarget">選択された通知対象です。</param>
-        public void SetSnapshot(UsageSnapshot snapshot, RateLimitWindow? notificationTarget)
+        /// <param name="state">最新アプリケーション状態です。</param>
+        public void SetSnapshot(
+            UsageSnapshot snapshot,
+            RateLimitWindow? notificationTarget,
+            ApplicationState state)
         {
             ArgumentNullException.ThrowIfNull(snapshot);
+            ArgumentNullException.ThrowIfNull(state);
             Interlocked.Increment(ref snapshotCount);
+            SnapshotReceived.TrySetResult();
+        }
+
+        /// <summary>
+        /// 次回確認予定はこのテストでは記録しません。
+        /// </summary>
+        /// <param name="nextCheckAtUtc">次回確認UTC時刻です。</param>
+        public void SetNextCheck(DateTimeOffset? nextCheckAtUtc)
+        {
         }
 
         /// <summary>
@@ -263,6 +359,43 @@ public sealed class UsageMonitorTests
         public void SetFailure(int consecutiveFailures, string message)
         {
             ArgumentException.ThrowIfNullOrWhiteSpace(message);
+        }
+    }
+
+    /// <summary>
+    /// テストから任意に復帰イベントを発行できる電源イベント元です。
+    /// </summary>
+    private sealed class FakePowerEventSource : IPowerEventSource
+    {
+        /// <summary>
+        /// スリープ復帰通知です。
+        /// </summary>
+        public event EventHandler? Resumed;
+
+        /// <summary>
+        /// スリープ復帰通知を発行します。
+        /// </summary>
+        public void RaiseResumed() => Resumed?.Invoke(this, EventArgs.Empty);
+    }
+
+    /// <summary>
+    /// Windows通知要求を成功として記録するテスト実装です。
+    /// </summary>
+    private sealed class RecordingWindowsNotificationSender : IWindowsNotificationSender
+    {
+        /// <summary>
+        /// 通知要求を成功として完了します。
+        /// </summary>
+        /// <param name="message">通知内容です。</param>
+        /// <param name="cancellationToken">送信のキャンセル通知です。</param>
+        /// <returns>完了済みの非同期処理です。</returns>
+        public Task SendAsync(
+            WindowsNotificationMessage message,
+            CancellationToken cancellationToken)
+        {
+            ArgumentNullException.ThrowIfNull(message);
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.CompletedTask;
         }
     }
 }

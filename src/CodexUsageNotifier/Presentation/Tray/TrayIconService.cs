@@ -25,8 +25,8 @@ public sealed class TrayIconService : IDisposable
     private readonly ApplicationLifetime applicationLifetime;
     private readonly IAppDataPaths paths;
     private readonly UsageMonitor usageMonitor;
+    private readonly TrayIconHost trayIconHost;
     private readonly ILogger<TrayIconService> logger;
-    private Forms.NotifyIcon? notifyIcon;
     private bool disposed;
 
     /// <summary>
@@ -36,24 +36,28 @@ public sealed class TrayIconService : IDisposable
     /// <param name="applicationLifetime">アプリケーションの終了制御です。</param>
     /// <param name="paths">アプリケーションデータの保存先です。</param>
     /// <param name="usageMonitor">手動確認を受け付ける利用枠監視です。</param>
+    /// <param name="trayIconHost">メニューと通知で共有するタスクトレイアイコンです。</param>
     /// <param name="logger">操作結果を記録するロガーです。</param>
     public TrayIconService(
         MainWindow mainWindow,
         ApplicationLifetime applicationLifetime,
         IAppDataPaths paths,
         UsageMonitor usageMonitor,
+        TrayIconHost trayIconHost,
         ILogger<TrayIconService> logger)
     {
         ArgumentNullException.ThrowIfNull(mainWindow);
         ArgumentNullException.ThrowIfNull(applicationLifetime);
         ArgumentNullException.ThrowIfNull(paths);
         ArgumentNullException.ThrowIfNull(usageMonitor);
+        ArgumentNullException.ThrowIfNull(trayIconHost);
         ArgumentNullException.ThrowIfNull(logger);
 
         this.mainWindow = mainWindow;
         this.applicationLifetime = applicationLifetime;
         this.paths = paths;
         this.usageMonitor = usageMonitor;
+        this.trayIconHost = trayIconHost;
         this.logger = logger;
     }
 
@@ -63,11 +67,6 @@ public sealed class TrayIconService : IDisposable
     public void Initialize()
     {
         ObjectDisposedException.ThrowIf(disposed, this);
-        if (notifyIcon is not null)
-        {
-            return;
-        }
-
         Forms.ContextMenuStrip menu = new();
         menu.Items.Add("状態を開く", image: null, OnOpenStatus);
         menu.Items.Add("今すぐ確認", image: null, OnRefreshNow);
@@ -75,14 +74,8 @@ public sealed class TrayIconService : IDisposable
         menu.Items.Add(new Forms.ToolStripSeparator());
         menu.Items.Add("終了", image: null, OnExit);
 
-        notifyIcon = new Forms.NotifyIcon
-        {
-            Text = "Codex Usage Notifier",
-            Icon = System.Drawing.SystemIcons.Application,
-            ContextMenuStrip = menu,
-            Visible = true,
-        };
-        notifyIcon.DoubleClick += OnOpenStatus;
+        trayIconHost.Initialize(menu, OnOpenStatus);
+        trayIconHost.NotificationClicked += OnOpenStatus;
         LogTrayStarted(logger, null);
     }
 
@@ -116,12 +109,7 @@ public sealed class TrayIconService : IDisposable
         }
 
         disposed = true;
-        if (notifyIcon is not null)
-        {
-            notifyIcon.Visible = false;
-            notifyIcon.Dispose();
-            notifyIcon = null;
-        }
+        trayIconHost.NotificationClicked -= OnOpenStatus;
     }
 
     /// <summary>

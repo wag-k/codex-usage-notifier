@@ -45,6 +45,21 @@ public sealed class JsonApplicationStateRepositoryTests
             },
             ConsecutiveFailures = 2,
             FailureNotificationSent = true,
+            RateLimitNotificationStates =
+            [
+                new RateLimitNotificationState
+                {
+                    LimitId = "codex",
+                    Position = RateLimitPosition.Primary,
+                    WindowDurationMinutes = 300,
+                    RecoveryWindowId = "window-1",
+                    NotificationType = RateLimitNotificationType.ShortWindowRecovered,
+                    NotificationStage = RateLimitNotificationStage.Recovered,
+                    ConditionMetAtUtc = capturedAtUtc,
+                    DeliveredAtUtc = capturedAtUtc,
+                    WindowsDeliveryStatus = DeliveryStatus.Succeeded,
+                },
+            ],
         };
 
         await repository.SaveAsync(initial, CancellationToken.None);
@@ -64,6 +79,9 @@ public sealed class JsonApplicationStateRepositoryTests
         Assert.AreEqual(UsageCheckTrigger.Startup, actual.LastUsageSnapshot?.Trigger);
         Assert.AreEqual(3, actual.ConsecutiveFailures);
         Assert.IsFalse(actual.FailureNotificationSent);
+        Assert.AreEqual(
+            RateLimitNotificationType.ShortWindowRecovered,
+            actual.RateLimitNotificationStates.Single().NotificationType);
         Assert.IsFalse(Directory.EnumerateFiles(temporaryDirectory.Path, "*.tmp").Any());
     }
 

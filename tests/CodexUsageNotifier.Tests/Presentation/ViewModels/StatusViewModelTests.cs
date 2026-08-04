@@ -36,10 +36,11 @@ public sealed class StatusViewModelTests
 
         viewModel.Initialize(AppSettings.CreateDefault(), state);
 
-        Assert.AreEqual("未観測", viewModel.FiveHourRateLimit);
+        Assert.AreEqual("5時間枠：未観測", viewModel.FiveHourRateLimit);
         StringAssert.Contains(viewModel.WeeklyRateLimit, "残り 65%");
         StringAssert.Contains(viewModel.AllRateLimits, "Position=Primary");
         StringAssert.Contains(viewModel.AllRateLimits, "Classification=Weekly");
         StringAssert.Contains(viewModel.NotificationTarget, "Duration=10080分");
+        StringAssert.Contains(viewModel.AllRateLimits, "通知対象=はい");
     }
 }

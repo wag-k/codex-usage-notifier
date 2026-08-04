@@ -22,10 +22,19 @@ public sealed class JsonSettingsRepositoryTests
 
         AppSettings settings = await repository.LoadAsync(CancellationToken.None);
 
-        Assert.AreEqual(99, settings.NotificationThresholdPercent);
+        Assert.IsTrue(settings.ShortWindowRecoveryEnabled);
+        Assert.AreEqual(99, settings.ShortWindowRecoveryThresholdPercent);
         Assert.AreEqual("codex", settings.CodexExecutablePath);
         Assert.AreEqual(NotificationTargetSelectionMode.Automatic, settings.NotificationTarget.Mode);
-        Assert.AreEqual(20, settings.WeeklyWarningThresholdPercent);
+        Assert.IsTrue(settings.LongWindowPreResetNotificationEnabled);
+        Assert.AreEqual(50, settings.LongWindowEarlyWarningThresholdPercent);
+        Assert.AreEqual(48, settings.LongWindowEarlyWarningHours);
+        Assert.AreEqual(20, settings.LongWindowStandardWarningThresholdPercent);
+        Assert.AreEqual(24, settings.LongWindowStandardWarningHours);
+        Assert.AreEqual(10, settings.LongWindowFinalWarningThresholdPercent);
+        Assert.AreEqual(6, settings.LongWindowFinalWarningHours);
+        Assert.IsTrue(settings.LongWindowResetCompletedNotificationEnabled);
+        Assert.IsFalse(settings.IncludeUnknownRateLimitsInNotifications);
         Assert.IsTrue(settings.WindowsNotificationEnabled);
         Assert.IsFalse(settings.GmailNotificationEnabled);
         Assert.AreEqual(new TimeOnly(0, 0), settings.QuietHoursStart);
@@ -46,8 +55,10 @@ public sealed class JsonSettingsRepositoryTests
         JsonSettingsRepository repository = CreateRepository(temporaryDirectory.Path);
         AppSettings expected = new()
         {
-            NotificationThresholdPercent = 95,
-            WeeklyWarningThresholdPercent = 15,
+            ShortWindowRecoveryThresholdPercent = 95,
+            LongWindowEarlyWarningThresholdPercent = 55,
+            LongWindowStandardWarningThresholdPercent = 25,
+            LongWindowFinalWarningThresholdPercent = 15,
             GmailNotificationEnabled = true,
             GmailRecipient = "user@example.com",
             QuietHoursStart = new TimeOnly(23, 30),
@@ -66,8 +77,10 @@ public sealed class JsonSettingsRepositoryTests
         await repository.SaveAsync(expected, CancellationToken.None);
         AppSettings actual = await repository.LoadAsync(CancellationToken.None);
 
-        Assert.AreEqual(expected.NotificationThresholdPercent, actual.NotificationThresholdPercent);
-        Assert.AreEqual(expected.WeeklyWarningThresholdPercent, actual.WeeklyWarningThresholdPercent);
+        Assert.AreEqual(expected.ShortWindowRecoveryThresholdPercent, actual.ShortWindowRecoveryThresholdPercent);
+        Assert.AreEqual(expected.LongWindowEarlyWarningThresholdPercent, actual.LongWindowEarlyWarningThresholdPercent);
+        Assert.AreEqual(expected.LongWindowStandardWarningThresholdPercent, actual.LongWindowStandardWarningThresholdPercent);
+        Assert.AreEqual(expected.LongWindowFinalWarningThresholdPercent, actual.LongWindowFinalWarningThresholdPercent);
         Assert.AreEqual(expected.GmailNotificationEnabled, actual.GmailNotificationEnabled);
         Assert.AreEqual(expected.GmailRecipient, actual.GmailRecipient);
         Assert.AreEqual(expected.QuietHoursStart, actual.QuietHoursStart);
@@ -90,7 +103,7 @@ public sealed class JsonSettingsRepositoryTests
     {
         using TemporaryDirectory temporaryDirectory = new();
         JsonSettingsRepository repository = CreateRepository(temporaryDirectory.Path);
-        AppSettings invalid = new() { NotificationThresholdPercent = 0 };
+        AppSettings invalid = new() { ShortWindowRecoveryThresholdPercent = 0 };
 
         await Assert.ThrowsExceptionAsync<ArgumentException>(
             () => repository.SaveAsync(invalid, CancellationToken.None));
@@ -153,8 +166,17 @@ public sealed class JsonSettingsRepositoryTests
         Assert.AreEqual(
             codeSettings.NotificationTarget.WindowDurationMinutes,
             fileSettings.NotificationTarget.WindowDurationMinutes);
-        Assert.AreEqual(codeSettings.NotificationThresholdPercent, fileSettings.NotificationThresholdPercent);
-        Assert.AreEqual(codeSettings.WeeklyWarningThresholdPercent, fileSettings.WeeklyWarningThresholdPercent);
+        Assert.AreEqual(codeSettings.ShortWindowRecoveryEnabled, fileSettings.ShortWindowRecoveryEnabled);
+        Assert.AreEqual(codeSettings.ShortWindowRecoveryThresholdPercent, fileSettings.ShortWindowRecoveryThresholdPercent);
+        Assert.AreEqual(codeSettings.LongWindowPreResetNotificationEnabled, fileSettings.LongWindowPreResetNotificationEnabled);
+        Assert.AreEqual(codeSettings.LongWindowEarlyWarningThresholdPercent, fileSettings.LongWindowEarlyWarningThresholdPercent);
+        Assert.AreEqual(codeSettings.LongWindowEarlyWarningHours, fileSettings.LongWindowEarlyWarningHours);
+        Assert.AreEqual(codeSettings.LongWindowStandardWarningThresholdPercent, fileSettings.LongWindowStandardWarningThresholdPercent);
+        Assert.AreEqual(codeSettings.LongWindowStandardWarningHours, fileSettings.LongWindowStandardWarningHours);
+        Assert.AreEqual(codeSettings.LongWindowFinalWarningThresholdPercent, fileSettings.LongWindowFinalWarningThresholdPercent);
+        Assert.AreEqual(codeSettings.LongWindowFinalWarningHours, fileSettings.LongWindowFinalWarningHours);
+        Assert.AreEqual(codeSettings.LongWindowResetCompletedNotificationEnabled, fileSettings.LongWindowResetCompletedNotificationEnabled);
+        Assert.AreEqual(codeSettings.IncludeUnknownRateLimitsInNotifications, fileSettings.IncludeUnknownRateLimitsInNotifications);
         Assert.AreEqual(codeSettings.WindowsNotificationEnabled, fileSettings.WindowsNotificationEnabled);
         Assert.AreEqual(codeSettings.GmailNotificationEnabled, fileSettings.GmailNotificationEnabled);
         Assert.AreEqual(codeSettings.GmailRecipient, fileSettings.GmailRecipient);
