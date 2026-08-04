@@ -112,6 +112,8 @@ Gmail通知、設定画面、履歴グラフは未実装です。通知別設定
 
 Codex App Serverの生成済みJSON Schemaは[`docs/codex-app-server-schema`](./docs/codex-app-server-schema)に保存しています。
 
+Windowsでは、既定値`codex`をPATHとPATHEXTから`codex.exe`、`codex.cmd`、または`codex.bat`へ解決します。PATHで見つからない場合は、`%LOCALAPPDATA%\CodexUsageNotifier\settings.json`の`codexExecutablePath`へ実行ファイルの絶対パスを設定できます。WindowsApps配下の実体ファイルをコピーすることはありません。
+
 ## 技術構成
 
 ```text

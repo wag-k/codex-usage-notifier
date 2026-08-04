@@ -42,25 +42,15 @@ public sealed partial class CodexAppServerProcessFactory : ICodexAppServerProces
             throw new InvalidOperationException("Codex CLIの実行ファイルが設定されていません。");
         }
 
+        string executablePath = ResolveExecutablePath(
+            options.ExecutablePath,
+            Environment.GetEnvironmentVariable("PATH"),
+            Environment.GetEnvironmentVariable("PATHEXT"));
         Process process = new()
         {
-            StartInfo = new ProcessStartInfo
-            {
-                FileName = options.ExecutablePath,
-                UseShellExecute = false,
-                CreateNoWindow = true,
-                RedirectStandardInput = true,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                StandardInputEncoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
-                StandardOutputEncoding = Encoding.UTF8,
-                StandardErrorEncoding = Encoding.UTF8,
-            },
+            StartInfo = CreateStartInfo(executablePath),
             EnableRaisingEvents = true,
         };
-        process.StartInfo.ArgumentList.Add("app-server");
-        process.StartInfo.ArgumentList.Add("--listen");
-        process.StartInfo.ArgumentList.Add("stdio://");
 
         try
         {
@@ -75,8 +65,95 @@ public sealed partial class CodexAppServerProcessFactory : ICodexAppServerProces
         catch (Exception exception) when (exception is Win32Exception or InvalidOperationException)
         {
             process.Dispose();
-            throw new InvalidOperationException("Codex CLIを起動できません。インストール状態を確認してください。", exception);
+            throw new InvalidOperationException(
+                "Codex CLIを起動できません。PATHまたはsettings.jsonのcodexExecutablePathを確認してください。",
+                exception);
         }
+    }
+
+    /// <summary>
+    /// PATHとPATHEXTからWindowsで実行可能なCodex CLIの実体を解決します。
+    /// </summary>
+    /// <param name="configuredCommand">設定されたコマンド名またはパスです。</param>
+    /// <param name="pathVariable">検索対象のPATH環境変数です。</param>
+    /// <param name="pathExtensionsVariable">検索対象のPATHEXT環境変数です。</param>
+    /// <returns>解決できた実行ファイルの絶対パスです。見つからない場合は設定値をそのまま返します。</returns>
+    internal static string ResolveExecutablePath(
+        string configuredCommand,
+        string? pathVariable,
+        string? pathExtensionsVariable)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(configuredCommand);
+        if (Path.IsPathFullyQualified(configuredCommand)
+            || configuredCommand.Contains(Path.DirectorySeparatorChar)
+            || configuredCommand.Contains(Path.AltDirectorySeparatorChar))
+        {
+            return Path.GetFullPath(configuredCommand);
+        }
+
+        string[] extensions = Path.HasExtension(configuredCommand)
+            ? [string.Empty]
+            : (string.IsNullOrWhiteSpace(pathExtensionsVariable)
+                    ? ".COM;.EXE;.BAT;.CMD"
+                    : pathExtensionsVariable)
+                .Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        foreach (string directoryValue in (pathVariable ?? string.Empty)
+                     .Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            string directory = Environment.ExpandEnvironmentVariables(directoryValue.Trim('"'));
+            foreach (string extension in extensions)
+            {
+                string normalizedExtension = string.IsNullOrEmpty(extension) || extension.StartsWith('.')
+                    ? extension
+                    : $".{extension}";
+                string candidate = Path.Combine(directory, configuredCommand + normalizedExtension);
+                if (File.Exists(candidate))
+                {
+                    return Path.GetFullPath(candidate);
+                }
+            }
+        }
+
+        return configuredCommand;
+    }
+
+    /// <summary>
+    /// 実行形式に応じて標準入出力をリダイレクトしたApp Server起動情報を生成します。
+    /// </summary>
+    /// <param name="executablePath">解決済みのCodex CLI実行ファイルです。</param>
+    /// <returns>App Server起動用のプロセス情報です。</returns>
+    internal static ProcessStartInfo CreateStartInfo(string executablePath)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(executablePath);
+        ProcessStartInfo startInfo = new()
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            StandardInputEncoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
+            StandardOutputEncoding = Encoding.UTF8,
+            StandardErrorEncoding = Encoding.UTF8,
+        };
+        if (Path.GetExtension(executablePath) is string extension
+            && (extension.Equals(".cmd", StringComparison.OrdinalIgnoreCase)
+                || extension.Equals(".bat", StringComparison.OrdinalIgnoreCase)))
+        {
+            startInfo.FileName = Environment.GetEnvironmentVariable("COMSPEC")
+                ?? Path.Combine(Environment.SystemDirectory, "cmd.exe");
+            startInfo.ArgumentList.Add("/d");
+            startInfo.ArgumentList.Add("/s");
+            startInfo.ArgumentList.Add("/c");
+            startInfo.ArgumentList.Add($"\"{executablePath}\" app-server --listen stdio://");
+            return startInfo;
+        }
+
+        startInfo.FileName = executablePath;
+        startInfo.ArgumentList.Add("app-server");
+        startInfo.ArgumentList.Add("--listen");
+        startInfo.ArgumentList.Add("stdio://");
+        return startInfo;
     }
 
     [LoggerMessage(2100, LogLevel.Information, "Codex App Server子プロセスを起動しました。ProcessId={ProcessId}")]
