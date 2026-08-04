@@ -5,16 +5,16 @@ using CodexUsageNotifier.Infrastructure.Codex;
 namespace CodexUsageNotifier.Tests.Infrastructure.Codex;
 
 /// <summary>
-/// Codex利用枠レスポンスの識別と変換を検証します。
+/// Codex利用枠レスポンスの全枠保持、位置保持、および分類を検証します。
 /// </summary>
 [TestClass]
 public sealed class CodexRateLimitMapperTests
 {
     /// <summary>
-    /// codexの現在形式を優先し、primaryとsecondaryの位置ではなく長さで識別することを検証します。
+    /// primaryとsecondaryを位置として保持し、ウィンドウ長だけで分類することを検証します。
     /// </summary>
     [TestMethod]
-    public void Map_PrefersCodexBucketAndClassifiesByDuration()
+    public void Map_ClassifiesCurrentBucketByDurationWithoutChangingPosition()
     {
         CodexRateLimitResponse response = Deserialize("""
             {
@@ -26,6 +26,8 @@ public sealed class CodexRateLimitMapperTests
                 "codex": {
                   "limitId": "codex",
                   "limitName": "Codex",
+                  "planType": "plus",
+                  "rateLimitReachedType": "rate_limit_reached",
                   "primary": { "usedPercent": 21, "windowDurationMins": 10080, "resetsAt": 1785859200 },
                   "secondary": { "usedPercent": 7, "windowDurationMins": 300, "resetsAt": 1785772800 }
                 }
@@ -40,29 +42,35 @@ public sealed class CodexRateLimitMapperTests
             UsageCheckTrigger.Manual,
             new DateTimeOffset(2026, 8, 4, 0, 0, 0, TimeSpan.Zero));
 
-        Assert.AreEqual("codex", result.RawLimitId);
-        Assert.AreEqual(7D, result.Primary!.UsedPercent);
-        Assert.AreEqual(RateLimitWindowSource.Secondary, result.Primary.Source);
-        Assert.AreEqual(21D, result.Secondary!.UsedPercent);
-        Assert.AreEqual(RateLimitWindowSource.Primary, result.Secondary.Source);
+        Assert.AreEqual(2, result.RateLimits.Count);
+        RateLimitWindow primary = result.RateLimits.Single(window => window.Position == RateLimitPosition.Primary);
+        RateLimitWindow secondary = result.RateLimits.Single(window => window.Position == RateLimitPosition.Secondary);
+        Assert.AreEqual(RateLimitClassification.Weekly, primary.Classification);
+        Assert.AreEqual(21D, primary.UsedPercent);
+        Assert.AreEqual(RateLimitClassification.FiveHour, secondary.Classification);
+        Assert.AreEqual(7D, secondary.UsedPercent);
+        Assert.AreEqual("plus", primary.PlanType);
+        Assert.AreEqual("rate_limit_reached", primary.RateLimitReachedType);
         Assert.AreEqual(2, result.ResetCredits);
-        Assert.AreEqual(0, result.UnknownWindows.Count);
     }
 
     /// <summary>
-    /// codexの現在形式がない場合に後方互換形式を使用することを検証します。
+    /// 現在形式に含まれるすべてのlimitIdを保持し、後方互換ミラーを重複追加しないことを検証します。
     /// </summary>
     [TestMethod]
-    public void Map_UsesLegacyBucketWhenCodexBucketDoesNotExist()
+    public void Map_CurrentBucketsExist_RetainsAllLimitIdsWithoutLegacyMirror()
     {
         CodexRateLimitResponse response = Deserialize("""
             {
               "rateLimits": {
                 "limitId": "legacy-codex",
-                "primary": { "usedPercent": 40, "windowDurationMins": 300 },
-                "secondary": { "usedPercent": 50, "windowDurationMins": 10080 }
+                "primary": { "usedPercent": 40, "windowDurationMins": 300 }
               },
               "rateLimitsByLimitId": {
+                "codex": {
+                  "limitId": "codex",
+                  "primary": { "usedPercent": 50, "windowDurationMins": 10080 }
+                },
                 "other": {
                   "limitId": "other",
                   "primary": { "usedPercent": 60, "windowDurationMins": 60 }
@@ -76,22 +84,22 @@ public sealed class CodexRateLimitMapperTests
             UsageCheckTrigger.Startup,
             DateTimeOffset.UnixEpoch);
 
-        Assert.AreEqual("legacy-codex", result.RawLimitId);
-        Assert.AreEqual(60D, result.Primary!.RemainingPercent);
-        Assert.AreEqual(50D, result.Secondary!.RemainingPercent);
-        Assert.AreEqual(1, result.UnknownWindows.Count);
-        Assert.AreEqual("other", result.UnknownWindows[0].LimitId);
+        Assert.AreEqual(2, result.RateLimits.Count);
+        CollectionAssert.AreEquivalent(
+            new[] { "codex", "other" },
+            result.RateLimits.Select(window => window.LimitId).ToArray());
+        Assert.IsFalse(result.RateLimits.Any(window => window.LimitId == "legacy-codex"));
     }
 
     /// <summary>
-    /// 未知のウィンドウ長や重複した既知長を破棄せずUnknownとして保持することを検証します。
+    /// 複数の同じ既知長と未知長を破棄せず、それぞれの長さに従って分類することを検証します。
     /// </summary>
     [TestMethod]
-    public void Map_RetainsUnidentifiedAndDuplicateWindowsAsUnknown()
+    public void Map_DuplicateKnownDurationsAndUnknownDuration_RetainsEveryWindow()
     {
         CodexRateLimitResponse response = Deserialize("""
             {
-              "rateLimits": { "limitId": "legacy" },
+              "rateLimits": {},
               "rateLimitsByLimitId": {
                 "codex": {
                   "limitId": "codex",
@@ -111,20 +119,20 @@ public sealed class CodexRateLimitMapperTests
             UsageCheckTrigger.Scheduled,
             DateTimeOffset.UnixEpoch);
 
-        Assert.IsNotNull(result.Primary);
-        Assert.IsNull(result.Secondary);
-        Assert.AreEqual(2, result.UnknownWindows.Count);
-        Assert.IsTrue(result.UnknownWindows.All(window => window.Kind == RateLimitWindowKind.Unknown));
-        CollectionAssert.AreEquivalent(
-            new[] { "codex", "future" },
-            result.UnknownWindows.Select(window => window.LimitId).ToArray());
+        Assert.AreEqual(3, result.RateLimits.Count);
+        Assert.AreEqual(
+            2,
+            result.RateLimits.Count(window => window.Classification == RateLimitClassification.FiveHour));
+        Assert.AreEqual(
+            1,
+            result.RateLimits.Count(window => window.Classification == RateLimitClassification.Unknown));
     }
 
     /// <summary>
-    /// 実アカウントで観測したprimaryが週間枠でsecondaryがない構成を位置に依存せず変換することを検証します。
+    /// 実アカウントで観測したprimaryが週間枠でsecondaryがない構成を正常値として変換します。
     /// </summary>
     [TestMethod]
-    public void Map_ObservedPrimaryWeeklyWithoutSecondary_DoesNotInventFiveHourWindow()
+    public void Map_ObservedPrimaryWeeklyWithoutSecondary_DoesNotRequireFiveHourWindow()
     {
         CodexRateLimitResponse response = Deserialize("""
             {
@@ -145,11 +153,38 @@ public sealed class CodexRateLimitMapperTests
             UsageCheckTrigger.Manual,
             DateTimeOffset.UnixEpoch);
 
-        Assert.IsNull(result.Primary);
-        Assert.IsNotNull(result.Secondary);
-        Assert.AreEqual(RateLimitWindowSource.Primary, result.Secondary.Source);
-        Assert.AreEqual(10080, result.Secondary.WindowDurationMinutes);
+        Assert.AreEqual(1, result.RateLimits.Count);
+        Assert.IsNull(result.FiveHourCandidate);
+        Assert.IsNotNull(result.WeeklyCandidate);
+        Assert.AreEqual(RateLimitPosition.Primary, result.WeeklyCandidate.Position);
+        Assert.AreEqual(10080, result.WeeklyCandidate.WindowDurationMinutes);
         Assert.AreEqual(1, result.ResetCredits);
+    }
+
+    /// <summary>
+    /// 現在形式がない場合だけ後方互換バケットを使用することを検証します。
+    /// </summary>
+    [TestMethod]
+    public void Map_CurrentBucketsMissing_UsesLegacyBucket()
+    {
+        CodexRateLimitResponse response = Deserialize("""
+            {
+              "rateLimits": {
+                "limitId": "legacy-codex",
+                "primary": { "usedPercent": 40, "windowDurationMins": 300 }
+              }
+            }
+            """);
+
+        UsageSnapshot result = CodexRateLimitMapper.Map(
+            response,
+            UsageCheckTrigger.Startup,
+            DateTimeOffset.UnixEpoch);
+
+        Assert.AreEqual(1, result.RateLimits.Count);
+        Assert.AreEqual("legacy-codex", result.RateLimits[0].LimitId);
+        Assert.AreEqual(RateLimitPosition.Primary, result.RateLimits[0].Position);
+        Assert.AreEqual(RateLimitClassification.FiveHour, result.RateLimits[0].Classification);
     }
 
     /// <summary>

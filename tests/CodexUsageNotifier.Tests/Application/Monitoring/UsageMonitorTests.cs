@@ -21,10 +21,14 @@ public sealed class UsageMonitorTests
         BlockingRateLimitClient client = new();
         InMemoryStateRepository repository = new();
         using ApplicationStateStore stateStore = new(repository);
+        InMemorySettingsRepository settingsRepository = new();
+        RecordingHistoryRepository historyRepository = new();
         RecordingStatusSink statusSink = new();
         await using UsageMonitor monitor = new(
             client,
             stateStore,
+            settingsRepository,
+            historyRepository,
             statusSink,
             TimeProvider.System,
             NullLogger<UsageMonitor>.Instance);
@@ -41,6 +45,7 @@ public sealed class UsageMonitorTests
         Assert.AreEqual(2, client.CallCount);
         Assert.AreEqual(2, statusSink.CheckingCount);
         Assert.AreEqual(2, statusSink.SnapshotCount);
+        Assert.AreEqual(2, historyRepository.AppendCount);
     }
 
     /// <summary>
@@ -159,6 +164,64 @@ public sealed class UsageMonitorTests
     }
 
     /// <summary>
+    /// 自動選択の初期設定を返すテスト用設定リポジトリです。
+    /// </summary>
+    private sealed class InMemorySettingsRepository : ISettingsRepository
+    {
+        /// <summary>
+        /// 初期設定を返します。
+        /// </summary>
+        /// <param name="cancellationToken">処理のキャンセル通知です。</param>
+        /// <returns>初期設定です。</returns>
+        public Task<AppSettings> LoadAsync(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult(AppSettings.CreateDefault());
+        }
+
+        /// <summary>
+        /// このテストでは設定保存を行いません。
+        /// </summary>
+        /// <param name="settings">保存対象の設定です。</param>
+        /// <param name="cancellationToken">処理のキャンセル通知です。</param>
+        public Task SaveAsync(AppSettings settings, CancellationToken cancellationToken)
+        {
+            ArgumentNullException.ThrowIfNull(settings);
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.CompletedTask;
+        }
+    }
+
+    /// <summary>
+    /// 履歴追記回数を記録するテスト用リポジトリです。
+    /// </summary>
+    private sealed class RecordingHistoryRepository : IUsageHistoryRepository
+    {
+        private int appendCount;
+
+        /// <summary>
+        /// 履歴追記回数を取得します。
+        /// </summary>
+        public int AppendCount => Volatile.Read(ref appendCount);
+
+        /// <summary>
+        /// 履歴追記を記録し、新規枠なしとして完了します。
+        /// </summary>
+        /// <param name="snapshot">保存対象のスナップショットです。</param>
+        /// <param name="cancellationToken">処理のキャンセル通知です。</param>
+        /// <returns>空の新規観測一覧です。</returns>
+        public Task<IReadOnlyList<RateLimitObservation>> AppendAsync(
+            UsageSnapshot snapshot,
+            CancellationToken cancellationToken)
+        {
+            ArgumentNullException.ThrowIfNull(snapshot);
+            cancellationToken.ThrowIfCancellationRequested();
+            Interlocked.Increment(ref appendCount);
+            return Task.FromResult<IReadOnlyList<RateLimitObservation>>(Array.Empty<RateLimitObservation>());
+        }
+    }
+
+    /// <summary>
     /// 画面通知の回数だけを記録する出力先です。
     /// </summary>
     private sealed class RecordingStatusSink : IUsageStatusSink
@@ -185,7 +248,8 @@ public sealed class UsageMonitorTests
         /// 正常取得を記録します。
         /// </summary>
         /// <param name="snapshot">取得した利用枠です。</param>
-        public void SetSnapshot(UsageSnapshot snapshot)
+        /// <param name="notificationTarget">選択された通知対象です。</param>
+        public void SetSnapshot(UsageSnapshot snapshot, RateLimitWindow? notificationTarget)
         {
             ArgumentNullException.ThrowIfNull(snapshot);
             Interlocked.Increment(ref snapshotCount);

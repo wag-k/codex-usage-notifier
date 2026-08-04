@@ -23,6 +23,8 @@ public sealed class JsonSettingsRepositoryTests
         AppSettings settings = await repository.LoadAsync(CancellationToken.None);
 
         Assert.AreEqual(99, settings.NotificationThresholdPercent);
+        Assert.AreEqual("codex", settings.CodexExecutablePath);
+        Assert.AreEqual(NotificationTargetSelectionMode.Automatic, settings.NotificationTarget.Mode);
         Assert.AreEqual(20, settings.WeeklyWarningThresholdPercent);
         Assert.IsTrue(settings.WindowsNotificationEnabled);
         Assert.IsFalse(settings.GmailNotificationEnabled);
@@ -51,6 +53,14 @@ public sealed class JsonSettingsRepositoryTests
             QuietHoursStart = new TimeOnly(23, 30),
             QuietHoursEnd = new TimeOnly(6, 30),
             FallbackPollingMinutes = 30,
+            CodexExecutablePath = "C:\\Tools\\codex.exe",
+            NotificationTarget = new NotificationTargetSelection
+            {
+                Mode = NotificationTargetSelectionMode.Manual,
+                LimitId = "codex",
+                Position = RateLimitPosition.Primary,
+                WindowDurationMinutes = 10080,
+            },
         };
 
         await repository.SaveAsync(expected, CancellationToken.None);
@@ -63,6 +73,13 @@ public sealed class JsonSettingsRepositoryTests
         Assert.AreEqual(expected.QuietHoursStart, actual.QuietHoursStart);
         Assert.AreEqual(expected.QuietHoursEnd, actual.QuietHoursEnd);
         Assert.AreEqual(expected.FallbackPollingMinutes, actual.FallbackPollingMinutes);
+        Assert.AreEqual(expected.CodexExecutablePath, actual.CodexExecutablePath);
+        Assert.AreEqual(expected.NotificationTarget.Mode, actual.NotificationTarget.Mode);
+        Assert.AreEqual(expected.NotificationTarget.LimitId, actual.NotificationTarget.LimitId);
+        Assert.AreEqual(expected.NotificationTarget.Position, actual.NotificationTarget.Position);
+        Assert.AreEqual(
+            expected.NotificationTarget.WindowDurationMinutes,
+            actual.NotificationTarget.WindowDurationMinutes);
     }
 
     /// <summary>
@@ -94,6 +111,27 @@ public sealed class JsonSettingsRepositoryTests
     }
 
     /// <summary>
+    /// 手動選択の識別値が不足している設定を拒否することを確認します。
+    /// </summary>
+    [TestMethod]
+    public async Task SaveAsync_IncompleteManualTarget_ThrowsArgumentException()
+    {
+        using TemporaryDirectory temporaryDirectory = new();
+        JsonSettingsRepository repository = CreateRepository(temporaryDirectory.Path);
+        AppSettings invalid = new()
+        {
+            NotificationTarget = new NotificationTargetSelection
+            {
+                Mode = NotificationTargetSelectionMode.Manual,
+                LimitId = "codex",
+            },
+        };
+
+        await Assert.ThrowsExceptionAsync<ArgumentException>(
+            () => repository.SaveAsync(invalid, CancellationToken.None));
+    }
+
+    /// <summary>
     /// 配布用の既定設定JSONがコード上の初期値と一致することを確認します。
     /// </summary>
     [TestMethod]
@@ -108,6 +146,13 @@ public sealed class JsonSettingsRepositoryTests
 
         Assert.IsNotNull(fileSettings);
         Assert.AreEqual(codeSettings.SchemaVersion, fileSettings.SchemaVersion);
+        Assert.AreEqual(codeSettings.CodexExecutablePath, fileSettings.CodexExecutablePath);
+        Assert.AreEqual(codeSettings.NotificationTarget.Mode, fileSettings.NotificationTarget.Mode);
+        Assert.AreEqual(codeSettings.NotificationTarget.LimitId, fileSettings.NotificationTarget.LimitId);
+        Assert.AreEqual(codeSettings.NotificationTarget.Position, fileSettings.NotificationTarget.Position);
+        Assert.AreEqual(
+            codeSettings.NotificationTarget.WindowDurationMinutes,
+            fileSettings.NotificationTarget.WindowDurationMinutes);
         Assert.AreEqual(codeSettings.NotificationThresholdPercent, fileSettings.NotificationThresholdPercent);
         Assert.AreEqual(codeSettings.WeeklyWarningThresholdPercent, fileSettings.WeeklyWarningThresholdPercent);
         Assert.AreEqual(codeSettings.WindowsNotificationEnabled, fileSettings.WindowsNotificationEnabled);

@@ -35,7 +35,7 @@ public sealed class CodexAppServerClientTests
             CancellationToken.None);
 
         Assert.AreEqual(4321, client.ProcessId);
-        Assert.AreEqual(90D, result.Primary!.RemainingPercent);
+        Assert.AreEqual(90D, result.RateLimits.Single().RemainingPercent);
         string[] methods = process.SentLines
             .Select(line => JsonDocument.Parse(line))
             .Select(document => document.RootElement.GetProperty("method").GetString()!)

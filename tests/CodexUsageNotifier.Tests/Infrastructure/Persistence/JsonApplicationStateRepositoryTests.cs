@@ -27,12 +27,19 @@ public sealed class JsonApplicationStateRepositoryTests
             LastUsageSnapshot = new UsageSnapshot
             {
                 CapturedAtUtc = capturedAtUtc,
-                Primary = new RateLimitWindow
-                {
-                    UsedPercent = 1,
-                    RemainingPercent = 99,
-                    ResetsAtUtc = capturedAtUtc.AddHours(5),
-                },
+                RateLimits =
+                [
+                    new RateLimitWindow
+                    {
+                        LimitId = "codex",
+                        Position = RateLimitPosition.Primary,
+                        Classification = RateLimitClassification.FiveHour,
+                        UsedPercent = 1,
+                        RemainingPercent = 99,
+                        WindowDurationMinutes = 300,
+                        ResetsAtUtc = capturedAtUtc.AddHours(5),
+                    },
+                ],
                 ResetCredits = 2,
                 Trigger = UsageCheckTrigger.Startup,
             },
@@ -52,7 +59,7 @@ public sealed class JsonApplicationStateRepositoryTests
 
         Assert.AreEqual(expected.LastNotifiedRecoveryWindowId, actual.LastNotifiedRecoveryWindowId);
         Assert.AreEqual(expected.LastSuccessfulFetchAtUtc, actual.LastSuccessfulFetchAtUtc);
-        Assert.AreEqual(99, actual.LastUsageSnapshot?.Primary?.RemainingPercent);
+        Assert.AreEqual(99, actual.LastUsageSnapshot?.RateLimits.Single().RemainingPercent);
         Assert.AreEqual(2, actual.LastUsageSnapshot?.ResetCredits);
         Assert.AreEqual(UsageCheckTrigger.Startup, actual.LastUsageSnapshot?.Trigger);
         Assert.AreEqual(3, actual.ConsecutiveFailures);
