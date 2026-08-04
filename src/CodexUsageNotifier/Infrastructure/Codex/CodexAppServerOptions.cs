@@ -8,7 +8,7 @@ public sealed class CodexAppServerOptions
     /// <summary>
     /// Codex CLIの実行ファイル名またはパスを取得または設定します。
     /// </summary>
-    public string ExecutablePath { get; init; } = "codex";
+    public string ExecutablePath { get; set; } = "codex";
 
     /// <summary>
     /// App Server起動のタイムアウトを取得または設定します。

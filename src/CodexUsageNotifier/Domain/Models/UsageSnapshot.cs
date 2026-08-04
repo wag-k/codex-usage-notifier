@@ -1,7 +1,7 @@
 namespace CodexUsageNotifier.Domain.Models;
 
 /// <summary>
-/// ある時点で取得したCodex利用枠のスナップショットを表します。
+/// ある時点で取得したCodexの全利用枠スナップショットを表します。
 /// </summary>
 public sealed class UsageSnapshot
 {
@@ -11,14 +11,21 @@ public sealed class UsageSnapshot
     public DateTimeOffset CapturedAtUtc { get; init; }
 
     /// <summary>
-    /// 5時間枠を取得または設定します。
+    /// App Serverから取得したすべての利用枠を取得または設定します。
     /// </summary>
-    public RateLimitWindow? Primary { get; init; }
+    public IReadOnlyList<RateLimitWindow> RateLimits { get; init; } = Array.Empty<RateLimitWindow>();
 
     /// <summary>
-    /// 週間枠を取得または設定します。
+    /// 最初に観測された300分の5時間枠候補を取得します。
     /// </summary>
-    public RateLimitWindow? Secondary { get; init; }
+    public RateLimitWindow? FiveHourCandidate => RateLimits.FirstOrDefault(
+        window => window.Classification == RateLimitClassification.FiveHour);
+
+    /// <summary>
+    /// 最初に観測された10080分の週間枠候補を取得します。
+    /// </summary>
+    public RateLimitWindow? WeeklyCandidate => RateLimits.FirstOrDefault(
+        window => window.Classification == RateLimitClassification.Weekly);
 
     /// <summary>
     /// リセット回数を取得または設定します。
@@ -29,16 +36,6 @@ public sealed class UsageSnapshot
     /// 取得契機を取得または設定します。
     /// </summary>
     public UsageCheckTrigger Trigger { get; init; }
-
-    /// <summary>
-    /// App Serverが返した制限識別子を取得または設定します。
-    /// </summary>
-    public string? RawLimitId { get; init; }
-
-    /// <summary>
-    /// 既知の5時間枠・週間枠として識別できなかった利用枠を取得または設定します。
-    /// </summary>
-    public IReadOnlyList<RateLimitWindow> UnknownWindows { get; init; } = Array.Empty<RateLimitWindow>();
 }
 
 /// <summary>

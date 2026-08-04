@@ -3,7 +3,7 @@ using CodexUsageNotifier.Domain.Models;
 namespace CodexUsageNotifier.Infrastructure.Codex;
 
 /// <summary>
-/// App Serverの利用枠レスポンスを、未知の枠を保持した内部モデルへ変換します。
+/// App Serverの全利用枠を位置と分類を分離した内部モデルへ変換します。
 /// </summary>
 internal static class CodexRateLimitMapper
 {
@@ -11,187 +11,115 @@ internal static class CodexRateLimitMapper
     private const long WeeklyDurationMinutes = 10080;
 
     /// <summary>
-    /// App Serverレスポンスをウィンドウ長に基づいて識別し、内部モデルへ変換します。
+    /// rateLimitsByLimitIdの全バケット、または後方互換バケットを内部モデルへ変換します。
     /// </summary>
     /// <param name="response">App Serverが返した利用枠です。</param>
     /// <param name="trigger">利用枠を取得した契機です。</param>
     /// <param name="capturedAtUtc">利用枠を取得したUTC時刻です。</param>
-    /// <returns>変換済みの利用枠スナップショットです。</returns>
+    /// <returns>全利用枠を含むスナップショットです。</returns>
     public static UsageSnapshot Map(
         CodexRateLimitResponse response,
         UsageCheckTrigger trigger,
         DateTimeOffset capturedAtUtc)
     {
         ArgumentNullException.ThrowIfNull(response);
+        List<RateLimitWindow> rateLimits = new();
 
-        CodexRateLimitSnapshot? selected = SelectCodexSnapshot(response);
-        List<RateLimitWindow> unknownWindows = new();
-        RateLimitWindow? fiveHour = null;
-        RateLimitWindow? weekly = null;
-
-        if (selected is not null)
+        if (response.RateLimitsByLimitId is { Count: > 0 })
         {
-            ClassifySelectedWindow(
-                ConvertWindow(selected, selected.Primary, RateLimitWindowSource.Primary),
-                ref fiveHour,
-                ref weekly,
-                unknownWindows);
-            ClassifySelectedWindow(
-                ConvertWindow(selected, selected.Secondary, RateLimitWindowSource.Secondary),
-                ref fiveHour,
-                ref weekly,
-                unknownWindows);
+            foreach (KeyValuePair<string, CodexRateLimitSnapshot?> pair in
+                     response.RateLimitsByLimitId.OrderBy(pair => pair.Key, StringComparer.Ordinal))
+            {
+                if (pair.Value is not null)
+                {
+                    AddSnapshotWindows(rateLimits, pair.Value, pair.Key);
+                }
+            }
         }
-
-        AddOtherLimitIdsAsUnknown(response, selected, unknownWindows);
+        else if (response.RateLimits is not null)
+        {
+            AddSnapshotWindows(rateLimits, response.RateLimits, fallbackLimitId: "legacy");
+        }
 
         return new UsageSnapshot
         {
             CapturedAtUtc = capturedAtUtc,
             Trigger = trigger,
-            RawLimitId = selected?.LimitId,
-            Primary = fiveHour,
-            Secondary = weekly,
+            RateLimits = rateLimits,
             ResetCredits = ConvertResetCredits(response.RateLimitResetCredits?.AvailableCount),
-            UnknownWindows = unknownWindows,
         };
     }
 
     /// <summary>
-    /// limitIdがcodexの現在形式を優先し、存在しない場合だけ後方互換形式を選択します。
+    /// 1つのlimitIdに含まれるprimaryとsecondaryを独立した位置情報として追加します。
     /// </summary>
-    /// <param name="response">App Serverレスポンスです。</param>
-    /// <returns>識別対象とする利用枠です。</returns>
-    private static CodexRateLimitSnapshot? SelectCodexSnapshot(CodexRateLimitResponse response)
+    /// <param name="destination">変換済み利用枠の追加先です。</param>
+    /// <param name="snapshot">変換するlimitId単位のスナップショットです。</param>
+    /// <param name="fallbackLimitId">レスポンスにlimitIdがない場合の辞書キーまたは後方互換識別子です。</param>
+    private static void AddSnapshotWindows(
+        List<RateLimitWindow> destination,
+        CodexRateLimitSnapshot snapshot,
+        string fallbackLimitId)
     {
-        if (response.RateLimitsByLimitId is not null
-            && response.RateLimitsByLimitId.TryGetValue("codex", out CodexRateLimitSnapshot? codex)
-            && codex is not null)
-        {
-            return codex;
-        }
+        ArgumentNullException.ThrowIfNull(destination);
+        ArgumentNullException.ThrowIfNull(snapshot);
+        ArgumentException.ThrowIfNullOrWhiteSpace(fallbackLimitId);
 
-        return response.RateLimits;
+        string limitId = string.IsNullOrWhiteSpace(snapshot.LimitId)
+            ? fallbackLimitId
+            : snapshot.LimitId;
+        AddWindow(destination, snapshot, snapshot.Primary, limitId, RateLimitPosition.Primary);
+        AddWindow(destination, snapshot, snapshot.Secondary, limitId, RateLimitPosition.Secondary);
     }
 
     /// <summary>
-    /// 選択した利用枠のウィンドウを、長さだけに基づいて既知枠またはUnknownへ分類します。
+    /// 値が存在する1つの位置を内部利用枠へ変換して追加します。
     /// </summary>
-    /// <param name="window">分類する内部ウィンドウです。</param>
-    /// <param name="fiveHour">識別済みの5時間枠です。</param>
-    /// <param name="weekly">識別済みの週間枠です。</param>
-    /// <param name="unknownWindows">識別できなかった枠の格納先です。</param>
-    private static void ClassifySelectedWindow(
-        RateLimitWindow? window,
-        ref RateLimitWindow? fiveHour,
-        ref RateLimitWindow? weekly,
-        List<RateLimitWindow> unknownWindows)
-    {
-        ArgumentNullException.ThrowIfNull(unknownWindows);
-        if (window is null)
-        {
-            return;
-        }
-
-        if (window.Kind == RateLimitWindowKind.FiveHour && fiveHour is null)
-        {
-            fiveHour = window;
-        }
-        else if (window.Kind == RateLimitWindowKind.Weekly && weekly is null)
-        {
-            weekly = window;
-        }
-        else
-        {
-            unknownWindows.Add(CopyAsUnknown(window));
-        }
-    }
-
-    /// <summary>
-    /// 選択対象以外のlimitIdに含まれる枠を破棄せずUnknownとして追加します。
-    /// </summary>
-    /// <param name="response">App Serverレスポンスです。</param>
-    /// <param name="selected">既知枠の識別に使用した利用枠です。</param>
-    /// <param name="unknownWindows">Unknown枠の格納先です。</param>
-    private static void AddOtherLimitIdsAsUnknown(
-        CodexRateLimitResponse response,
-        CodexRateLimitSnapshot? selected,
-        List<RateLimitWindow> unknownWindows)
-    {
-        ArgumentNullException.ThrowIfNull(response);
-        ArgumentNullException.ThrowIfNull(unknownWindows);
-        if (response.RateLimitsByLimitId is null)
-        {
-            return;
-        }
-
-        foreach (CodexRateLimitSnapshot? snapshot in response.RateLimitsByLimitId.Values)
-        {
-            if (snapshot is null || ReferenceEquals(snapshot, selected))
-            {
-                continue;
-            }
-
-            AddUnknownWindow(ConvertWindow(snapshot, snapshot.Primary, RateLimitWindowSource.Primary), unknownWindows);
-            AddUnknownWindow(ConvertWindow(snapshot, snapshot.Secondary, RateLimitWindowSource.Secondary), unknownWindows);
-        }
-    }
-
-    /// <summary>
-    /// 値があるウィンドウをUnknownとして格納します。
-    /// </summary>
-    /// <param name="window">格納候補のウィンドウです。</param>
-    /// <param name="unknownWindows">Unknown枠の格納先です。</param>
-    private static void AddUnknownWindow(RateLimitWindow? window, List<RateLimitWindow> unknownWindows)
-    {
-        ArgumentNullException.ThrowIfNull(unknownWindows);
-        if (window is not null)
-        {
-            unknownWindows.Add(CopyAsUnknown(window));
-        }
-    }
-
-    /// <summary>
-    /// App Serverのウィンドウを内部モデルへ変換します。
-    /// </summary>
-    /// <param name="snapshot">ウィンドウを所有する利用枠です。</param>
+    /// <param name="destination">変換済み利用枠の追加先です。</param>
+    /// <param name="snapshot">limitId共通情報です。</param>
     /// <param name="window">変換元ウィンドウです。</param>
-    /// <param name="source">レスポンス内での位置です。</param>
-    /// <returns>変換済みウィンドウです。元がnullの場合はnullです。</returns>
-    private static RateLimitWindow? ConvertWindow(
+    /// <param name="limitId">内部で使用する非空のlimitIdです。</param>
+    /// <param name="position">レスポンス内の位置です。</param>
+    private static void AddWindow(
+        List<RateLimitWindow> destination,
         CodexRateLimitSnapshot snapshot,
         CodexRateLimitWindow? window,
-        RateLimitWindowSource source)
+        string limitId,
+        RateLimitPosition position)
     {
+        ArgumentNullException.ThrowIfNull(destination);
         ArgumentNullException.ThrowIfNull(snapshot);
+        ArgumentException.ThrowIfNullOrWhiteSpace(limitId);
         if (window is null)
         {
-            return null;
+            return;
         }
 
-        return new RateLimitWindow
+        destination.Add(new RateLimitWindow
         {
-            Kind = ClassifyDuration(window.WindowDurationMins),
-            LimitId = snapshot.LimitId,
+            LimitId = limitId,
             LimitName = snapshot.LimitName,
-            Source = source,
+            Position = position,
+            Classification = ClassifyDuration(window.WindowDurationMins),
             UsedPercent = window.UsedPercent,
             RemainingPercent = 100D - window.UsedPercent,
             WindowDurationMinutes = ConvertDuration(window.WindowDurationMins),
             ResetsAtUtc = ConvertUnixSeconds(window.ResetsAt),
-        };
+            PlanType = snapshot.PlanType,
+            RateLimitReachedType = snapshot.RateLimitReachedType,
+        });
     }
 
     /// <summary>
-    /// ウィンドウ長を既知枠へ分類します。
+    /// ウィンドウ長を既知候補またはUnknownへ分類します。
     /// </summary>
     /// <param name="durationMinutes">分単位のウィンドウ長です。</param>
-    /// <returns>識別した枠の種類です。</returns>
-    private static RateLimitWindowKind ClassifyDuration(long? durationMinutes) => durationMinutes switch
+    /// <returns>ウィンドウ長に対応する分類です。</returns>
+    private static RateLimitClassification ClassifyDuration(long? durationMinutes) => durationMinutes switch
     {
-        FiveHourDurationMinutes => RateLimitWindowKind.FiveHour,
-        WeeklyDurationMinutes => RateLimitWindowKind.Weekly,
-        _ => RateLimitWindowKind.Unknown,
+        FiveHourDurationMinutes => RateLimitClassification.FiveHour,
+        WeeklyDurationMinutes => RateLimitClassification.Weekly,
+        _ => RateLimitClassification.Unknown,
     };
 
     /// <summary>
@@ -238,26 +166,5 @@ internal static class CodexRateLimitMapper
         return availableCount is >= int.MinValue and <= int.MaxValue
             ? (int)availableCount.Value
             : null;
-    }
-
-    /// <summary>
-    /// ウィンドウ値を保ったまま識別結果だけUnknownへ変更します。
-    /// </summary>
-    /// <param name="window">複製元のウィンドウです。</param>
-    /// <returns>Unknownとして複製したウィンドウです。</returns>
-    private static RateLimitWindow CopyAsUnknown(RateLimitWindow window)
-    {
-        ArgumentNullException.ThrowIfNull(window);
-        return new RateLimitWindow
-        {
-            Kind = RateLimitWindowKind.Unknown,
-            LimitId = window.LimitId,
-            LimitName = window.LimitName,
-            Source = window.Source,
-            UsedPercent = window.UsedPercent,
-            RemainingPercent = window.RemainingPercent,
-            WindowDurationMinutes = window.WindowDurationMinutes,
-            ResetsAtUtc = window.ResetsAtUtc,
-        };
     }
 }

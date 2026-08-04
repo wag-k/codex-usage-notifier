@@ -44,6 +44,18 @@ internal sealed class CodexRateLimitSnapshot
     public string? LimitName { get; init; }
 
     /// <summary>
+    /// App Serverが返したプラン種別を取得または設定します。
+    /// </summary>
+    [JsonPropertyName("planType")]
+    public string? PlanType { get; init; }
+
+    /// <summary>
+    /// App Serverが返した利用枠到達理由を取得または設定します。
+    /// </summary>
+    [JsonPropertyName("rateLimitReachedType")]
+    public string? RateLimitReachedType { get; init; }
+
+    /// <summary>
     /// primary位置のウィンドウを取得または設定します。
     /// </summary>
     [JsonPropertyName("primary")]

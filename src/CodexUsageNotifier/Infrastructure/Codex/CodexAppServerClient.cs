@@ -425,20 +425,18 @@ internal sealed partial class CodexAppServerClient : ICodexRateLimitClient, IAsy
     private void LogRateLimitDiagnostics(UsageSnapshot snapshot)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
-        IEnumerable<RateLimitWindow> windows = new[] { snapshot.Primary, snapshot.Secondary }
-            .Where(window => window is not null)
-            .Cast<RateLimitWindow>()
-            .Concat(snapshot.UnknownWindows);
-        foreach (RateLimitWindow window in windows)
+        foreach (RateLimitWindow window in snapshot.RateLimits)
         {
             LogRateLimitWindow(
                 logger,
                 window.LimitId ?? "(null)",
-                window.Source,
-                window.Kind,
+                window.Position,
+                window.Classification,
                 window.WindowDurationMinutes,
                 window.UsedPercent,
-                window.ResetsAtUtc);
+                window.ResetsAtUtc,
+                window.PlanType ?? "(null)",
+                window.RateLimitReachedType ?? "(null)");
         }
     }
 
@@ -484,13 +482,15 @@ internal sealed partial class CodexAppServerClient : ICodexRateLimitClient, IAsy
     [LoggerMessage(2125, LogLevel.Warning, "正常終了しないCodex App Serverを所有プロセスツリー単位で終了します。ProcessId={ProcessId}")]
     private static partial void LogForcedTermination(ILogger logger, int processId);
 
-    [LoggerMessage(2126, LogLevel.Information, "利用枠診断: LimitId={LimitId}, Source={Source}, Kind={Kind}, WindowDurationMins={WindowDurationMins}, UsedPercent={UsedPercent}, ResetsAtUtc={ResetsAtUtc}")]
+    [LoggerMessage(2126, LogLevel.Information, "利用枠診断: LimitId={LimitId}, Position={Position}, Classification={Classification}, WindowDurationMins={WindowDurationMins}, UsedPercent={UsedPercent}, ResetsAtUtc={ResetsAtUtc}, PlanType={PlanType}, RateLimitReachedType={RateLimitReachedType}")]
     private static partial void LogRateLimitWindow(
         ILogger logger,
         string limitId,
-        RateLimitWindowSource source,
-        RateLimitWindowKind kind,
+        RateLimitPosition position,
+        RateLimitClassification classification,
         int? windowDurationMins,
         double usedPercent,
-        DateTimeOffset? resetsAtUtc);
+        DateTimeOffset? resetsAtUtc,
+        string planType,
+        string rateLimitReachedType);
 }

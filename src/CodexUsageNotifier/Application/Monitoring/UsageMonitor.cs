@@ -1,6 +1,7 @@
 using CodexUsageNotifier.Application.Abstractions;
 using CodexUsageNotifier.Application.State;
 using CodexUsageNotifier.Domain.Models;
+using CodexUsageNotifier.Domain.Services;
 using Microsoft.Extensions.Logging;
 
 namespace CodexUsageNotifier.Application.Monitoring;
@@ -12,6 +13,8 @@ public sealed partial class UsageMonitor : IAsyncDisposable
 {
     private readonly ICodexRateLimitClient client;
     private readonly ApplicationStateStore stateStore;
+    private readonly ISettingsRepository settingsRepository;
+    private readonly IUsageHistoryRepository historyRepository;
     private readonly IUsageStatusSink statusSink;
     private readonly TimeProvider timeProvider;
     private readonly ILogger<UsageMonitor> logger;
@@ -33,23 +36,31 @@ public sealed partial class UsageMonitor : IAsyncDisposable
     /// </summary>
     /// <param name="client">Codex App Serverから利用枠を取得するクライアントです。</param>
     /// <param name="stateStore">取得結果と失敗回数を保存する状態ストアです。</param>
+    /// <param name="settingsRepository">通知対象選択設定の読み込み元です。</param>
+    /// <param name="historyRepository">全利用枠の観測履歴保存先です。</param>
     /// <param name="statusSink">監視状態の表示先です。</param>
     /// <param name="timeProvider">デバウンスと再試行に使用する時刻提供元です。</param>
     /// <param name="logger">監視結果を記録するロガーです。</param>
     public UsageMonitor(
         ICodexRateLimitClient client,
         ApplicationStateStore stateStore,
+        ISettingsRepository settingsRepository,
+        IUsageHistoryRepository historyRepository,
         IUsageStatusSink statusSink,
         TimeProvider timeProvider,
         ILogger<UsageMonitor> logger)
     {
         ArgumentNullException.ThrowIfNull(client);
         ArgumentNullException.ThrowIfNull(stateStore);
+        ArgumentNullException.ThrowIfNull(settingsRepository);
+        ArgumentNullException.ThrowIfNull(historyRepository);
         ArgumentNullException.ThrowIfNull(statusSink);
         ArgumentNullException.ThrowIfNull(timeProvider);
         ArgumentNullException.ThrowIfNull(logger);
         this.client = client;
         this.stateStore = stateStore;
+        this.settingsRepository = settingsRepository;
+        this.historyRepository = historyRepository;
         this.statusSink = statusSink;
         this.timeProvider = timeProvider;
         this.logger = logger;
@@ -141,6 +152,23 @@ public sealed partial class UsageMonitor : IAsyncDisposable
         try
         {
             UsageSnapshot snapshot = await client.ReadAsync(trigger, cancellationToken);
+            IReadOnlyList<RateLimitObservation> newlyObserved = await historyRepository.AppendAsync(
+                snapshot,
+                cancellationToken);
+            foreach (RateLimitObservation observation in newlyObserved)
+            {
+                LogNewRateLimitObserved(
+                    logger,
+                    observation.LimitId ?? "(null)",
+                    observation.Position,
+                    observation.WindowDurationMinutes,
+                    observation.Classification);
+            }
+
+            AppSettings settings = await settingsRepository.LoadAsync(cancellationToken);
+            RateLimitWindow? notificationTarget = NotificationTargetSelector.Select(
+                snapshot.RateLimits,
+                settings.NotificationTarget);
             await stateStore.UpdateAsync(
                 state => state with
                 {
@@ -151,8 +179,10 @@ public sealed partial class UsageMonitor : IAsyncDisposable
                 },
                 cancellationToken);
             CancelRetry();
-            statusSink.SetSnapshot(snapshot);
-            LogFetchSucceeded(logger, client.ProcessId, snapshot.UnknownWindows.Count);
+            statusSink.SetSnapshot(snapshot, notificationTarget);
+            int unknownCount = snapshot.RateLimits.Count(
+                window => window.Classification == RateLimitClassification.Unknown);
+            LogFetchSucceeded(logger, client.ProcessId, snapshot.RateLimits.Count, unknownCount);
         }
         catch (Exception exception) when (
             exception is not OperationCanceledException
@@ -387,9 +417,21 @@ public sealed partial class UsageMonitor : IAsyncDisposable
         executionGate.Dispose();
     }
 
-    [LoggerMessage(2200, LogLevel.Information, "利用枠を取得しました。ProcessId={ProcessId}, UnknownWindowCount={UnknownWindowCount}")]
-    private static partial void LogFetchSucceeded(ILogger logger, int? processId, int unknownWindowCount);
+    [LoggerMessage(2200, LogLevel.Information, "利用枠を取得しました。ProcessId={ProcessId}, RateLimitCount={RateLimitCount}, UnknownWindowCount={UnknownWindowCount}")]
+    private static partial void LogFetchSucceeded(
+        ILogger logger,
+        int? processId,
+        int rateLimitCount,
+        int unknownWindowCount);
 
     [LoggerMessage(2201, LogLevel.Warning, "利用枠の取得に失敗しました。ConsecutiveFailures={ConsecutiveFailures}")]
     private static partial void LogFetchFailed(ILogger logger, int consecutiveFailures, Exception exception);
+
+    [LoggerMessage(2202, LogLevel.Information, "新しい利用枠を初めて観測しました。LimitId={LimitId}, Position={Position}, WindowDurationMins={WindowDurationMins}, Classification={Classification}")]
+    private static partial void LogNewRateLimitObserved(
+        ILogger logger,
+        string limitId,
+        RateLimitPosition position,
+        int? windowDurationMins,
+        RateLimitClassification classification);
 }

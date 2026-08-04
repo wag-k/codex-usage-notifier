@@ -27,7 +27,17 @@ public sealed class AppSettings
     public int SchemaVersion { get; init; } = CurrentSchemaVersion;
 
     /// <summary>
-    /// 5時間枠の通知閾値を取得または設定します。
+    /// PATH上のコマンド名、またはCodex CLI実行ファイルのパスを取得または設定します。
+    /// </summary>
+    public string CodexExecutablePath { get; init; } = "codex";
+
+    /// <summary>
+    /// 将来の回復通知で監視対象にする利用枠の選択設定を取得または設定します。
+    /// </summary>
+    public NotificationTargetSelection NotificationTarget { get; init; } = new();
+
+    /// <summary>
+    /// 選択された利用枠の通知閾値を取得または設定します。
     /// </summary>
     public int NotificationThresholdPercent { get; init; } = 99;
 
@@ -109,6 +119,9 @@ public sealed class AppSettings
     public bool IsValid()
     {
         return SchemaVersion == CurrentSchemaVersion
+            && !string.IsNullOrWhiteSpace(CodexExecutablePath)
+            && NotificationTarget is not null
+            && NotificationTarget.IsValid()
             && NotificationThresholdPercent is >= 1 and <= 100
             && WeeklyWarningThresholdPercent is >= 0 and <= 100
             && FallbackPollingMinutes >= 1

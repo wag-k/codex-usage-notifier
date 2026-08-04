@@ -84,6 +84,7 @@ public partial class App : System.Windows.Application
 
         services.AddSingleton<ISettingsRepository, JsonSettingsRepository>();
         services.AddSingleton<IApplicationStateRepository, JsonApplicationStateRepository>();
+        services.AddSingleton<IUsageHistoryRepository, JsonUsageHistoryRepository>();
         services.AddSingleton<ApplicationStateStore>();
         services.AddSingleton<TimeProvider>(TimeProvider.System);
         services.AddSingleton(new CodexAppServerOptions());
@@ -114,6 +115,7 @@ public partial class App : System.Windows.Application
         LogApplicationStarting(logger, null);
         AppSettings settings = await provider.GetRequiredService<ISettingsRepository>()
             .LoadAsync(cancellationToken);
+        provider.GetRequiredService<CodexAppServerOptions>().ExecutablePath = settings.CodexExecutablePath;
         ApplyLogLevel(settings, provider.GetRequiredService<DailyFileLoggerProvider>());
         ApplicationState state = await provider.GetRequiredService<ApplicationStateStore>()
             .LoadAsync(cancellationToken);

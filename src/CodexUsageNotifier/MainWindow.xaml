@@ -35,28 +35,31 @@
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
                         </Grid.RowDefinitions>
 
                         <TextBlock Grid.Row="0" FontWeight="SemiBold" Text="5時間枠" />
-                        <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding PrimaryRateLimit}" />
+                        <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding FiveHourRateLimit}" />
                         <TextBlock Grid.Row="1" Margin="0,14,0,0" FontWeight="SemiBold" Text="週間枠" />
-                        <TextBlock Grid.Row="1" Grid.Column="1" Margin="0,14,0,0" Text="{Binding SecondaryRateLimit}" />
+                        <TextBlock Grid.Row="1" Grid.Column="1" Margin="0,14,0,0" Text="{Binding WeeklyRateLimit}" />
                         <TextBlock Grid.Row="2" Margin="0,14,0,0" FontWeight="SemiBold" Text="リセット回数" />
                         <TextBlock Grid.Row="2" Grid.Column="1" Margin="0,14,0,0" Text="{Binding ResetCredits}" />
-                        <TextBlock Grid.Row="3" Margin="0,14,0,0" FontWeight="SemiBold" Text="未識別の枠" />
-                        <TextBlock Grid.Row="3" Grid.Column="1" Margin="0,14,0,0" Text="{Binding UnknownRateLimits}" TextWrapping="Wrap" />
-                        <TextBlock Grid.Row="4" Margin="0,14,0,0" FontWeight="SemiBold" Text="監視状態" />
-                        <TextBlock Grid.Row="4" Grid.Column="1" Margin="0,14,0,0" Text="{Binding MonitoringStatus}" TextWrapping="Wrap" />
-                        <TextBlock Grid.Row="5" Margin="0,14,0,0" FontWeight="SemiBold" Text="最終取得" />
-                        <TextBlock Grid.Row="5" Grid.Column="1" Margin="0,14,0,0" Text="{Binding LastSuccessfulFetch}" />
-                        <TextBlock Grid.Row="6" Margin="0,14,0,0" FontWeight="SemiBold" Text="次回確認" />
-                        <TextBlock Grid.Row="6" Grid.Column="1" Margin="0,14,0,0" Text="{Binding NextCheck}" />
-                        <TextBlock Grid.Row="7" Margin="0,14,0,0" FontWeight="SemiBold" Text="Gmail" />
-                        <TextBlock Grid.Row="7" Grid.Column="1" Margin="0,14,0,0" Text="{Binding GmailStatus}" />
-                        <TextBlock Grid.Row="8" Margin="0,14,0,0" FontWeight="SemiBold" Text="最終通知" />
-                        <TextBlock Grid.Row="8" Grid.Column="1" Margin="0,14,0,0" Text="{Binding LastNotification}" />
-                        <TextBlock Grid.Row="9" Margin="0,14,0,0" FontWeight="SemiBold" Text="連続失敗" />
-                        <TextBlock Grid.Row="9" Grid.Column="1" Margin="0,14,0,0" Text="{Binding ConsecutiveFailures}" />
+                        <TextBlock Grid.Row="3" Margin="0,14,0,0" FontWeight="SemiBold" Text="すべての利用枠" />
+                        <TextBlock Grid.Row="3" Grid.Column="1" Margin="0,14,0,0" Text="{Binding AllRateLimits}" TextWrapping="Wrap" />
+                        <TextBlock Grid.Row="4" Margin="0,14,0,0" FontWeight="SemiBold" Text="通知対象候補" />
+                        <TextBlock Grid.Row="4" Grid.Column="1" Margin="0,14,0,0" Text="{Binding NotificationTarget}" TextWrapping="Wrap" />
+                        <TextBlock Grid.Row="5" Margin="0,14,0,0" FontWeight="SemiBold" Text="監視状態" />
+                        <TextBlock Grid.Row="5" Grid.Column="1" Margin="0,14,0,0" Text="{Binding MonitoringStatus}" TextWrapping="Wrap" />
+                        <TextBlock Grid.Row="6" Margin="0,14,0,0" FontWeight="SemiBold" Text="最終取得" />
+                        <TextBlock Grid.Row="6" Grid.Column="1" Margin="0,14,0,0" Text="{Binding LastSuccessfulFetch}" />
+                        <TextBlock Grid.Row="7" Margin="0,14,0,0" FontWeight="SemiBold" Text="次回確認" />
+                        <TextBlock Grid.Row="7" Grid.Column="1" Margin="0,14,0,0" Text="{Binding NextCheck}" />
+                        <TextBlock Grid.Row="8" Margin="0,14,0,0" FontWeight="SemiBold" Text="Gmail" />
+                        <TextBlock Grid.Row="8" Grid.Column="1" Margin="0,14,0,0" Text="{Binding GmailStatus}" />
+                        <TextBlock Grid.Row="9" Margin="0,14,0,0" FontWeight="SemiBold" Text="最終通知" />
+                        <TextBlock Grid.Row="9" Grid.Column="1" Margin="0,14,0,0" Text="{Binding LastNotification}" />
+                        <TextBlock Grid.Row="10" Margin="0,14,0,0" FontWeight="SemiBold" Text="連続失敗" />
+                        <TextBlock Grid.Row="10" Grid.Column="1" Margin="0,14,0,0" Text="{Binding ConsecutiveFailures}" />
                     </Grid>
                 </Border>
 

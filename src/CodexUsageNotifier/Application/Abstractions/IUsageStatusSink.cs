@@ -16,7 +16,8 @@ public interface IUsageStatusSink
     /// 正常に取得した利用枠を通知します。
     /// </summary>
     /// <param name="snapshot">取得した利用枠です。</param>
-    void SetSnapshot(UsageSnapshot snapshot);
+    /// <param name="notificationTarget">現在の設定で選択された将来の通知対象です。</param>
+    void SetSnapshot(UsageSnapshot snapshot, RateLimitWindow? notificationTarget);
 
     /// <summary>
     /// 利用枠取得の失敗を通知します。
