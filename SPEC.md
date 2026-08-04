@@ -13,9 +13,9 @@
 
 ## 2. 背景
 
-Codexの短期利用枠が完全に回復していても、ユーザーがその状態に気付かなければ、利用可能な時間を有効に活用できない。
+Codexの利用枠が回復していても、ユーザーがその状態に気付かなければ、利用可能な時間を有効に活用できない。
 
-本アプリは、Codexの利用枠をWindows PC上で監視し、5時間枠が設定した閾値まで回復した際に通知する。初版では、人間が通知を確認してCodexの作業を開始する。
+本アプリは、Codex App Serverが返す任意の利用枠をWindows PC上で観測し、選択した利用枠が設定した閾値まで回復した際に通知する。初版では、人間が通知を確認してCodexの作業を開始する。
 
 将来は、承認済みのバックログから作業を自動選択し、Codexへ投入し、作業結果に応じてバックログを更新する仕組みへ拡張する。
 
@@ -23,11 +23,14 @@ Codexの短期利用枠が完全に回復していても、ユーザーがその
 
 | 用語 | 定義 |
 |---|---|
-| 5時間枠 | Codexが提供する短期の利用制限枠。App Serverの返却情報から識別する |
-| 週間枠 | Codexが提供する、5時間枠より長い期間の利用制限枠 |
+| 5時間枠候補 | `windowDurationMins == 300`の利用枠。存在は保証されない |
+| 週間枠候補 | `windowDurationMins == 10080`の利用枠。存在は保証されない |
+| Position | App Server内の格納位置。PrimaryまたはSecondaryであり、枠の意味を表さない |
+| Classification | ウィンドウ長によるFiveHour、Weekly、Unknownの分類 |
+| 通知対象 | 将来の通知判定に使用する、現在観測できる1つの利用枠 |
 | 残量 | `100 - usedPercent` で算出する利用可能割合 |
 | 回復期間 | 同一のリセット時刻または同一ウィンドウとして扱う期間 |
-| 通知閾値 | 通知対象とする5時間枠の残量。初期値は99% |
+| 通知閾値 | 選択した通知対象の残量に適用する閾値。初期値は99% |
 | 通知禁止時間 | 即時通知を行わず、通知を保留する時間帯 |
 | 保留通知 | 通知禁止時間中に成立した通知を、禁止時間終了後に送ること |
 | バックログ | 将来実施する作業を優先順位付きで管理する一覧 |
@@ -100,18 +103,30 @@ Phase 1完了時の懸念点1「App Serverのプロセス所有権」と懸念�
 3. アプリ終了時は所有プロセスのstdinを閉じて正常終了を要求する。
 4. 5秒以内に終了しない場合は、所有するプロセスツリーだけを強制終了する。
 5. App Serverが予期せず終了した場合は、FR-014の1分、5分、15分の再試行方針を使用する。
+6. 既定ではPATH上の`codex`コマンドを使用する。
+7. PATHで解決できない環境向けに、実行コマンドまたは実行ファイルのパスを設定で変更できるようにする。
+8. WindowsApps配下の実体ファイルをコピーして起動する機能は実装しない。
 
 #### 利用枠の識別
 
-1. `rateLimitsByLimitId["codex"]`が存在する場合はそれを優先する。
-2. 存在しない場合は後方互換用の`rateLimits`を使用する。
-3. `primary`と`secondary`の位置だけでは枠の種類を決定しない。
+1. `rateLimitsByLimitId`が存在する場合は、すべてのlimitIdと、そのprimary・secondaryを保持する。
+2. 現在形式が存在しない場合だけ後方互換用の`rateLimits`を使用する。
+3. `primary`と`secondary`は位置情報として保持し、枠の種類を決定しない。
 4. `windowDurationMins == 300`を5時間枠候補とする。
 5. `windowDurationMins == 10080`を週間枠候補とする。
-6. それ以外の長さ、同じ既知長の重複、および選択対象外のlimitIdはUnknownとして保持・表示・ログ出力する。
+6. それ以外の長さはUnknownとして保持する。同じ既知長の重複や異なるlimitIdも破棄しない。
 7. `account/rateLimits/updated`の通知内容だけでは状態を確定せず、1秒のデバウンス後に`account/rateLimits/read`を再実行する。
 8. 診断ログには`limitId`、`primary`／`secondary`の由来、`windowDurationMins`、使用率、リセット時刻、識別結果だけを出力し、認証情報や生JSONは出力しない。
-9. 実アカウントのレスポンス確認後に、最終識別ルールを単体テストへ追加できるよう、レスポンスDTOと識別処理を分離する。
+9. 実アカウントでは`limitId=codex`、primaryが10080分、secondaryがnull、300分枠なしを観測済みであり、この構成を単体テストへ固定する。
+10. 5時間枠候補が存在しない状態を正常な取得結果として扱う。
+
+#### 通知対象の選択
+
+1. 自動選択では300分枠を最優先する。
+2. 300分枠がなければ、観測できた既知の期間が最も短い枠を選択する。
+3. 手動選択ではLimitId、Position、WindowDurationMinutesの3項目で指定する。
+4. 手動選択した枠が未観測の場合は通知対象なしとする。
+5. Phase 2では選択結果を表示するが、通知判定と通知送信は行わない。
 
 #### 同時要求の集約
 
@@ -136,7 +151,7 @@ Gmail通知にはGmail APIを使用する。
 ### 5.1 初版に含むもの
 
 - タスクトレイ常駐
-- 5時間枠と週間枠の取得
+- App Serverが返すすべてのlimitIdと利用枠の取得
 - 現在残量と次回リセット時刻の表示
 - Windows通知
 - Gmail通知
@@ -216,15 +231,22 @@ Gmail通知にはGmail APIを使用する。
 ### FR-004 利用枠取得
 
 1. `account/rateLimits/read` を使用して利用枠を取得する。
-2. レスポンスから、短期枠と週間枠を識別する。
+2. `rateLimitsByLimitId`が返すすべてのlimitIdとprimary・secondary位置を保持する。
 3. 各枠について次を取得または算出する。
+   - LimitId
+   - LimitName
+   - Position
+   - Classification
    - 使用率
    - 残量
    - ウィンドウ長
    - 次回リセット時刻
+   - PlanType
+   - RateLimitReachedType
 4. 取得可能な場合はリセット回数も表示する。
 5. 未知の枠が追加されても、アプリが異常終了しない。
 6. 取得結果はUTCで内部保持し、画面と通知ではローカル時刻に変換する。
+7. 300分の利用枠が存在しなくても取得成功として扱う。
 
 ### FR-005 監視スケジュール
 
@@ -240,7 +262,7 @@ Gmail通知にはGmail APIを使用する。
 
 ### FR-006 通知判定
 
-5時間枠について、以下をすべて満たす場合に通知候補とする。
+設定に従って選択した通知対象について、以下をすべて満たす場合に通知候補とする。
 
 1. 残量が通知閾値以上である。
 2. 同じ回復期間について未通知である。
@@ -248,7 +270,9 @@ Gmail通知にはGmail APIを使用する。
 
 通知閾値は1～100%の範囲で設定でき、初期値は99%とする。
 
-週間枠の残量は、通知の可否には使用しない。週間枠が警告閾値未満の場合は、通知本文に警告を表示する。
+通知対象を選択できない場合は通知しない。週間枠候補が存在し、その残量が警告閾値未満の場合は通知本文に警告を表示する。
+
+300分枠を取得できる環境では、自動選択により5時間枠候補が通知対象になる。Phase 2では通知判定自体をまだ実行しない。
 
 ### FR-007 回復期間の識別
 
@@ -257,7 +281,7 @@ Gmail通知にはGmail APIを使用する。
 優先順位は次のとおりとする。
 
 1. App Serverから取得したリセット時刻およびウィンドウ情報
-2. 短期枠のリセット時刻
+2. 選択した通知対象のリセット時刻
 3. リセット時刻が取得できない場合は、閾値未満から閾値以上へ遷移した時刻を基準に生成した識別子
 
 同一の回復期間では、Windows通知とGmail通知をそれぞれ最大1回送る。
@@ -288,8 +312,8 @@ Gmail通知にはGmail APIを使用する。
 Windows通知には少なくとも次を含める。
 
 - タイトル
-- 5時間枠の残量
-- 週間枠の残量
+- 選択した通知対象のLimitId、Position、ウィンドウ長、残量
+- 週間枠候補が存在する場合はその残量
 - 週間枠の警告
 - 次回リセット時刻
 - 確認時刻
@@ -319,12 +343,12 @@ Windows通知が利用できない場合でも、Gmail通知と監視処理は�
 4. 件名の初期値は次とする。
 
 ```text
-[Codex] 5時間枠が回復しました
+[Codex] 通知対象の利用枠が回復しました
 ```
 
 5. 本文に次を含める。
-   - 5時間枠の残量
-   - 週間枠の残量
+   - 通知対象のLimitId、Position、ウィンドウ長、残量
+   - 週間枠候補が存在する場合はその残量
    - 週間枠の警告
    - 次回リセット時刻
    - 条件成立時刻
@@ -340,7 +364,7 @@ Windows通知が利用できない場合でも、Gmail通知と監視処理は�
 1. 週間枠の警告閾値を設定できる。
 2. 初期値は20%とする。
 3. 週間枠の残量が警告閾値未満の場合、画面と通知に警告を表示する。
-4. 週間枠が0%の場合でも、5時間枠の回復通知自体は抑止しない。
+4. 週間枠候補が0%の場合でも、別の通知対象の回復通知自体は抑止しない。
 
 ### FR-014 自動再接続
 
@@ -372,8 +396,10 @@ Codex App Serverまたは利用枠取得に失敗した場合、次の処理を�
 
 | 表示項目 | 内容 |
 |---|---|
-| 5時間枠 | 残量、使用率、次回リセット時刻 |
-| 週間枠 | 残量、使用率、次回リセット時刻 |
+| 5時間枠候補 | 残量、使用率、次回リセット時刻。存在しない場合は「未観測」 |
+| 週間枠候補 | 残量、使用率、次回リセット時刻。存在しない場合は「未観測」 |
+| すべての利用枠 | 全limitId、Position、Classification、ウィンドウ長、利用状況 |
+| 通知対象候補 | 自動または手動で現在選択される利用枠 |
 | リセット回数 | 取得できる場合のみ |
 | 監視状態 | 正常、取得中、再接続中、エラー |
 | 最終取得 | 最終成功時刻 |
@@ -389,6 +415,8 @@ Codex App Serverまたは利用枠取得に失敗した場合、次の処理を�
 次を設定できる。
 
 - 通知閾値
+- Codex CLIの実行コマンドまたはパス
+- 通知対象の自動選択またはLimitId・Position・WindowDurationMinutesによる手動選択
 - 週間枠の警告閾値
 - Windows通知の有効・無効
 - Gmail通知の有効・無効
@@ -403,20 +431,21 @@ Codex App Serverまたは利用枠取得に失敗した場合、次の処理を�
 
 ### FR-018 履歴保存
 
-1. 利用枠の取得成功時に履歴を保存する。
-2. 保存形式はJSON Linesを初期案とする。
-3. 各レコードに次を保存する。
+1. 利用枠の取得成功ごとに、取得できたすべての利用枠を履歴へ保存する。
+2. 保存形式は、取得1回を1行とするJSON Linesとする。
+3. 各利用枠に次を保存する。
    - 取得時刻（UTC）
-   - 5時間枠の使用率・残量
-   - 5時間枠のリセット時刻
-   - 週間枠の使用率・残量
-   - 週間枠のリセット時刻
-   - リセット回数
-   - 取得契機
+   - LimitId
+   - Position
+   - WindowDurationMinutes
+   - UsedPercent
+   - ResetsAtUtc
+   - Classification
 4. 初期保存期間は90日とする。
 5. 起動時または1日1回、保存期間を超えた履歴を削除する。
 6. 1レコードの破損で全履歴を読み込めなくならない形式とする。
 7. 将来、SQLiteへ移行できるよう永続化処理を抽象化する。
+8. 過去履歴に存在しないLimitId、Position、WindowDurationMinutesの組み合わせを初観測として検出し、ログへ記録する。
 
 ### FR-019 状態保存
 
@@ -498,12 +527,11 @@ Codex App Serverまたは利用枠取得に失敗した場合、次の処理を�
 | プロパティ | 型 | 説明 |
 |---|---|---|
 | CapturedAtUtc | DateTimeOffset | 取得時刻 |
-| Primary | RateLimitWindow? | 5時間枠 |
-| Secondary | RateLimitWindow? | 週間枠 |
+| RateLimits | IReadOnlyList&lt;RateLimitWindow&gt; | App Serverから取得したすべての利用枠 |
+| FiveHourCandidate | RateLimitWindow? | 最初に観測された300分枠。存在しない場合はnull |
+| WeeklyCandidate | RateLimitWindow? | 最初に観測された10080分枠。存在しない場合はnull |
 | ResetCredits | int? | リセット回数 |
 | Trigger | UsageCheckTrigger | 取得契機 |
-| RawLimitId | string? | 元の制限識別子 |
-| UnknownWindows | IReadOnlyList&lt;RateLimitWindow&gt; | 識別できなかった枠。破棄せず保持する |
 
 ### 8.2 RateLimitWindow
 
@@ -513,10 +541,12 @@ Codex App Serverまたは利用枠取得に失敗した場合、次の処理を�
 | RemainingPercent | double | 残量 |
 | WindowDurationMinutes | int? | ウィンドウ長 |
 | ResetsAtUtc | DateTimeOffset? | リセット時刻 |
-| Kind | RateLimitWindowKind | FiveHour、Weekly、Unknownの識別結果 |
+| Classification | RateLimitClassification | FiveHour、Weekly、Unknownの識別結果 |
 | LimitId | string? | App Serverが返したlimitId |
 | LimitName | string? | App Serverが返した表示名 |
-| Source | RateLimitWindowSource | primary／secondaryの由来 |
+| Position | RateLimitPosition | PrimaryまたはSecondaryの位置 |
+| PlanType | string? | App Serverが返したプラン種別 |
+| RateLimitReachedType | string? | App Serverが返した利用枠到達理由 |
 
 ### 8.3 NotificationState
 
@@ -534,6 +564,11 @@ Codex App Serverまたは利用枠取得に失敗した場合、次の処理を�
 | プロパティ | 初期値 |
 |---|---:|
 | NotificationThresholdPercent | 99 |
+| CodexExecutablePath | codex |
+| NotificationTarget.Mode | Automatic |
+| NotificationTarget.LimitId | null |
+| NotificationTarget.Position | null |
+| NotificationTarget.WindowDurationMinutes | null |
 | WeeklyWarningThresholdPercent | 20 |
 | WindowsNotificationEnabled | true |
 | GmailNotificationEnabled | ユーザー選択 |
@@ -551,8 +586,8 @@ Codex App Serverまたは利用枠取得に失敗した場合、次の処理を�
 ```text
 利用枠取得成功
    │
-   ├─ 5時間枠を識別できない
-   │      └─ エラーとして記録し、通知しない
+   ├─ 設定に従って通知対象を選択できない
+   │      └─ 正常な未観測状態として記録し、通知しない
    │
    ├─ 残量 < 通知閾値
    │      └─ 通知候補なし
@@ -573,8 +608,10 @@ Codex App Serverまたは利用枠取得に失敗した場合、次の処理を�
 
 ### AC-001 基本取得
 
-- Codexへログイン済みの環境で、5時間枠と週間枠を取得できる。
-- 画面に残量と次回リセット時刻を表示できる。
+- Codexへログイン済みの環境で、App Serverが返すすべてのlimitIdと利用枠を取得できる。
+- 画面に全枠のPosition、Classification、残量、次回リセット時刻を表示できる。
+- 300分枠がない場合も取得成功となり、「5時間枠：未観測」と表示できる。
+- 実観測済みのprimaryが10080分、secondaryがnullの構成を週間枠候補として表示できる。
 
 ### AC-002 閾値通知
 
@@ -633,7 +670,7 @@ Codex App Serverまたは利用枠取得に失敗した場合、次の処理を�
 最低限、次を単体テストする。
 
 1. 残量計算
-2. 5時間枠・週間枠の識別
+2. Positionを維持した300分・10080分・Unknownの分類
 3. 閾値判定
 4. 回復期間ID生成
 5. 重複通知防止
@@ -647,6 +684,10 @@ Codex App Serverまたは利用枠取得に失敗した場合、次の処理を�
 13. 履歴保持期間の削除
 14. Gmail本文生成
 15. OAuth情報がログへ出ないこと
+16. 全limitId・全利用枠の保持
+17. 通知対象の自動・手動選択
+18. 取得単位の全利用枠履歴保存
+19. 新しいLimitId・Position・WindowDurationMinutesの組み合わせの検出
 
 ## 12. 実装上の設計方針
 
@@ -793,12 +834,16 @@ Codex実行用ワークスペースを準備
 - 利用枠取得
 - 画面表示
 - エラー表示
+- 全limitId・全利用枠の保持と分類
+- 通知対象候補の自動・手動選択モデル
+- 全利用枠のJSONL観測履歴保存
+- 新規利用枠の検出ログ
 - 更新通知を契機としたデバウンス再取得
 - 同時要求の集約
 - 自動再接続
 - 現在のCodex CLIに対応するJSON Schemaの保存
 
-Phase 2では通知判定、Windows通知、Gmail通知、履歴グラフを実装しない。
+Phase 2では通知判定、Windows通知、Gmail通知、履歴グラフを実装しない。観測履歴の保存はPhase 2に含める。
 
 ### Phase 3：監視とWindows通知
 
@@ -833,7 +878,7 @@ Phase 2では通知判定、Windows通知、Gmail通知、履歴グラフを実�
 1. Windows通知に使用する具体的なライブラリ
 2. タスクトレイに使用する具体的なライブラリ
 3. Gmail OAuthトークン保存の具体的なファイル形式
-4. 実アカウントで観測した複数プラン・複数limitIdに対して、300分／10080分の識別ルールを最終確定できるか
+4. 300分枠を返す実アカウントで、5時間枠候補と通知対象自動選択の実挙動を確認できるか
 5. 自分宛てGmailのスマートフォン通知の実機挙動
 6. 配布形式
 7. アプリ名・アイコン
