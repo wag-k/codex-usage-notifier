@@ -60,6 +60,10 @@ public sealed partial class RateLimitNotificationProcessor
             previousState,
             snapshot.CapturedAtUtc,
             cancellationToken);
+        previousState = await ExpireInvalidDeferredNotificationsAsync(
+            previousState,
+            snapshot,
+            cancellationToken);
         RateLimitNotificationEvaluation evaluation = RateLimitNotificationPolicy.Evaluate(
             snapshot,
             previousState.LastUsageSnapshot,
@@ -352,6 +356,119 @@ public sealed partial class RateLimitNotificationProcessor
     }
 
     /// <summary>
+    /// 古すぎる保留または現在の利用期間と一致しない保留を期限切れへ変更します。
+    /// </summary>
+    /// <param name="state">読み込んだアプリケーション状態です。</param>
+    /// <param name="snapshot">今回の正常取得結果です。</param>
+    /// <param name="cancellationToken">状態保存のキャンセル通知です。</param>
+    /// <returns>無効な保留を期限切れへ変更した状態です。</returns>
+    private async Task<ApplicationState> ExpireInvalidDeferredNotificationsAsync(
+        ApplicationState state,
+        UsageSnapshot snapshot,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(state);
+        ArgumentNullException.ThrowIfNull(snapshot);
+        bool hasExpired = state.RateLimitNotificationStates.Any(notification =>
+            IsInvalidDeferredNotification(notification, state, snapshot));
+        if (!hasExpired)
+        {
+            return state;
+        }
+
+        ApplicationState updated = await stateStore.UpdateAsync(
+            current => current with
+            {
+                RateLimitNotificationStates = current.RateLimitNotificationStates
+                    .Select(notification => IsInvalidDeferredNotification(notification, current, snapshot)
+                        ? notification with
+                        {
+                            WindowsDeliveryStatus = DeliveryStatus.Expired,
+                            DeferredUntilUtc = null,
+                            WindowsNextRetryAtUtc = null,
+                        }
+                        : notification)
+                    .ToArray(),
+            },
+            cancellationToken);
+        LogDeferredNotificationsExpired(logger);
+        return updated;
+    }
+
+    /// <summary>
+    /// 1件のWindows保留通知が古すぎるか現在の利用期間と不一致か判定します。
+    /// </summary>
+    /// <param name="notification">判定対象の通知状態です。</param>
+    /// <param name="state">回復連番を含む保存状態です。</param>
+    /// <param name="snapshot">現在取得した利用枠です。</param>
+    /// <returns>保留を期限切れにする場合はtrueです。</returns>
+    private static bool IsInvalidDeferredNotification(
+        RateLimitNotificationState notification,
+        ApplicationState state,
+        UsageSnapshot snapshot)
+    {
+        ArgumentNullException.ThrowIfNull(notification);
+        ArgumentNullException.ThrowIfNull(state);
+        ArgumentNullException.ThrowIfNull(snapshot);
+        if (notification.WindowsDeliveryStatus != DeliveryStatus.NotAttempted
+            || notification.DeferredUntilUtc is null)
+        {
+            return false;
+        }
+
+        if (notification.ConditionMetAtUtc < snapshot.CapturedAtUtc.Subtract(TimeSpan.FromHours(24)))
+        {
+            return true;
+        }
+
+        RateLimitWindow? window = snapshot.RateLimits.FirstOrDefault(candidate =>
+            string.Equals(candidate.LimitId, notification.LimitId, StringComparison.Ordinal)
+            && candidate.Position == notification.Position
+            && candidate.WindowDurationMinutes == notification.WindowDurationMinutes);
+        if (window is null)
+        {
+            return true;
+        }
+
+        string? currentRecoveryWindowId = window.ResetsAtUtc is not null
+            ? RateLimitNotificationPolicy.CreateRecoveryWindowId(window, snapshot.CapturedAtUtc)
+            : CreateNoResetCurrentRecoveryWindowId(window, state.RateLimitRecoveryStates);
+        return currentRecoveryWindowId is not null
+            && !string.Equals(
+                notification.RecoveryWindowId,
+                currentRecoveryWindowId,
+                StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// リセット時刻がない短期枠について、保存済み回復連番から現在期間IDを生成します。
+    /// </summary>
+    /// <param name="window">現在取得した利用枠です。</param>
+    /// <param name="recoveryStates">保存済み回復状態です。</param>
+    /// <returns>現在期間ID、または回復状態がない場合のnullです。</returns>
+    private static string? CreateNoResetCurrentRecoveryWindowId(
+        RateLimitWindow window,
+        IReadOnlyList<RateLimitRecoveryState> recoveryStates)
+    {
+        ArgumentNullException.ThrowIfNull(window);
+        ArgumentNullException.ThrowIfNull(recoveryStates);
+        if (window.Classification != RateLimitClassification.FiveHour)
+        {
+            return null;
+        }
+
+        RateLimitRecoveryState? recovery = recoveryStates.FirstOrDefault(candidate =>
+            string.Equals(candidate.LimitId, window.LimitId, StringComparison.Ordinal)
+            && candidate.Position == window.Position
+            && candidate.WindowDurationMinutes == window.WindowDurationMinutes);
+        return recovery is null
+            ? null
+            : RateLimitNotificationPolicy.CreateNoResetRecoveryWindowId(
+                window,
+                recovery.RecoverySequence);
+    }
+
+    /// <summary>
     /// 保存済み状態から通知候補と同じ複合キーの状態を検索します。
     /// </summary>
     /// <param name="states">検索対象の通知状態です。</param>
@@ -477,4 +594,7 @@ public sealed partial class RateLimitNotificationProcessor
 
     [LoggerMessage(2305, LogLevel.Warning, "古いWindows通知送信中状態を再試行可能な状態へ戻しました。")]
     private static partial void LogInterruptedWindowsAttemptsRecovered(ILogger logger);
+
+    [LoggerMessage(2306, LogLevel.Information, "無効になった保留Windows通知を期限切れへ変更しました。")]
+    private static partial void LogDeferredNotificationsExpired(ILogger logger);
 }

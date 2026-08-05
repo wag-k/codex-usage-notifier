@@ -8,6 +8,8 @@ namespace CodexUsageNotifier.Domain.Services;
 /// </summary>
 public static class RateLimitNotificationPolicy
 {
+    private static readonly TimeSpan DeferredNotificationMaxAge = TimeSpan.FromHours(24);
+
     /// <summary>
     /// 1つのWindows通知に許可する最大表示試行回数です。
     /// </summary>
@@ -56,9 +58,11 @@ public static class RateLimitNotificationPolicy
             }
 
             RateLimitNotificationCandidate? deferredShort = RestoreDeferredShortWindow(
+                currentSnapshot,
                 window,
                 windowSetting,
                 settings,
+                recoveryState,
                 notificationStates);
             if (deferredShort is not null)
             {
@@ -80,6 +84,7 @@ public static class RateLimitNotificationPolicy
             }
 
             RateLimitNotificationCandidate? deferredReset = RestoreDeferredResetCompleted(
+                currentSnapshot,
                 window,
                 windowSetting,
                 notificationStates);
@@ -326,33 +331,53 @@ public static class RateLimitNotificationPolicy
     /// 禁止時間中に保留した短期回復通知を条件が継続している場合に復元します。
     /// </summary>
     private static RateLimitNotificationCandidate? RestoreDeferredShortWindow(
+        UsageSnapshot snapshot,
         RateLimitWindow window,
         RateLimitNotificationSetting windowSetting,
         AppSettings settings,
+        RateLimitRecoveryState? recoveryState,
         IReadOnlyList<RateLimitNotificationState> notificationStates)
     {
+        ArgumentNullException.ThrowIfNull(snapshot);
         if (!windowSetting.ShortWindowRecoveryEnabled
             || window.RemainingPercent < settings.ShortWindowRecoveryThresholdPercent)
         {
             return null;
         }
 
+        string? expectedRecoveryWindowId = window.ResetsAtUtc is not null
+            ? CreateRecoveryWindowId(window, snapshot.CapturedAtUtc)
+            : recoveryState is null
+                ? null
+                : CreateNoResetRecoveryWindowId(window, recoveryState.RecoverySequence);
         return RestoreDeferred(
             window,
             notificationStates,
-            RateLimitNotificationType.ShortWindowRecovered);
+            RateLimitNotificationType.ShortWindowRecovered,
+            snapshot.CapturedAtUtc,
+            expectedRecoveryWindowId);
     }
 
     /// <summary>
     /// 禁止時間中に保留したリセット完了通知を復元します。
     /// </summary>
     private static RateLimitNotificationCandidate? RestoreDeferredResetCompleted(
+        UsageSnapshot snapshot,
         RateLimitWindow window,
         RateLimitNotificationSetting windowSetting,
         IReadOnlyList<RateLimitNotificationState> notificationStates)
     {
+        ArgumentNullException.ThrowIfNull(snapshot);
+        string? expectedRecoveryWindowId = window.ResetsAtUtc is null
+            ? null
+            : CreateRecoveryWindowId(window, snapshot.CapturedAtUtc);
         return windowSetting.LongWindowResetCompletedEnabled
-            ? RestoreDeferred(window, notificationStates, RateLimitNotificationType.LongWindowResetCompleted)
+            ? RestoreDeferred(
+                window,
+                notificationStates,
+                RateLimitNotificationType.LongWindowResetCompleted,
+                snapshot.CapturedAtUtc,
+                expectedRecoveryWindowId)
             : null;
     }
 
@@ -362,13 +387,23 @@ public static class RateLimitNotificationPolicy
     private static RateLimitNotificationCandidate? RestoreDeferred(
         RateLimitWindow window,
         IReadOnlyList<RateLimitNotificationState> notificationStates,
-        RateLimitNotificationType notificationType)
+        RateLimitNotificationType notificationType,
+        DateTimeOffset nowUtc,
+        string? expectedRecoveryWindowId)
     {
         RateLimitNotificationState? pending = notificationStates
             .Where(state =>
                 state.WindowsDeliveryStatus == DeliveryStatus.NotAttempted
                 && state.NotificationType == notificationType
-                && HasSameIdentity(state, window))
+                && HasSameIdentity(state, window)
+                && state.DeferredUntilUtc is not null
+                && state.DeferredUntilUtc <= nowUtc
+                && state.ConditionMetAtUtc >= nowUtc.Subtract(DeferredNotificationMaxAge)
+                && (expectedRecoveryWindowId is null
+                    || string.Equals(
+                        state.RecoveryWindowId,
+                        expectedRecoveryWindowId,
+                        StringComparison.Ordinal)))
             .OrderByDescending(state => state.ConditionMetAtUtc)
             .FirstOrDefault();
         return pending is null
@@ -421,9 +456,14 @@ public static class RateLimitNotificationPolicy
         RateLimitNotificationState? existing,
         DateTimeOffset nowUtc)
     {
-        if (existing is null || existing.WindowsDeliveryStatus == DeliveryStatus.NotAttempted)
+        if (existing is null)
         {
             return true;
+        }
+
+        if (existing.WindowsDeliveryStatus == DeliveryStatus.NotAttempted)
+        {
+            return existing.DeferredUntilUtc is null || existing.DeferredUntilUtc <= nowUtc;
         }
 
         return existing.WindowsDeliveryStatus == DeliveryStatus.Failed

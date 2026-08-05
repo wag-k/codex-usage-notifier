@@ -123,7 +123,12 @@ public enum DeliveryStatus
     /// <summary>
     /// 送信が失敗した状態を表します。
     /// </summary>
-    Failed
+    Failed,
+
+    /// <summary>
+    /// 保留期限または利用期間が無効になり、送信対象から除外した状態を表します。
+    /// </summary>
+    Expired
 }
 
 /// <summary>

@@ -247,6 +247,121 @@ public sealed class RateLimitNotificationProcessorTests
     }
 
     /// <summary>
+    /// 保留終了前の通知を通常時間帯の取得でも送信しないことを検証します。
+    /// </summary>
+    [TestMethod]
+    public async Task ProcessAsync_DeferredUntilFuture_DoesNotSendEarly()
+    {
+        DateTimeOffset nowUtc = new(2026, 8, 5, 8, 0, 0, TimeSpan.Zero);
+        RateLimitWindow window = CreateFiveHourWindow(nowUtc);
+        InMemoryStateRepository repository = new();
+        await repository.SaveAsync(
+            CreateStateWithDeferredNotification(
+                window,
+                nowUtc.AddMinutes(-1),
+                nowUtc.AddHours(1)),
+            CancellationToken.None);
+        using ApplicationStateStore stateStore = new(repository);
+        RecordingWindowsNotificationSender sender = new();
+        RateLimitNotificationProcessor processor = CreateProcessor(
+            stateStore,
+            sender,
+            new MutableTimeProvider(nowUtc));
+
+        NotificationProcessingResult result = await processor.ProcessAsync(
+            CreateSnapshot(window, nowUtc),
+            AppSettings.CreateDefault() with { QuietHoursEnabled = false },
+            CancellationToken.None);
+
+        Assert.AreEqual(0, sender.SendCount);
+        Assert.AreEqual(
+            DeliveryStatus.NotAttempted,
+            result.State.RateLimitNotificationStates.Single().WindowsDeliveryStatus);
+    }
+
+    /// <summary>
+    /// 24時間を超えた保留通知を期限切れへ変更し、後日送信しないことを検証します。
+    /// </summary>
+    [TestMethod]
+    public async Task ProcessAsync_DeferredOlderThanMaximumAge_ExpiresWithoutSending()
+    {
+        DateTimeOffset nowUtc = new(2026, 8, 5, 8, 0, 0, TimeSpan.Zero);
+        RateLimitWindow window = CreateFiveHourWindow(nowUtc);
+        InMemoryStateRepository repository = new();
+        await repository.SaveAsync(
+            CreateStateWithDeferredNotification(
+                window,
+                nowUtc.AddHours(-25),
+                nowUtc.AddHours(-24)),
+            CancellationToken.None);
+        using ApplicationStateStore stateStore = new(repository);
+        RecordingWindowsNotificationSender sender = new();
+        RateLimitNotificationProcessor processor = CreateProcessor(
+            stateStore,
+            sender,
+            new MutableTimeProvider(nowUtc));
+
+        NotificationProcessingResult result = await processor.ProcessAsync(
+            CreateSnapshot(window, nowUtc),
+            AppSettings.CreateDefault() with { QuietHoursEnabled = false },
+            CancellationToken.None);
+
+        Assert.AreEqual(0, sender.SendCount);
+        Assert.AreEqual(
+            DeliveryStatus.Expired,
+            result.State.RateLimitNotificationStates.Single().WindowsDeliveryStatus);
+    }
+
+    /// <summary>
+    /// 前の利用期間の保留を期限切れにし、現在期間の通知とは別状態として扱うことを検証します。
+    /// </summary>
+    [TestMethod]
+    public async Task ProcessAsync_DeferredFromPreviousRecoveryWindow_ExpiresOldState()
+    {
+        DateTimeOffset nowUtc = new(2026, 8, 5, 8, 0, 0, TimeSpan.Zero);
+        RateLimitWindow oldWindow = CreateFiveHourWindow(nowUtc);
+        RateLimitWindow currentWindow = new()
+        {
+            LimitId = oldWindow.LimitId,
+            Position = oldWindow.Position,
+            Classification = oldWindow.Classification,
+            WindowDurationMinutes = oldWindow.WindowDurationMinutes,
+            UsedPercent = oldWindow.UsedPercent,
+            RemainingPercent = oldWindow.RemainingPercent,
+            ResetsAtUtc = oldWindow.ResetsAtUtc?.AddHours(5),
+        };
+        InMemoryStateRepository repository = new();
+        await repository.SaveAsync(
+            CreateStateWithDeferredNotification(
+                oldWindow,
+                nowUtc.AddHours(-1),
+                nowUtc.AddMinutes(-1)),
+            CancellationToken.None);
+        using ApplicationStateStore stateStore = new(repository);
+        RecordingWindowsNotificationSender sender = new();
+        RateLimitNotificationProcessor processor = CreateProcessor(
+            stateStore,
+            sender,
+            new MutableTimeProvider(nowUtc));
+
+        NotificationProcessingResult result = await processor.ProcessAsync(
+            CreateSnapshot(currentWindow, nowUtc),
+            AppSettings.CreateDefault() with { QuietHoursEnabled = false },
+            CancellationToken.None);
+
+        Assert.AreEqual(1, sender.SendCount);
+        Assert.AreEqual(2, result.State.RateLimitNotificationStates.Count);
+        Assert.AreEqual(
+            1,
+            result.State.RateLimitNotificationStates.Count(
+                state => state.WindowsDeliveryStatus == DeliveryStatus.Expired));
+        Assert.AreEqual(
+            1,
+            result.State.RateLimitNotificationStates.Count(
+                state => state.WindowsDeliveryStatus == DeliveryStatus.Succeeded));
+    }
+
+    /// <summary>
     /// 監視失敗が3回へ達したときだけ障害通知を1回送ることを検証します。
     /// </summary>
     [TestMethod]
@@ -329,6 +444,41 @@ public sealed class RateLimitNotificationProcessorTests
         {
             CapturedAtUtc = capturedAtUtc,
             RateLimits = [window],
+        };
+    }
+
+    /// <summary>
+    /// 指定利用枠の短期回復通知を保留中として含むアプリケーション状態を生成します。
+    /// </summary>
+    /// <param name="window">通知対象の利用枠です。</param>
+    /// <param name="conditionMetAtUtc">通知条件が成立したUTC時刻です。</param>
+    /// <param name="deferredUntilUtc">保留終了UTC時刻です。</param>
+    /// <returns>保留通知を1件含む状態です。</returns>
+    private static ApplicationState CreateStateWithDeferredNotification(
+        RateLimitWindow window,
+        DateTimeOffset conditionMetAtUtc,
+        DateTimeOffset deferredUntilUtc)
+    {
+        return new ApplicationState
+        {
+            InitialSetupCompleted = true,
+            RateLimitNotificationStates =
+            [
+                new RateLimitNotificationState
+                {
+                    LimitId = window.LimitId ?? string.Empty,
+                    Position = window.Position,
+                    WindowDurationMinutes = window.WindowDurationMinutes ?? 0,
+                    RecoveryWindowId = RateLimitNotificationPolicy.CreateRecoveryWindowId(
+                        window,
+                        conditionMetAtUtc),
+                    NotificationType = RateLimitNotificationType.ShortWindowRecovered,
+                    NotificationStage = RateLimitNotificationStage.Recovered,
+                    ConditionMetAtUtc = conditionMetAtUtc,
+                    WindowsDeliveryStatus = DeliveryStatus.NotAttempted,
+                    DeferredUntilUtc = deferredUntilUtc,
+                },
+            ],
         };
     }
 
