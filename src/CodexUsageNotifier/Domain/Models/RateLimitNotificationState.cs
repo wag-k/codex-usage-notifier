@@ -71,6 +71,21 @@ public sealed record RateLimitNotificationState
     public DeliveryStatus GmailDeliveryStatus { get; init; }
 
     /// <summary>
+    /// Gmail通知を送信要求した累計回数を取得または設定します。
+    /// </summary>
+    public int GmailAttemptCount { get; init; }
+
+    /// <summary>
+    /// Gmail通知を最後に送信要求したUTC時刻を取得または設定します。
+    /// </summary>
+    public DateTimeOffset? GmailLastAttemptedAtUtc { get; init; }
+
+    /// <summary>
+    /// Gmail通知を次に再試行できるUTC時刻を取得または設定します。
+    /// </summary>
+    public DateTimeOffset? GmailNextRetryAtUtc { get; init; }
+
+    /// <summary>
     /// 通知禁止時間による保留終了UTC時刻を取得または設定します。
     /// </summary>
     public DateTimeOffset? DeferredUntilUtc { get; init; }

@@ -16,6 +16,11 @@ public static class RateLimitNotificationPolicy
     internal const int MaxWindowsAttemptCount = 3;
 
     /// <summary>
+    /// 1つのGmail通知に許可する最大送信試行回数です。
+    /// </summary>
+    internal const int MaxGmailAttemptCount = 3;
+
+    /// <summary>
     /// 取得できた全利用枠を独立に評価し、複数の通知候補と回復状態を返します。
     /// </summary>
     /// <param name="currentSnapshot">現在取得した全利用枠です。</param>
@@ -80,13 +85,15 @@ public static class RateLimitNotificationPolicy
                         recoveryStarted,
                         settings),
                     notificationStates,
-                    currentSnapshot.CapturedAtUtc);
+                    currentSnapshot.CapturedAtUtc,
+                    settings);
             }
 
             RateLimitNotificationCandidate? deferredReset = RestoreDeferredResetCompleted(
                 currentSnapshot,
                 window,
                 windowSetting,
+                settings,
                 notificationStates);
             AddIfPending(
                 candidates,
@@ -98,7 +105,8 @@ public static class RateLimitNotificationPolicy
                     windowSetting,
                     settings),
                 notificationStates,
-                currentSnapshot.CapturedAtUtc);
+                currentSnapshot.CapturedAtUtc,
+                settings);
         }
 
         return new RateLimitNotificationEvaluation
@@ -355,7 +363,8 @@ public static class RateLimitNotificationPolicy
             notificationStates,
             RateLimitNotificationType.ShortWindowRecovered,
             snapshot.CapturedAtUtc,
-            expectedRecoveryWindowId);
+            expectedRecoveryWindowId,
+            settings);
     }
 
     /// <summary>
@@ -365,6 +374,7 @@ public static class RateLimitNotificationPolicy
         UsageSnapshot snapshot,
         RateLimitWindow window,
         RateLimitNotificationSetting windowSetting,
+        AppSettings settings,
         IReadOnlyList<RateLimitNotificationState> notificationStates)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
@@ -377,7 +387,8 @@ public static class RateLimitNotificationPolicy
                 notificationStates,
                 RateLimitNotificationType.LongWindowResetCompleted,
                 snapshot.CapturedAtUtc,
-                expectedRecoveryWindowId)
+                expectedRecoveryWindowId,
+                settings)
             : null;
     }
 
@@ -389,11 +400,13 @@ public static class RateLimitNotificationPolicy
         IReadOnlyList<RateLimitNotificationState> notificationStates,
         RateLimitNotificationType notificationType,
         DateTimeOffset nowUtc,
-        string? expectedRecoveryWindowId)
+        string? expectedRecoveryWindowId,
+        AppSettings settings)
     {
+        ArgumentNullException.ThrowIfNull(settings);
         RateLimitNotificationState? pending = notificationStates
             .Where(state =>
-                state.WindowsDeliveryStatus == DeliveryStatus.NotAttempted
+                IsAnyEnabledChannelPending(state, settings, nowUtc)
                 && state.NotificationType == notificationType
                 && HasSameIdentity(state, window)
                 && state.DeferredUntilUtc is not null
@@ -426,10 +439,12 @@ public static class RateLimitNotificationPolicy
         List<RateLimitNotificationCandidate> candidates,
         RateLimitNotificationCandidate? candidate,
         IReadOnlyList<RateLimitNotificationState> notificationStates,
-        DateTimeOffset nowUtc)
+        DateTimeOffset nowUtc,
+        AppSettings settings)
     {
         ArgumentNullException.ThrowIfNull(candidates);
         ArgumentNullException.ThrowIfNull(notificationStates);
+        ArgumentNullException.ThrowIfNull(settings);
         if (candidate is null)
         {
             return;
@@ -440,7 +455,8 @@ public static class RateLimitNotificationPolicy
             && string.Equals(state.RecoveryWindowId, candidate.RecoveryWindowId, StringComparison.Ordinal)
             && state.NotificationType == candidate.NotificationType
             && state.NotificationStage == candidate.NotificationStage);
-        if (CanAttemptWindows(existing, nowUtc))
+        if ((settings.WindowsNotificationEnabled && CanAttemptWindows(existing, nowUtc))
+            || (settings.GmailNotificationEnabled && CanAttemptGmail(existing, nowUtc)))
         {
             candidates.Add(candidate);
         }
@@ -452,7 +468,7 @@ public static class RateLimitNotificationPolicy
     /// <param name="existing">同じ通知を表す保存済み状態です。</param>
     /// <param name="nowUtc">今回の正常取得UTC時刻です。</param>
     /// <returns>Windows通知を試行できる場合はtrueです。</returns>
-    private static bool CanAttemptWindows(
+    internal static bool CanAttemptWindows(
         RateLimitNotificationState? existing,
         DateTimeOffset nowUtc)
     {
@@ -469,6 +485,49 @@ public static class RateLimitNotificationPolicy
         return existing.WindowsDeliveryStatus == DeliveryStatus.Failed
             && existing.WindowsAttemptCount < MaxWindowsAttemptCount
             && (existing.WindowsNextRetryAtUtc is null || existing.WindowsNextRetryAtUtc <= nowUtc);
+    }
+
+    /// <summary>
+    /// 保存済みGmail配送状態から、新規送信または失敗後の再試行が可能か判定します。
+    /// </summary>
+    /// <param name="existing">同じ通知を表す保存済み状態です。</param>
+    /// <param name="nowUtc">今回の正常取得UTC時刻です。</param>
+    /// <returns>Gmail通知を試行できる場合はtrueです。</returns>
+    internal static bool CanAttemptGmail(
+        RateLimitNotificationState? existing,
+        DateTimeOffset nowUtc)
+    {
+        if (existing is null)
+        {
+            return true;
+        }
+
+        if (existing.GmailDeliveryStatus == DeliveryStatus.NotAttempted)
+        {
+            return existing.DeferredUntilUtc is null || existing.DeferredUntilUtc <= nowUtc;
+        }
+
+        return existing.GmailDeliveryStatus == DeliveryStatus.Failed
+            && existing.GmailAttemptCount < MaxGmailAttemptCount
+            && (existing.GmailNextRetryAtUtc is null || existing.GmailNextRetryAtUtc <= nowUtc);
+    }
+
+    /// <summary>
+    /// 有効な配送チャネルのいずれかに未送信または再試行可能な状態があるか判定します。
+    /// </summary>
+    /// <param name="state">保存済み通知状態です。</param>
+    /// <param name="settings">有効な配送チャネル設定です。</param>
+    /// <param name="nowUtc">今回の正常取得UTC時刻です。</param>
+    /// <returns>いずれかの有効チャネルが処理可能ならtrueです。</returns>
+    private static bool IsAnyEnabledChannelPending(
+        RateLimitNotificationState state,
+        AppSettings settings,
+        DateTimeOffset nowUtc)
+    {
+        ArgumentNullException.ThrowIfNull(state);
+        ArgumentNullException.ThrowIfNull(settings);
+        return (settings.WindowsNotificationEnabled && CanAttemptWindows(state, nowUtc))
+            || (settings.GmailNotificationEnabled && CanAttemptGmail(state, nowUtc));
     }
 
     /// <summary>

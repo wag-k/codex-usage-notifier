@@ -362,6 +362,72 @@ public sealed class RateLimitNotificationProcessorTests
     }
 
     /// <summary>
+    /// Windowsを無効、Gmailを有効にした場合にWindowsを送らずGmail未送信候補を保持することを検証します。
+    /// </summary>
+    [TestMethod]
+    public async Task ProcessAsync_WindowsDisabledAndGmailEnabled_PreservesGmailCandidate()
+    {
+        DateTimeOffset nowUtc = new(2026, 8, 5, 8, 0, 0, TimeSpan.Zero);
+        InMemoryStateRepository repository = new();
+        using ApplicationStateStore stateStore = new(repository);
+        RecordingWindowsNotificationSender sender = new();
+        RateLimitNotificationProcessor processor = CreateProcessor(
+            stateStore,
+            sender,
+            new MutableTimeProvider(nowUtc));
+        AppSettings settings = AppSettings.CreateDefault() with
+        {
+            WindowsNotificationEnabled = false,
+            GmailNotificationEnabled = true,
+        };
+
+        NotificationProcessingResult result = await processor.ProcessAsync(
+            CreateSnapshot(CreateFiveHourWindow(nowUtc), nowUtc),
+            settings,
+            CancellationToken.None);
+
+        RateLimitNotificationState state = result.State.RateLimitNotificationStates.Single();
+        Assert.AreEqual(0, sender.SendCount);
+        Assert.AreEqual(DeliveryStatus.NotAttempted, state.WindowsDeliveryStatus);
+        Assert.AreEqual(DeliveryStatus.NotAttempted, state.GmailDeliveryStatus);
+    }
+
+    /// <summary>
+    /// Gmailが未送信でも、成功済みWindowsチャネルへ同じ通知を再送しないことを検証します。
+    /// </summary>
+    [TestMethod]
+    public async Task ProcessAsync_WindowsSucceededAndGmailPending_DoesNotResendWindows()
+    {
+        DateTimeOffset nowUtc = new(2026, 8, 5, 8, 0, 0, TimeSpan.Zero);
+        InMemoryStateRepository repository = new();
+        using ApplicationStateStore stateStore = new(repository);
+        RecordingWindowsNotificationSender sender = new();
+        MutableTimeProvider timeProvider = new(nowUtc);
+        RateLimitNotificationProcessor processor = CreateProcessor(stateStore, sender, timeProvider);
+        AppSettings settings = AppSettings.CreateDefault() with
+        {
+            WindowsNotificationEnabled = true,
+            GmailNotificationEnabled = true,
+        };
+        RateLimitWindow window = CreateFiveHourWindow(nowUtc);
+
+        await processor.ProcessAsync(
+            CreateSnapshot(window, nowUtc),
+            settings,
+            CancellationToken.None);
+        timeProvider.SetUtcNow(nowUtc.AddMinutes(1));
+        NotificationProcessingResult second = await processor.ProcessAsync(
+            CreateSnapshot(window, nowUtc.AddMinutes(1)),
+            settings,
+            CancellationToken.None);
+
+        RateLimitNotificationState state = second.State.RateLimitNotificationStates.Single();
+        Assert.AreEqual(1, sender.SendCount);
+        Assert.AreEqual(DeliveryStatus.Succeeded, state.WindowsDeliveryStatus);
+        Assert.AreEqual(DeliveryStatus.NotAttempted, state.GmailDeliveryStatus);
+    }
+
+    /// <summary>
     /// 監視失敗が3回へ達したときだけ障害通知を1回送ることを検証します。
     /// </summary>
     [TestMethod]

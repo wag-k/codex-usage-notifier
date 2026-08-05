@@ -90,7 +90,7 @@ Codex週間枠のリセットが近づいています
 
 ## 現在の実装状況
 
-Phase 1の基盤、Phase 2のCodex App Server連携、Phase 3の監視・Windows通知、Phase 3.1の複数枠通知基盤、およびPhase 4Aの設定画面まで実装しています。
+Phase 1の基盤、Phase 2のCodex App Server連携、Phase 3の監視・Windows通知、Phase 3.1の複数枠通知基盤、Phase 3.2の通知信頼性改善、およびPhase 4Aの設定画面まで実装しています。
 
 - `codex app-server`を本アプリ所有の子プロセスとして起動
 - stdin/stdoutのJSONL形式で`initialize`、`initialized`、`account/rateLimits/read`を実行
@@ -107,6 +107,11 @@ Phase 1の基盤、Phase 2のCodex App Server連携、Phase 3の監視・Windows
 - 短期枠回復と長期枠のEarly／Standard／Final／Completed判定
 - 複合キーによる通知状態保存と通知禁止時間終了後の再取得
 - 共有タスクトレイアイコンからのWindowsバルーン通知
+- 同一取得で成立した複数候補を1件のWindowsバルーンへ集約
+- Windows通知失敗の5分間隔・最大3回再試行と、古い送信中状態の回復
+- Early／Standard／Finalを重複しない時間帯として判定
+- 24時間を超えた保留と現在期間に一致しない保留を期限切れとして除外
+- WindowsとGmailの配送状態を独立して保持し、成功済みチャネルへ再送しない
 - `resetsAt`なしの短期枠回復連番と長期枠の`UsageDropInference`を状態保存
 - 状態を変更しない6種類のテスト通知をタスクトレイから個別送信
 - タスクトレイと状態画面から開けるWPF設定画面
@@ -200,12 +205,13 @@ CodexUsageNotifier.sln
    │      ├─ resetsAtなしならリセット前通知を行わない
    │      └─ リセット時刻の前進、または設定閾値以上の使用率低下を確認
    │
-   ├─ 同じ枠・期間・通知種別・段階で送信済みか
-   ├─ 通知禁止時間内なら保留
+   ├─ 同じ枠・期間・通知種別・段階についてチャネル別に送信済みか
+   ├─ 通知禁止時間内なら保留（現在期間と一致し、24時間以内の場合だけ復元）
    └─ 条件成立かつ通知可能
-          ├─ Windows通知
-          ├─ Gmail通知
-          └─ 通知結果を状態保存
+          ├─ Windows候補を1件のバルーンへ集約
+          ├─ 失敗時は5分間隔・最大3回再試行
+          ├─ Gmail候補は未送信状態を独立保持（送信はPhase 4B以降）
+          └─ チャネル別の通知結果を状態保存
 ```
 
 ## 状態表示

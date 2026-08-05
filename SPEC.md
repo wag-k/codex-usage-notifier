@@ -319,7 +319,7 @@ Gmail通知にはGmail APIを使用する。
 
 通知種別には少なくとも`ShortWindowRecovered`、`LongWindowEarlyWarning`、`LongWindowStandardWarning`、`LongWindowFinalWarning`、`LongWindowResetCompleted`、`NewRateLimitDetected`、`MonitoringFailure`を表現できるようにする。同じリセット期間において、同じ通知種別と通知段階をWindowsとGmailへそれぞれ最大1回送る。
 
-送信失敗した通知先については、設定された再試行条件に従い再送できる。
+送信失敗した通知先については、チャネルごとの`AttemptCount`、`LastAttemptedAtUtc`、`NextRetryAtUtc`に従って再送できる。Windows通知は5分間隔・最大3回とする。送信前に保存した`InProgress`が5分以上残っている場合は、中断された試行として次の正常取得時に再試行可能な状態へ戻す。WindowsとGmailは候補を共有するが配送状態を独立して評価し、一方が未送信でも成功済みの他方へ再送しない。
 
 ### FR-008 PC起動時の通知
 
@@ -339,6 +339,8 @@ Gmail通知にはGmail APIを使用する。
 7. 長期枠リセット前通知は、禁止時間終了時点でも対象段階の時間帯と残量条件が有効な場合だけ送る。期限を過ぎた段階は送らない。
 8. 長期枠リセット完了通知は、禁止時間終了後に新しいリセット期間を確認できれば送信できる。
 9. 保留通知には、実際に条件を満たした時刻、送信時点の残量、および通知段階を記載する。
+10. 保留通知は`DeferredUntilUtc`を過ぎ、現在のリセット期間IDと一致し、条件成立から24時間以内の場合だけ復元する。
+11. 期間不一致、利用枠消失、または24時間超過を検出した保留は`Expired`へ変更する。`resetsAt`のない使用率低下推定イベントは、同一利用枠かつ24時間以内であることを確認する。
 
 ### FR-010 Windows通知
 
@@ -354,6 +356,8 @@ Windows通知には少なくとも次を含める。
 通知をクリックした場合は、状態画面を開く。
 
 Windows通知が利用できない場合でも、Gmail通知と監視処理は継続する。
+
+同一取得で複数の通知候補が成立した場合、共有`NotifyIcon`への連続表示で上書きされないよう、候補を1件のWindows通知へ集約する。集約通知の表示要求が成功した場合だけ、含まれる各候補のWindows配送状態を成功へ変更する。個別通知が必要になった場合はWindowsトースト通知への移行を検討する。
 
 タスクトレイの「テスト通知」サブメニューから、短期回復、Early、Standard、Final、リセット完了、監視障害を個別に送信できる。テスト通知は本番の通知済み状態、回復連番、利用枠履歴を変更せず、送信結果だけをログへ記録する。テスト通知のクリック時も状態画面を開く。
 
@@ -664,7 +668,13 @@ Weeklyなどの長期枠について、新しい利用期間の開始を`LongWin
 | ConditionMetAtUtc | DateTimeOffset | 条件成立時刻 |
 | DeliveredAtUtc | DateTimeOffset? | いずれかの送信先へ最初に送信できた時刻 |
 | WindowsDeliveryStatus | DeliveryStatus | Windows通知状態 |
+| WindowsAttemptCount | int | Windows通知の累計表示試行回数 |
+| WindowsLastAttemptedAtUtc | DateTimeOffset? | Windows通知の最終表示試行時刻 |
+| WindowsNextRetryAtUtc | DateTimeOffset? | Windows通知の次回再試行時刻 |
 | GmailDeliveryStatus | DeliveryStatus | Gmail通知状態 |
+| GmailAttemptCount | int | Gmail通知の累計送信試行回数 |
+| GmailLastAttemptedAtUtc | DateTimeOffset? | Gmail通知の最終送信試行時刻 |
+| GmailNextRetryAtUtc | DateTimeOffset? | Gmail通知の次回再試行時刻 |
 | DeferredUntilUtc | DateTimeOffset? | 保留終了時刻 |
 | ResetCompletionReason | ResetCompletionReason? | ResetTimeAdvancedまたはUsageDropInference |
 
@@ -902,6 +912,16 @@ Weeklyなどの長期枠について、新しい利用期間の開始を`LongWin
 - `ResetInferenceUsageDropPoints`の初期値が50で、不正なファイル値はこの項目だけ50へ補正される。
 - 保存後にアプリを再起動しても設定値が維持される。
 
+### AC-017 通知信頼性
+
+- 同一取得で短期枠と長期枠の候補が同時成立した場合、1件のWindows通知へ集約され、各候補の状態が成功になる。
+- Windows通知が失敗した場合、5分後から最大3回まで再試行し、成功後は再送しない。
+- 5分以上残った`InProgress`を次の正常取得で再試行できる。
+- Final時間帯でFinalが無効な場合はStandardを、Standard時間帯でStandardが無効な場合はEarlyを送らない。
+- 保留終了前、24時間超過、現在期間と不一致の保留を送らない。
+- 短時間に連続した更新通知を最後の1回へデバウンスできる。
+- Windows無効・Gmail有効でも候補とGmail未送信状態を保持でき、Windows成功済み・Gmail未送信の状態でWindowsを重複送信しない。
+
 ## 11. 単体テスト対象
 
 最低限、次を単体テストする。
@@ -951,6 +971,15 @@ Weeklyなどの長期枠について、新しい利用期間の開始を`LongWin
 43. Gmail未認証時の有効化抑止
 44. 分類別既定通知設定の編集反映
 45. 設定した使用率低下推定閾値によるリセット完了判定
+46. 同一取得で成立した複数候補のWindows通知集約
+47. Windows通知の失敗後再送、成功後抑止、および最大3回制限
+48. 古いWindows`InProgress`の再試行可能状態への回復
+49. Final無効時とStandard無効時の下位段階へのフォールバック抑止
+50. 保留終了前、24時間超過、現在期間不一致の保留除外
+51. 連続更新通知のデバウンスによる1回取得
+52. Windows無効・Gmail有効時の候補保持
+53. Windows成功済み・Gmail未送信時のWindows重複送信抑止
+54. WindowsとGmailそれぞれの試行情報のJSON永続化
 
 ## 12. 実装上の設計方針
 
@@ -1135,6 +1164,18 @@ Phase 3では、Windows通知を既存のタスクトレイアイコンから表
 - 本番状態と履歴を変更しない6種類のWindowsテスト通知
 
 Phase 3.1ではGmail送信とGmail OAuthを実装しない。利用枠別設定の内部モデルとClassification別の既定値を実装し、設定画面からの編集は後続フェーズとする。
+
+### Phase 3.2：通知信頼性改善
+
+- 同一取得で成立した複数候補のWindowsバルーン集約
+- Windows配送失敗の5分間隔・最大3回再試行
+- 5分以上残った`InProgress`の回復
+- Early、Standard、Finalの排他的な時間帯判定
+- 保留通知の期間ID、保留終了時刻、24時間の鮮度検証
+- 更新通知デバウンスのCTS競合解消
+- WindowsとGmailのチャネル別配送状態・試行情報
+
+Phase 3.2ではGmail APIによる送信は行わない。Gmailだけが有効な場合も候補と未送信状態を保持し、Phase 4Bの配送実装が引き継げる構造とする。
 
 ### Phase 4A：設定画面
 

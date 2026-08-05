@@ -61,6 +61,10 @@ public sealed class JsonApplicationStateRepositoryTests
                     WindowsAttemptCount = 2,
                     WindowsLastAttemptedAtUtc = capturedAtUtc.AddMinutes(-1),
                     WindowsNextRetryAtUtc = capturedAtUtc.AddMinutes(4),
+                    GmailDeliveryStatus = DeliveryStatus.Failed,
+                    GmailAttemptCount = 1,
+                    GmailLastAttemptedAtUtc = capturedAtUtc.AddMinutes(-2),
+                    GmailNextRetryAtUtc = capturedAtUtc.AddMinutes(3),
                 },
             ],
             RateLimitRecoveryStates =
@@ -104,6 +108,14 @@ public sealed class JsonApplicationStateRepositoryTests
         Assert.AreEqual(
             capturedAtUtc.AddMinutes(4),
             actual.RateLimitNotificationStates.Single().WindowsNextRetryAtUtc);
+        Assert.AreEqual(DeliveryStatus.Failed, actual.RateLimitNotificationStates.Single().GmailDeliveryStatus);
+        Assert.AreEqual(1, actual.RateLimitNotificationStates.Single().GmailAttemptCount);
+        Assert.AreEqual(
+            capturedAtUtc.AddMinutes(-2),
+            actual.RateLimitNotificationStates.Single().GmailLastAttemptedAtUtc);
+        Assert.AreEqual(
+            capturedAtUtc.AddMinutes(3),
+            actual.RateLimitNotificationStates.Single().GmailNextRetryAtUtc);
         Assert.AreEqual(3, actual.RateLimitRecoveryStates.Single().RecoverySequence);
         Assert.IsFalse(Directory.EnumerateFiles(temporaryDirectory.Path, "*.tmp").Any());
     }

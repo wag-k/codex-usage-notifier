@@ -82,8 +82,7 @@ public sealed partial class RateLimitNotificationProcessor
             cancellationToken);
 
         if (!previousState.InitialSetupCompleted
-            || evaluation.Candidates.Count == 0
-            || !settings.WindowsNotificationEnabled)
+            || evaluation.Candidates.Count == 0)
         {
             return new NotificationProcessingResult { State = currentState };
         }
@@ -103,13 +102,17 @@ public sealed partial class RateLimitNotificationProcessor
                     candidate);
                 RateLimitNotificationState deferred = CreateState(
                     candidate,
-                    DeliveryStatus.NotAttempted,
+                    existing?.WindowsDeliveryStatus ?? DeliveryStatus.NotAttempted,
                     deliveredAtUtc: null,
                     deferredUntilUtc: quietHoursEnd) with
                 {
                     WindowsAttemptCount = existing?.WindowsAttemptCount ?? 0,
                     WindowsLastAttemptedAtUtc = existing?.WindowsLastAttemptedAtUtc,
                     WindowsNextRetryAtUtc = existing?.WindowsNextRetryAtUtc,
+                    GmailDeliveryStatus = existing?.GmailDeliveryStatus ?? DeliveryStatus.NotAttempted,
+                    GmailAttemptCount = existing?.GmailAttemptCount ?? 0,
+                    GmailLastAttemptedAtUtc = existing?.GmailLastAttemptedAtUtc,
+                    GmailNextRetryAtUtc = existing?.GmailNextRetryAtUtc,
                 };
                 currentState = await SaveNotificationStateAsync(deferred, cancellationToken);
                 LogNotificationDeferred(
@@ -126,13 +129,43 @@ public sealed partial class RateLimitNotificationProcessor
             };
         }
 
-        List<RateLimitNotificationState> inProgressStates = [];
+        List<RateLimitNotificationCandidate> windowsCandidates = [];
+        List<RateLimitNotificationState> existingWindowsStates = [];
         foreach (RateLimitNotificationCandidate candidate in evaluation.Candidates)
         {
             LogResetCompletionReason(candidate);
             RateLimitNotificationState? existing = FindNotificationState(
                 previousState.RateLimitNotificationStates,
                 candidate);
+            if (existing is null)
+            {
+                existing = CreateState(
+                    candidate,
+                    DeliveryStatus.NotAttempted,
+                    deliveredAtUtc: null,
+                    deferredUntilUtc: null);
+                currentState = await SaveNotificationStateAsync(existing, cancellationToken);
+            }
+
+            if (!settings.WindowsNotificationEnabled
+                || !RateLimitNotificationPolicy.CanAttemptWindows(existing, nowUtc))
+            {
+                continue;
+            }
+
+            windowsCandidates.Add(candidate);
+            existingWindowsStates.Add(existing);
+        }
+
+        if (windowsCandidates.Count == 0)
+        {
+            return new NotificationProcessingResult { State = currentState };
+        }
+
+        List<RateLimitNotificationState> inProgressStates = [];
+        foreach ((RateLimitNotificationCandidate candidate, RateLimitNotificationState existing) in
+                 windowsCandidates.Zip(existingWindowsStates))
+        {
             RateLimitNotificationState inProgress = CreateInProgressState(
                 candidate,
                 existing,
@@ -142,14 +175,14 @@ public sealed partial class RateLimitNotificationProcessor
         }
 
         WindowsNotificationMessage message = WindowsNotificationMessageFactory.CreateAggregate(
-            evaluation.Candidates,
+            windowsCandidates,
             snapshot.CapturedAtUtc);
         try
         {
             await windowsNotificationSender.SendAsync(message, cancellationToken);
             DateTimeOffset deliveredAtUtc = timeProvider.GetUtcNow();
             foreach ((RateLimitNotificationCandidate candidate, RateLimitNotificationState inProgress) in
-                     evaluation.Candidates.Zip(inProgressStates))
+                     windowsCandidates.Zip(inProgressStates))
             {
                 RateLimitNotificationState succeeded = inProgress with
                 {
@@ -163,12 +196,12 @@ public sealed partial class RateLimitNotificationProcessor
             currentState = await stateStore.UpdateAsync(
                 state => state with
                 {
-                    LastNotifiedRecoveryWindowId = evaluation.Candidates[^1].RecoveryWindowId,
+                    LastNotifiedRecoveryWindowId = windowsCandidates[^1].RecoveryWindowId,
                     WindowsDeliveryResult = new DeliveryResultState
                     {
                         Status = DeliveryStatus.Succeeded,
                         AttemptedAtUtc = deliveredAtUtc,
-                        Summary = CreateDeliverySummary(evaluation.Candidates),
+                        Summary = CreateDeliverySummary(windowsCandidates),
                     },
                 },
                 cancellationToken);
@@ -177,7 +210,7 @@ public sealed partial class RateLimitNotificationProcessor
         {
             DateTimeOffset attemptedAtUtc = timeProvider.GetUtcNow();
             foreach ((RateLimitNotificationCandidate candidate, RateLimitNotificationState inProgress) in
-                     evaluation.Candidates.Zip(inProgressStates))
+                     windowsCandidates.Zip(inProgressStates))
             {
                 RateLimitNotificationState failed = inProgress with
                 {
@@ -310,6 +343,10 @@ public sealed partial class RateLimitNotificationProcessor
             WindowsAttemptCount = (existing?.WindowsAttemptCount ?? 0) + 1,
             WindowsLastAttemptedAtUtc = attemptedAtUtc,
             WindowsNextRetryAtUtc = null,
+            GmailDeliveryStatus = existing?.GmailDeliveryStatus ?? DeliveryStatus.NotAttempted,
+            GmailAttemptCount = existing?.GmailAttemptCount ?? 0,
+            GmailLastAttemptedAtUtc = existing?.GmailLastAttemptedAtUtc,
+            GmailNextRetryAtUtc = existing?.GmailNextRetryAtUtc,
         };
     }
 
@@ -384,8 +421,10 @@ public sealed partial class RateLimitNotificationProcessor
                         ? notification with
                         {
                             WindowsDeliveryStatus = DeliveryStatus.Expired,
+                            GmailDeliveryStatus = DeliveryStatus.Expired,
                             DeferredUntilUtc = null,
                             WindowsNextRetryAtUtc = null,
+                            GmailNextRetryAtUtc = null,
                         }
                         : notification)
                     .ToArray(),
@@ -555,7 +594,7 @@ public sealed partial class RateLimitNotificationProcessor
     /// </summary>
     /// <param name="candidates">送信に含めた通知候補です。</param>
     /// <returns>件数と通知種別を含む概要です。</returns>
-    private static string CreateDeliverySummary(IReadOnlyList<RateLimitNotificationCandidate> candidates)
+    private static string CreateDeliverySummary(List<RateLimitNotificationCandidate> candidates)
     {
         ArgumentNullException.ThrowIfNull(candidates);
         return $"{candidates.Count}件: {string.Join(", ", candidates.Select(candidate => $"{candidate.NotificationType}/{candidate.NotificationStage}"))}";
