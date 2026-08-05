@@ -48,7 +48,7 @@ public sealed partial class UsageMonitor : IAsyncDisposable
     /// </summary>
     /// <param name="client">Codex App Serverから利用枠を取得するクライアントです。</param>
     /// <param name="stateStore">取得結果と失敗回数を保存する状態ストアです。</param>
-    /// <param name="settingsRepository">通知対象選択設定の読み込み元です。</param>
+    /// <param name="settingsRepository">利用枠別通知設定の読み込み元です。</param>
     /// <param name="historyRepository">全利用枠の観測履歴保存先です。</param>
     /// <param name="powerEventSource">スリープ復帰を通知するイベント元です。</param>
     /// <param name="notificationProcessor">通知判定・送信・状態保存を調整する処理です。</param>
@@ -195,17 +195,8 @@ public sealed partial class UsageMonitor : IAsyncDisposable
             }
 
             AppSettings settings = await settingsRepository.LoadAsync(cancellationToken);
-            IReadOnlyList<RateLimitWindow> selectableRateLimits = settings.IncludeUnknownRateLimitsInNotifications
-                ? snapshot.RateLimits
-                : snapshot.RateLimits
-                    .Where(window => window.Classification != RateLimitClassification.Unknown)
-                    .ToArray();
-            RateLimitWindow? notificationTarget = NotificationTargetSelector.Select(
-                selectableRateLimits,
-                settings.NotificationTarget);
             NotificationProcessingResult processingResult = await notificationProcessor.ProcessAsync(
                 snapshot,
-                notificationTarget,
                 settings,
                 cancellationToken);
             CancelRetry();
@@ -217,8 +208,8 @@ public sealed partial class UsageMonitor : IAsyncDisposable
 
             statusSink.SetSnapshot(
                 snapshot,
-                notificationTarget,
-                processingResult.State);
+                processingResult.State,
+                settings);
             int unknownCount = snapshot.RateLimits.Count(
                 window => window.Classification == RateLimitClassification.Unknown);
             LogFetchSucceeded(logger, client.ProcessId, snapshot.RateLimits.Count, unknownCount);

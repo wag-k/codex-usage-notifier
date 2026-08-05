@@ -60,6 +60,18 @@ public sealed class JsonApplicationStateRepositoryTests
                     WindowsDeliveryStatus = DeliveryStatus.Succeeded,
                 },
             ],
+            RateLimitRecoveryStates =
+            [
+                new RateLimitRecoveryState
+                {
+                    LimitId = "codex",
+                    Position = RateLimitPosition.Primary,
+                    WindowDurationMinutes = 300,
+                    HasObservation = true,
+                    RecoverySequence = 3,
+                    LastRemainingPercent = 99,
+                },
+            ],
         };
 
         await repository.SaveAsync(initial, CancellationToken.None);
@@ -82,6 +94,7 @@ public sealed class JsonApplicationStateRepositoryTests
         Assert.AreEqual(
             RateLimitNotificationType.ShortWindowRecovered,
             actual.RateLimitNotificationStates.Single().NotificationType);
+        Assert.AreEqual(3, actual.RateLimitRecoveryStates.Single().RecoverySequence);
         Assert.IsFalse(Directory.EnumerateFiles(temporaryDirectory.Path, "*.tmp").Any());
     }
 

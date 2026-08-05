@@ -29,7 +29,6 @@ public sealed class RateLimitNotificationProcessorTests
 
         NotificationProcessingResult result = await processor.ProcessAsync(
             snapshot,
-            window,
             AppSettings.CreateDefault(),
             CancellationToken.None);
 
@@ -55,7 +54,6 @@ public sealed class RateLimitNotificationProcessorTests
         RateLimitWindow window = CreateFiveHourWindow(quietUtc);
         await processor.ProcessAsync(
             CreateSnapshot(window, quietUtc),
-            window,
             AppSettings.CreateDefault(),
             CancellationToken.None);
 
@@ -64,12 +62,10 @@ public sealed class RateLimitNotificationProcessorTests
         RateLimitWindow currentWindow = CreateFiveHourWindow(afterQuietUtc);
         NotificationProcessingResult sent = await processor.ProcessAsync(
             CreateSnapshot(currentWindow, afterQuietUtc),
-            currentWindow,
             AppSettings.CreateDefault(),
             CancellationToken.None);
         await processor.ProcessAsync(
             CreateSnapshot(currentWindow, afterQuietUtc.AddMinutes(1)),
-            currentWindow,
             AppSettings.CreateDefault(),
             CancellationToken.None);
 

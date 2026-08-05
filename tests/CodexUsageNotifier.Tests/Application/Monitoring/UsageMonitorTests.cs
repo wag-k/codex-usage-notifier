@@ -241,7 +241,7 @@ public sealed class UsageMonitorTests
     }
 
     /// <summary>
-    /// 自動選択の初期設定を返すテスト用設定リポジトリです。
+    /// 利用枠別通知の初期設定を返すテスト用設定リポジトリです。
     /// </summary>
     private sealed class InMemorySettingsRepository : ISettingsRepository
     {
@@ -330,15 +330,16 @@ public sealed class UsageMonitorTests
         /// 正常取得を記録します。
         /// </summary>
         /// <param name="snapshot">取得した利用枠です。</param>
-        /// <param name="notificationTarget">選択された通知対象です。</param>
         /// <param name="state">最新アプリケーション状態です。</param>
+        /// <param name="settings">利用枠別通知設定です。</param>
         public void SetSnapshot(
             UsageSnapshot snapshot,
-            RateLimitWindow? notificationTarget,
-            ApplicationState state)
+            ApplicationState state,
+            AppSettings settings)
         {
             ArgumentNullException.ThrowIfNull(snapshot);
             ArgumentNullException.ThrowIfNull(state);
+            ArgumentNullException.ThrowIfNull(settings);
             Interlocked.Increment(ref snapshotCount);
             SnapshotReceived.TrySetResult();
         }

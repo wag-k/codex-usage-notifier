@@ -93,6 +93,7 @@ public partial class App : System.Windows.Application
         services.AddSingleton<TrayIconHost>();
         services.AddSingleton<IWindowsNotificationSender, WindowsBalloonNotificationSender>();
         services.AddSingleton<RateLimitNotificationProcessor>();
+        services.AddSingleton<TestNotificationService>();
         services.AddSingleton(new CodexAppServerOptions());
         services.AddSingleton<ICodexAppServerProcessFactory, CodexAppServerProcessFactory>();
         services.AddSingleton<CodexAppServerClient>();

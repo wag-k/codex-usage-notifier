@@ -14,7 +14,7 @@ public sealed class StatusViewModel : INotifyPropertyChanged, IUsageStatusSink
     private string fiveHourRateLimit = "未観測";
     private string weeklyRateLimit = "未観測";
     private string allRateLimits = "未取得";
-    private string notificationTarget = "未選択";
+    private string notificationTarget = "未取得";
     private string resetCredits = "未取得";
     private string monitoringStatus = "開始待ち";
     private string lastSuccessfulFetch = "未取得";
@@ -22,7 +22,6 @@ public sealed class StatusViewModel : INotifyPropertyChanged, IUsageStatusSink
     private string gmailStatus = "未設定（Phase 4で実装）";
     private string lastNotification = "通知実績なし";
     private string consecutiveFailures = "0回";
-    private NotificationTargetSelectionMode notificationTargetSelectionMode;
 
     /// <summary>
     /// 表示値が変更されたときに発生します。
@@ -57,7 +56,7 @@ public sealed class StatusViewModel : INotifyPropertyChanged, IUsageStatusSink
     }
 
     /// <summary>
-    /// 将来の通知処理で使用する現在の選択候補を取得します。
+    /// 観測中の全利用枠に適用される通知設定の概要を取得します。
     /// </summary>
     public string NotificationTarget
     {
@@ -138,22 +137,10 @@ public sealed class StatusViewModel : INotifyPropertyChanged, IUsageStatusSink
         ArgumentNullException.ThrowIfNull(settings);
         ArgumentNullException.ThrowIfNull(state);
 
-        notificationTargetSelectionMode = settings.NotificationTarget.Mode;
-        IReadOnlyList<RateLimitWindow> selectableRateLimits = state.LastUsageSnapshot is null
-            ? Array.Empty<RateLimitWindow>()
-            : settings.IncludeUnknownRateLimitsInNotifications
-                ? state.LastUsageSnapshot.RateLimits
-                : state.LastUsageSnapshot.RateLimits
-                    .Where(window => window.Classification != RateLimitClassification.Unknown)
-                    .ToArray();
-        RateLimitWindow? selectedTarget = NotificationTargetSelector.Select(
-            selectableRateLimits,
-            settings.NotificationTarget);
         ApplyUsageSnapshot(
             state.LastUsageSnapshot,
-            selectedTarget,
-            settings.NotificationTarget.Mode,
-            state.RateLimitNotificationStates);
+            state,
+            settings);
         LastSuccessfulFetch = FormatLocalDateTime(state.LastSuccessfulFetchAtUtc, "未取得");
         GmailStatus = settings.GmailNotificationEnabled
             ? "有効・未認証（Phase 4で認証を実装）"
@@ -174,22 +161,19 @@ public sealed class StatusViewModel : INotifyPropertyChanged, IUsageStatusSink
     /// 正常に取得した利用枠をUIスレッドへ反映します。
     /// </summary>
     /// <param name="snapshot">取得した利用枠です。</param>
-    /// <param name="notificationTarget">現在の設定で選択された通知対象です。</param>
     /// <param name="state">通知状態と直近送信結果を含む最新アプリケーション状態です。</param>
+    /// <param name="settings">利用枠別通知設定と閾値です。</param>
     public void SetSnapshot(
         UsageSnapshot snapshot,
-        RateLimitWindow? notificationTarget,
-        ApplicationState state)
+        ApplicationState state,
+        AppSettings settings)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
         ArgumentNullException.ThrowIfNull(state);
+        ArgumentNullException.ThrowIfNull(settings);
         RunOnUiThread(() =>
         {
-            ApplyUsageSnapshot(
-                snapshot,
-                notificationTarget,
-                notificationTargetSelectionMode,
-                state.RateLimitNotificationStates);
+            ApplyUsageSnapshot(snapshot, state, settings);
             LastSuccessfulFetch = FormatLocalDateTime(snapshot.CapturedAtUtc, "未取得");
             LastNotification = FormatLastNotification(state);
             MonitoringStatus = "監視中（App Server接続済み）";
@@ -225,16 +209,15 @@ public sealed class StatusViewModel : INotifyPropertyChanged, IUsageStatusSink
     /// 保存済みの利用枠があれば基本表示へ反映します。
     /// </summary>
     /// <param name="snapshot">保存済みの利用枠です。</param>
-    /// <param name="selectedNotificationTarget">現在選択されている将来の通知対象です。</param>
-    /// <param name="selectionMode">通知対象の選択方法です。</param>
-    /// <param name="notificationStates">利用枠ごとの通知状態です。</param>
+    /// <param name="state">利用枠別の通知状態と回復状態です。</param>
+    /// <param name="settings">利用枠別通知設定と閾値です。</param>
     private void ApplyUsageSnapshot(
         UsageSnapshot? snapshot,
-        RateLimitWindow? selectedNotificationTarget,
-        NotificationTargetSelectionMode selectionMode,
-        IReadOnlyList<RateLimitNotificationState> notificationStates)
+        ApplicationState state,
+        AppSettings settings)
     {
-        ArgumentNullException.ThrowIfNull(notificationStates);
+        ArgumentNullException.ThrowIfNull(state);
+        ArgumentNullException.ThrowIfNull(settings);
         if (snapshot is null)
         {
             return;
@@ -244,9 +227,9 @@ public sealed class StatusViewModel : INotifyPropertyChanged, IUsageStatusSink
         WeeklyRateLimit = FormatRateLimit(snapshot.WeeklyCandidate, "週間枠：未観測", snapshot.CapturedAtUtc);
         AllRateLimits = FormatAllRateLimits(
             snapshot,
-            selectedNotificationTarget,
-            notificationStates);
-        NotificationTarget = FormatNotificationTarget(selectedNotificationTarget, selectionMode);
+            state,
+            settings);
+        NotificationTarget = FormatNotificationSettings(snapshot, settings);
         ResetCredits = snapshot.ResetCredits?.ToString(System.Globalization.CultureInfo.CurrentCulture) ?? "未取得";
     }
 
@@ -265,7 +248,7 @@ public sealed class StatusViewModel : INotifyPropertyChanged, IUsageStatusSink
             return emptyText;
         }
 
-        string reset = FormatLocalDateTime(window.ResetsAtUtc, "不明");
+        string reset = FormatLocalDateTime(window.ResetsAtUtc, "リセット時刻未取得");
         string remainingTime = FormatRemainingTime(window.ResetsAtUtc, capturedAtUtc);
         return $"残り {window.RemainingPercent:0.#}% / 使用 {window.UsedPercent:0.#}% / 次回リセット {reset} / あと {remainingTime}";
     }
@@ -274,16 +257,17 @@ public sealed class StatusViewModel : INotifyPropertyChanged, IUsageStatusSink
     /// すべての利用枠を診断可能な表示文字列へ変換します。
     /// </summary>
     /// <param name="snapshot">取得したすべての利用枠と取得時刻です。</param>
-    /// <param name="selectedTarget">現在選択された通知対象です。</param>
-    /// <param name="notificationStates">利用枠ごとの通知状態です。</param>
+    /// <param name="state">利用枠ごとの通知状態と回復状態です。</param>
+    /// <param name="settings">利用枠別通知設定です。</param>
     /// <returns>limitId、位置、分類、ウィンドウ長、および利用状況を含む表示文字列です。</returns>
     private static string FormatAllRateLimits(
         UsageSnapshot snapshot,
-        RateLimitWindow? selectedTarget,
-        IReadOnlyList<RateLimitNotificationState> notificationStates)
+        ApplicationState state,
+        AppSettings settings)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
-        ArgumentNullException.ThrowIfNull(notificationStates);
+        ArgumentNullException.ThrowIfNull(state);
+        ArgumentNullException.ThrowIfNull(settings);
         if (snapshot.RateLimits.Count == 0)
         {
             return "利用枠なし";
@@ -293,9 +277,15 @@ public sealed class StatusViewModel : INotifyPropertyChanged, IUsageStatusSink
             Environment.NewLine,
             snapshot.RateLimits.Select(window =>
             {
-                bool isTarget = IsSameWindow(window, selectedTarget);
-                string stages = FormatDeliveredStages(window, snapshot.CapturedAtUtc, notificationStates);
-                return $"LimitId={window.LimitId ?? "不明"}, Name={window.LimitName ?? "不明"}, Position={window.Position}, Classification={window.Classification}, Duration={window.WindowDurationMinutes?.ToString(System.Globalization.CultureInfo.CurrentCulture) ?? "不明"}分, 残り{window.RemainingPercent:0.#}%, 使用{window.UsedPercent:0.#}%, Reset={FormatLocalDateTime(window.ResetsAtUtc, "不明")}, リセットまで={FormatRemainingTime(window.ResetsAtUtc, snapshot.CapturedAtUtc)}, 通知対象={(isTarget ? "はい" : "いいえ")}, 送信済み={stages}, Plan={window.PlanType ?? "不明"}, Reached={window.RateLimitReachedType ?? "なし"}";
+                RateLimitNotificationSetting windowSetting = RateLimitNotificationSettingsResolver.Resolve(
+                    window,
+                    settings.RateLimitNotifications);
+                string enabledTypes = FormatEnabledNotificationTypes(windowSetting);
+                string lastNotification = FormatLastWindowNotification(window, state.RateLimitNotificationStates);
+                string resetReason = FormatLastResetCompletionReason(window, state.RateLimitNotificationStates);
+                string recoverySequence = FormatRecoverySequence(window, state.RateLimitRecoveryStates);
+                string resetStatus = window.ResetsAtUtc is null ? "リセット時刻未取得" : "取得済み";
+                return $"LimitId={window.LimitId ?? "不明"}, Name={window.LimitName ?? "不明"}, Position={window.Position}, Classification={window.Classification}, Duration={window.WindowDurationMinutes?.ToString(System.Globalization.CultureInfo.CurrentCulture) ?? "不明"}分, 残り{window.RemainingPercent:0.#}%, 使用{window.UsedPercent:0.#}%, 通知設定={(windowSetting.IsAnyEnabled ? "有効" : "通知対象外")}, 有効通知={enabledTypes}, resetsAt={resetStatus}, Reset={FormatLocalDateTime(window.ResetsAtUtc, "リセット時刻未取得")}, リセットまで={FormatRemainingTime(window.ResetsAtUtc, snapshot.CapturedAtUtc)}, 最終通知={lastNotification}, 最終リセット判定={resetReason}, 回復連番={recoverySequence}, Plan={window.PlanType ?? "不明"}, Reached={window.RateLimitReachedType ?? "なし"}";
             }));
     }
 
@@ -311,7 +301,7 @@ public sealed class StatusViewModel : INotifyPropertyChanged, IUsageStatusSink
     {
         if (resetsAtUtc is null)
         {
-            return "不明";
+            return "リセット時刻未取得";
         }
 
         TimeSpan remaining = resetsAtUtc.Value - capturedAtUtc;
@@ -326,65 +316,146 @@ public sealed class StatusViewModel : INotifyPropertyChanged, IUsageStatusSink
     }
 
     /// <summary>
-    /// 指定利用枠が現在選択された通知対象と同じか判定します。
+    /// 利用枠別設定から有効な通知種類を表示用に整形します。
     /// </summary>
-    /// <param name="window">表示対象の利用枠です。</param>
-    /// <param name="selectedTarget">現在選択された通知対象です。</param>
-    /// <returns>同じ識別値ならtrueです。</returns>
-    private static bool IsSameWindow(RateLimitWindow window, RateLimitWindow? selectedTarget)
+    /// <param name="setting">表示する利用枠別設定です。</param>
+    /// <returns>有効な通知種類、または「なし」です。</returns>
+    private static string FormatEnabledNotificationTypes(RateLimitNotificationSetting setting)
     {
-        ArgumentNullException.ThrowIfNull(window);
-        return selectedTarget is not null
-            && string.Equals(window.LimitId, selectedTarget.LimitId, StringComparison.Ordinal)
-            && window.Position == selectedTarget.Position
-            && window.WindowDurationMinutes == selectedTarget.WindowDurationMinutes;
+        ArgumentNullException.ThrowIfNull(setting);
+        List<string> types = [];
+        if (setting.ShortWindowRecoveryEnabled)
+        {
+            types.Add("ShortWindowRecovered");
+        }
+
+        if (setting.LongWindowEarlyWarningEnabled)
+        {
+            types.Add("Early");
+        }
+
+        if (setting.LongWindowStandardWarningEnabled)
+        {
+            types.Add("Standard");
+        }
+
+        if (setting.LongWindowFinalWarningEnabled)
+        {
+            types.Add("Final");
+        }
+
+        if (setting.LongWindowResetCompletedEnabled)
+        {
+            types.Add("LongWindowResetCompleted");
+        }
+
+        return types.Count == 0 ? "なし" : string.Join("/", types);
     }
 
     /// <summary>
-    /// 現在の利用期間でWindows通知に成功した通知段階を整形します。
+    /// 指定利用枠で最後に成功したWindows通知を整形します。
     /// </summary>
     /// <param name="window">表示対象の利用枠です。</param>
-    /// <param name="capturedAtUtc">現在の取得UTC時刻です。</param>
     /// <param name="notificationStates">保存済み通知状態です。</param>
-    /// <returns>送信済み段階一覧、または「なし」です。</returns>
-    private static string FormatDeliveredStages(
+    /// <returns>通知種類、段階、送信時刻、または「なし」です。</returns>
+    private static string FormatLastWindowNotification(
         RateLimitWindow window,
-        DateTimeOffset capturedAtUtc,
         IReadOnlyList<RateLimitNotificationState> notificationStates)
     {
         ArgumentNullException.ThrowIfNull(window);
         ArgumentNullException.ThrowIfNull(notificationStates);
-        string recoveryWindowId = RateLimitNotificationPolicy.CreateRecoveryWindowId(window, capturedAtUtc);
-        string[] stages = notificationStates
+        RateLimitNotificationState? latest = notificationStates
             .Where(state =>
                 state.WindowsDeliveryStatus == DeliveryStatus.Succeeded
-                && string.Equals(state.LimitId, window.LimitId, StringComparison.Ordinal)
-                && state.Position == window.Position
-                && state.WindowDurationMinutes == window.WindowDurationMinutes
-                && string.Equals(state.RecoveryWindowId, recoveryWindowId, StringComparison.Ordinal))
-            .Select(state => state.NotificationStage.ToString())
-            .Distinct(StringComparer.Ordinal)
-            .ToArray();
-        return stages.Length == 0 ? "なし" : string.Join("/", stages);
+                && HasSameIdentity(state, window))
+            .OrderByDescending(state => state.DeliveredAtUtc)
+            .FirstOrDefault();
+        return latest is null
+            ? "なし"
+            : $"{latest.NotificationType}/{latest.NotificationStage} {FormatLocalDateTime(latest.DeliveredAtUtc, "時刻不明")}";
     }
 
     /// <summary>
-    /// 現在の通知対象候補を表示用文字列へ変換します。
+    /// 指定利用枠の最後のリセット完了判定理由を整形します。
     /// </summary>
-    /// <param name="window">選択された利用枠です。</param>
-    /// <param name="selectionMode">通知対象の選択方法です。</param>
-    /// <returns>選択方法と利用枠の識別値を含む表示文字列です。</returns>
-    private static string FormatNotificationTarget(
-        RateLimitWindow? window,
-        NotificationTargetSelectionMode selectionMode)
+    /// <param name="window">表示対象の利用枠です。</param>
+    /// <param name="notificationStates">保存済み通知状態です。</param>
+    /// <returns>最後の判定理由、または「なし」です。</returns>
+    private static string FormatLastResetCompletionReason(
+        RateLimitWindow window,
+        IReadOnlyList<RateLimitNotificationState> notificationStates)
     {
-        string mode = selectionMode == NotificationTargetSelectionMode.Automatic ? "自動" : "手動";
-        if (window is null)
+        ArgumentNullException.ThrowIfNull(window);
+        ArgumentNullException.ThrowIfNull(notificationStates);
+        return notificationStates
+            .Where(state =>
+                state.NotificationType == RateLimitNotificationType.LongWindowResetCompleted
+                && state.ResetCompletionReason is not null
+                && HasSameIdentity(state, window))
+            .OrderByDescending(state => state.ConditionMetAtUtc)
+            .Select(state => state.ResetCompletionReason!.Value.ToString())
+            .FirstOrDefault() ?? "なし";
+    }
+
+    /// <summary>
+    /// 指定利用枠の永続回復連番を整形します。
+    /// </summary>
+    /// <param name="window">表示対象の利用枠です。</param>
+    /// <param name="recoveryStates">保存済み回復状態です。</param>
+    /// <returns>回復連番です。未観測の場合は0です。</returns>
+    private static string FormatRecoverySequence(
+        RateLimitWindow window,
+        IReadOnlyList<RateLimitRecoveryState> recoveryStates)
+    {
+        ArgumentNullException.ThrowIfNull(window);
+        ArgumentNullException.ThrowIfNull(recoveryStates);
+        int sequence = recoveryStates
+            .Where(state =>
+                string.Equals(state.LimitId, window.LimitId, StringComparison.Ordinal)
+                && state.Position == window.Position
+                && state.WindowDurationMinutes == window.WindowDurationMinutes)
+            .Select(state => state.RecoverySequence)
+            .FirstOrDefault();
+        return sequence.ToString(System.Globalization.CultureInfo.CurrentCulture);
+    }
+
+    /// <summary>
+    /// 観測中の全利用枠に適用される通知設定を一覧へ整形します。
+    /// </summary>
+    /// <param name="snapshot">現在観測中の全利用枠です。</param>
+    /// <param name="settings">利用枠別の上書き設定です。</param>
+    /// <returns>利用枠識別値と有効通知種類の一覧です。</returns>
+    private static string FormatNotificationSettings(UsageSnapshot snapshot, AppSettings settings)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+        ArgumentNullException.ThrowIfNull(settings);
+        if (snapshot.RateLimits.Count == 0)
         {
-            return $"{mode}：対象枠は未観測";
+            return "対象枠は未観測";
         }
 
-        return $"{mode}：LimitId={window.LimitId ?? "不明"}, Position={window.Position}, Duration={window.WindowDurationMinutes?.ToString(System.Globalization.CultureInfo.CurrentCulture) ?? "不明"}分, Classification={window.Classification}";
+        return string.Join(
+            Environment.NewLine,
+            snapshot.RateLimits.Select(window =>
+            {
+                RateLimitNotificationSetting windowSetting = RateLimitNotificationSettingsResolver.Resolve(
+                    window,
+                    settings.RateLimitNotifications);
+                return $"LimitId={window.LimitId ?? "不明"}, Position={window.Position}, Duration={window.WindowDurationMinutes?.ToString(System.Globalization.CultureInfo.CurrentCulture) ?? "不明"}分：{(windowSetting.IsAnyEnabled ? FormatEnabledNotificationTypes(windowSetting) : "通知対象外")}";
+            }));
+    }
+
+    /// <summary>
+    /// 通知状態と利用枠が同じ識別値を持つか判定します。
+    /// </summary>
+    /// <param name="state">比較する通知状態です。</param>
+    /// <param name="window">比較する利用枠です。</param>
+    /// <returns>3つの識別値が一致する場合はtrueです。</returns>
+    private static bool HasSameIdentity(RateLimitNotificationState state, RateLimitWindow window)
+    {
+        return string.Equals(state.LimitId, window.LimitId, StringComparison.Ordinal)
+            && state.Position == window.Position
+            && state.WindowDurationMinutes == window.WindowDurationMinutes;
     }
 
     /// <summary>

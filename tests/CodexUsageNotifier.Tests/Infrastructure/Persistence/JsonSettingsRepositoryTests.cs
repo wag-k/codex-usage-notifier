@@ -22,19 +22,15 @@ public sealed class JsonSettingsRepositoryTests
 
         AppSettings settings = await repository.LoadAsync(CancellationToken.None);
 
-        Assert.IsTrue(settings.ShortWindowRecoveryEnabled);
         Assert.AreEqual(99, settings.ShortWindowRecoveryThresholdPercent);
         Assert.AreEqual("codex", settings.CodexExecutablePath);
-        Assert.AreEqual(NotificationTargetSelectionMode.Automatic, settings.NotificationTarget.Mode);
-        Assert.IsTrue(settings.LongWindowPreResetNotificationEnabled);
+        Assert.AreEqual(0, settings.RateLimitNotifications.Count);
         Assert.AreEqual(50, settings.LongWindowEarlyWarningThresholdPercent);
         Assert.AreEqual(48, settings.LongWindowEarlyWarningHours);
         Assert.AreEqual(20, settings.LongWindowStandardWarningThresholdPercent);
         Assert.AreEqual(24, settings.LongWindowStandardWarningHours);
         Assert.AreEqual(10, settings.LongWindowFinalWarningThresholdPercent);
         Assert.AreEqual(6, settings.LongWindowFinalWarningHours);
-        Assert.IsTrue(settings.LongWindowResetCompletedNotificationEnabled);
-        Assert.IsFalse(settings.IncludeUnknownRateLimitsInNotifications);
         Assert.IsTrue(settings.WindowsNotificationEnabled);
         Assert.IsFalse(settings.GmailNotificationEnabled);
         Assert.AreEqual(new TimeOnly(0, 0), settings.QuietHoursStart);
@@ -65,13 +61,17 @@ public sealed class JsonSettingsRepositoryTests
             QuietHoursEnd = new TimeOnly(6, 30),
             FallbackPollingMinutes = 30,
             CodexExecutablePath = "C:\\Tools\\codex.exe",
-            NotificationTarget = new NotificationTargetSelection
-            {
-                Mode = NotificationTargetSelectionMode.Manual,
-                LimitId = "codex",
-                Position = RateLimitPosition.Primary,
-                WindowDurationMinutes = 10080,
-            },
+            RateLimitNotifications =
+            [
+                new RateLimitNotificationSetting
+                {
+                    LimitId = "codex",
+                    Position = RateLimitPosition.Primary,
+                    WindowDurationMinutes = 10080,
+                    LongWindowEarlyWarningEnabled = true,
+                    LongWindowResetCompletedEnabled = true,
+                },
+            ],
         };
 
         await repository.SaveAsync(expected, CancellationToken.None);
@@ -87,12 +87,10 @@ public sealed class JsonSettingsRepositoryTests
         Assert.AreEqual(expected.QuietHoursEnd, actual.QuietHoursEnd);
         Assert.AreEqual(expected.FallbackPollingMinutes, actual.FallbackPollingMinutes);
         Assert.AreEqual(expected.CodexExecutablePath, actual.CodexExecutablePath);
-        Assert.AreEqual(expected.NotificationTarget.Mode, actual.NotificationTarget.Mode);
-        Assert.AreEqual(expected.NotificationTarget.LimitId, actual.NotificationTarget.LimitId);
-        Assert.AreEqual(expected.NotificationTarget.Position, actual.NotificationTarget.Position);
-        Assert.AreEqual(
-            expected.NotificationTarget.WindowDurationMinutes,
-            actual.NotificationTarget.WindowDurationMinutes);
+        Assert.AreEqual(1, actual.RateLimitNotifications.Count);
+        Assert.AreEqual(expected.RateLimitNotifications[0].LimitId, actual.RateLimitNotifications[0].LimitId);
+        Assert.IsTrue(actual.RateLimitNotifications[0].LongWindowEarlyWarningEnabled);
+        Assert.IsTrue(actual.RateLimitNotifications[0].LongWindowResetCompletedEnabled);
     }
 
     /// <summary>
@@ -124,20 +122,30 @@ public sealed class JsonSettingsRepositoryTests
     }
 
     /// <summary>
-    /// 手動選択の識別値が不足している設定を拒否することを確認します。
+    /// 同じ利用枠識別値が重複する通知設定を拒否することを確認します。
     /// </summary>
     [TestMethod]
-    public async Task SaveAsync_IncompleteManualTarget_ThrowsArgumentException()
+    public async Task SaveAsync_DuplicateRateLimitSetting_ThrowsArgumentException()
     {
         using TemporaryDirectory temporaryDirectory = new();
         JsonSettingsRepository repository = CreateRepository(temporaryDirectory.Path);
         AppSettings invalid = new()
         {
-            NotificationTarget = new NotificationTargetSelection
-            {
-                Mode = NotificationTargetSelectionMode.Manual,
-                LimitId = "codex",
-            },
+            RateLimitNotifications =
+            [
+                new RateLimitNotificationSetting
+                {
+                    LimitId = "codex",
+                    Position = RateLimitPosition.Primary,
+                    WindowDurationMinutes = 300,
+                },
+                new RateLimitNotificationSetting
+                {
+                    LimitId = "codex",
+                    Position = RateLimitPosition.Primary,
+                    WindowDurationMinutes = 300,
+                },
+            ],
         };
 
         await Assert.ThrowsExceptionAsync<ArgumentException>(
@@ -160,23 +168,14 @@ public sealed class JsonSettingsRepositoryTests
         Assert.IsNotNull(fileSettings);
         Assert.AreEqual(codeSettings.SchemaVersion, fileSettings.SchemaVersion);
         Assert.AreEqual(codeSettings.CodexExecutablePath, fileSettings.CodexExecutablePath);
-        Assert.AreEqual(codeSettings.NotificationTarget.Mode, fileSettings.NotificationTarget.Mode);
-        Assert.AreEqual(codeSettings.NotificationTarget.LimitId, fileSettings.NotificationTarget.LimitId);
-        Assert.AreEqual(codeSettings.NotificationTarget.Position, fileSettings.NotificationTarget.Position);
-        Assert.AreEqual(
-            codeSettings.NotificationTarget.WindowDurationMinutes,
-            fileSettings.NotificationTarget.WindowDurationMinutes);
-        Assert.AreEqual(codeSettings.ShortWindowRecoveryEnabled, fileSettings.ShortWindowRecoveryEnabled);
+        Assert.AreEqual(codeSettings.RateLimitNotifications.Count, fileSettings.RateLimitNotifications.Count);
         Assert.AreEqual(codeSettings.ShortWindowRecoveryThresholdPercent, fileSettings.ShortWindowRecoveryThresholdPercent);
-        Assert.AreEqual(codeSettings.LongWindowPreResetNotificationEnabled, fileSettings.LongWindowPreResetNotificationEnabled);
         Assert.AreEqual(codeSettings.LongWindowEarlyWarningThresholdPercent, fileSettings.LongWindowEarlyWarningThresholdPercent);
         Assert.AreEqual(codeSettings.LongWindowEarlyWarningHours, fileSettings.LongWindowEarlyWarningHours);
         Assert.AreEqual(codeSettings.LongWindowStandardWarningThresholdPercent, fileSettings.LongWindowStandardWarningThresholdPercent);
         Assert.AreEqual(codeSettings.LongWindowStandardWarningHours, fileSettings.LongWindowStandardWarningHours);
         Assert.AreEqual(codeSettings.LongWindowFinalWarningThresholdPercent, fileSettings.LongWindowFinalWarningThresholdPercent);
         Assert.AreEqual(codeSettings.LongWindowFinalWarningHours, fileSettings.LongWindowFinalWarningHours);
-        Assert.AreEqual(codeSettings.LongWindowResetCompletedNotificationEnabled, fileSettings.LongWindowResetCompletedNotificationEnabled);
-        Assert.AreEqual(codeSettings.IncludeUnknownRateLimitsInNotifications, fileSettings.IncludeUnknownRateLimitsInNotifications);
         Assert.AreEqual(codeSettings.WindowsNotificationEnabled, fileSettings.WindowsNotificationEnabled);
         Assert.AreEqual(codeSettings.GmailNotificationEnabled, fileSettings.GmailNotificationEnabled);
         Assert.AreEqual(codeSettings.GmailRecipient, fileSettings.GmailRecipient);

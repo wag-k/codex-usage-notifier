@@ -42,6 +42,12 @@ public sealed record ApplicationState
         Array.Empty<RateLimitNotificationState>();
 
     /// <summary>
+    /// リセット時刻がない短期枠を含む利用枠別の回復状態を取得または設定します。
+    /// </summary>
+    public IReadOnlyList<RateLimitRecoveryState> RateLimitRecoveryStates { get; init; } =
+        Array.Empty<RateLimitRecoveryState>();
+
+    /// <summary>
     /// 最後に利用枠を正常取得したUTC時刻を取得または設定します。
     /// </summary>
     public DateTimeOffset? LastSuccessfulFetchAtUtc { get; init; }

@@ -59,6 +59,27 @@ public sealed record RateLimitNotificationState
     /// 通知禁止時間による保留終了UTC時刻を取得または設定します。
     /// </summary>
     public DateTimeOffset? DeferredUntilUtc { get; init; }
+
+    /// <summary>
+    /// リセット完了通知を判定した理由を取得または設定します。
+    /// </summary>
+    public RateLimitResetCompletionReason? ResetCompletionReason { get; init; }
+}
+
+/// <summary>
+/// 長期枠のリセット完了を判定した根拠を表します。
+/// </summary>
+public enum RateLimitResetCompletionReason
+{
+    /// <summary>
+    /// App Serverのリセット時刻が次の期間へ進んだことを表します。
+    /// </summary>
+    ResetTimeAdvanced,
+
+    /// <summary>
+    /// 使用率が前回値から50ポイント以上低下した推定を表します。
+    /// </summary>
+    UsageDropInference,
 }
 
 /// <summary>

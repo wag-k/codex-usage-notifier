@@ -40,40 +40,39 @@ public sealed partial class RateLimitNotificationProcessor
     }
 
     /// <summary>
-    /// 最新スナップショットを保存し、現在の通知候補を保留またはWindowsへ送信します。
+    /// 最新スナップショットを保存し、全利用枠の通知候補を保留またはWindowsへ送信します。
     /// </summary>
     /// <param name="snapshot">正常取得した最新スナップショットです。</param>
-    /// <param name="target">現在選択された通知対象です。</param>
     /// <param name="settings">通知と禁止時間の設定です。</param>
     /// <param name="cancellationToken">処理のキャンセル通知です。</param>
     /// <returns>保存済み状態と保留終了時刻です。</returns>
     public async Task<NotificationProcessingResult> ProcessAsync(
         UsageSnapshot snapshot,
-        RateLimitWindow? target,
         AppSettings settings,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
         ArgumentNullException.ThrowIfNull(settings);
         ApplicationState previousState = await stateStore.LoadAsync(cancellationToken);
-        RateLimitNotificationCandidate? candidate = RateLimitNotificationPolicy.Evaluate(
+        RateLimitNotificationEvaluation evaluation = RateLimitNotificationPolicy.Evaluate(
             snapshot,
             previousState.LastUsageSnapshot,
-            target,
             settings,
-            previousState.RateLimitNotificationStates);
+            previousState.RateLimitNotificationStates,
+            previousState.RateLimitRecoveryStates);
         ApplicationState currentState = await stateStore.UpdateAsync(
             state => state with
             {
                 LastSuccessfulFetchAtUtc = snapshot.CapturedAtUtc,
                 LastUsageSnapshot = snapshot,
+                RateLimitRecoveryStates = evaluation.RecoveryStates,
                 ConsecutiveFailures = 0,
                 FailureNotificationSent = false,
             },
             cancellationToken);
 
         if (!previousState.InitialSetupCompleted
-            || candidate is null
+            || evaluation.Candidates.Count == 0
             || !settings.WindowsNotificationEnabled)
         {
             return new NotificationProcessingResult { State = currentState };
@@ -86,17 +85,22 @@ public sealed partial class RateLimitNotificationProcessor
             settings);
         if (quietHoursEnd is not null)
         {
-            RateLimitNotificationState deferred = CreateState(
-                candidate,
-                DeliveryStatus.NotAttempted,
-                deliveredAtUtc: null,
-                deferredUntilUtc: quietHoursEnd);
-            currentState = await SaveNotificationStateAsync(deferred, cancellationToken);
-            LogNotificationDeferred(
-                logger,
-                candidate.NotificationType,
-                candidate.NotificationStage,
-                quietHoursEnd.Value);
+            foreach (RateLimitNotificationCandidate candidate in evaluation.Candidates)
+            {
+                LogResetCompletionReason(candidate);
+                RateLimitNotificationState deferred = CreateState(
+                    candidate,
+                    DeliveryStatus.NotAttempted,
+                    deliveredAtUtc: null,
+                    deferredUntilUtc: quietHoursEnd);
+                currentState = await SaveNotificationStateAsync(deferred, cancellationToken);
+                LogNotificationDeferred(
+                    logger,
+                    candidate.NotificationType,
+                    candidate.NotificationStage,
+                    quietHoursEnd.Value);
+            }
+
             return new NotificationProcessingResult
             {
                 State = currentState,
@@ -104,59 +108,62 @@ public sealed partial class RateLimitNotificationProcessor
             };
         }
 
-        RateLimitNotificationState inProgress = CreateState(
-            candidate,
-            DeliveryStatus.InProgress,
-            deliveredAtUtc: null,
-            deferredUntilUtc: null);
-        await SaveNotificationStateAsync(inProgress, cancellationToken);
-
-        WindowsNotificationMessage message = WindowsNotificationMessageFactory.Create(
-            candidate,
-            snapshot.CapturedAtUtc);
-        try
+        foreach (RateLimitNotificationCandidate candidate in evaluation.Candidates)
         {
-            await windowsNotificationSender.SendAsync(message, cancellationToken);
-            RateLimitNotificationState succeeded = inProgress with
+            LogResetCompletionReason(candidate);
+            RateLimitNotificationState inProgress = CreateState(
+                candidate,
+                DeliveryStatus.InProgress,
+                deliveredAtUtc: null,
+                deferredUntilUtc: null);
+            await SaveNotificationStateAsync(inProgress, cancellationToken);
+            WindowsNotificationMessage message = WindowsNotificationMessageFactory.Create(
+                candidate,
+                snapshot.CapturedAtUtc);
+            try
             {
-                WindowsDeliveryStatus = DeliveryStatus.Succeeded,
-                DeliveredAtUtc = timeProvider.GetUtcNow(),
-            };
-            currentState = await SaveNotificationStateAsync(succeeded, cancellationToken);
-            currentState = await stateStore.UpdateAsync(
-                state => state with
+                await windowsNotificationSender.SendAsync(message, cancellationToken);
+                RateLimitNotificationState succeeded = inProgress with
                 {
-                    LastNotifiedRecoveryWindowId = candidate.RecoveryWindowId,
-                    WindowsDeliveryResult = new DeliveryResultState
+                    WindowsDeliveryStatus = DeliveryStatus.Succeeded,
+                    DeliveredAtUtc = timeProvider.GetUtcNow(),
+                };
+                currentState = await SaveNotificationStateAsync(succeeded, cancellationToken);
+                currentState = await stateStore.UpdateAsync(
+                    state => state with
                     {
-                        Status = DeliveryStatus.Succeeded,
-                        AttemptedAtUtc = succeeded.DeliveredAtUtc,
-                        Summary = $"{candidate.NotificationType}/{candidate.NotificationStage}",
+                        LastNotifiedRecoveryWindowId = candidate.RecoveryWindowId,
+                        WindowsDeliveryResult = new DeliveryResultState
+                        {
+                            Status = DeliveryStatus.Succeeded,
+                            AttemptedAtUtc = succeeded.DeliveredAtUtc,
+                            Summary = $"{candidate.NotificationType}/{candidate.NotificationStage}",
+                        },
                     },
-                },
-                cancellationToken);
-            LogNotificationSucceeded(logger, candidate.NotificationType, candidate.NotificationStage);
-        }
-        catch (Exception exception) when (exception is not OperationCanceledException)
-        {
-            DateTimeOffset attemptedAtUtc = timeProvider.GetUtcNow();
-            RateLimitNotificationState failed = inProgress with
+                    cancellationToken);
+                LogNotificationSucceeded(logger, candidate.NotificationType, candidate.NotificationStage);
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
             {
-                WindowsDeliveryStatus = DeliveryStatus.Failed,
-            };
-            currentState = await SaveNotificationStateAsync(failed, cancellationToken);
-            currentState = await stateStore.UpdateAsync(
-                state => state with
+                DateTimeOffset attemptedAtUtc = timeProvider.GetUtcNow();
+                RateLimitNotificationState failed = inProgress with
                 {
-                    WindowsDeliveryResult = new DeliveryResultState
+                    WindowsDeliveryStatus = DeliveryStatus.Failed,
+                };
+                currentState = await SaveNotificationStateAsync(failed, cancellationToken);
+                currentState = await stateStore.UpdateAsync(
+                    state => state with
                     {
-                        Status = DeliveryStatus.Failed,
-                        AttemptedAtUtc = attemptedAtUtc,
-                        Summary = "Windows通知を表示できませんでした。",
+                        WindowsDeliveryResult = new DeliveryResultState
+                        {
+                            Status = DeliveryStatus.Failed,
+                            AttemptedAtUtc = attemptedAtUtc,
+                            Summary = "Windows通知を表示できませんでした。",
+                        },
                     },
-                },
-                cancellationToken);
-            LogNotificationFailed(logger, candidate.NotificationType, candidate.NotificationStage, exception);
+                    cancellationToken);
+                LogNotificationFailed(logger, candidate.NotificationType, candidate.NotificationStage, exception);
+            }
         }
 
         return new NotificationProcessingResult { State = currentState };
@@ -241,7 +248,26 @@ public sealed partial class RateLimitNotificationProcessor
             WindowsDeliveryStatus = windowsStatus,
             GmailDeliveryStatus = DeliveryStatus.NotAttempted,
             DeferredUntilUtc = deferredUntilUtc,
+            ResetCompletionReason = candidate.ResetCompletionReason,
         };
+    }
+
+    /// <summary>
+    /// リセット完了候補に判定理由がある場合は診断ログへ記録します。
+    /// </summary>
+    /// <param name="candidate">判定理由を確認する通知候補です。</param>
+    private void LogResetCompletionReason(RateLimitNotificationCandidate candidate)
+    {
+        ArgumentNullException.ThrowIfNull(candidate);
+        if (candidate.ResetCompletionReason is not null)
+        {
+            LogResetCompletionDetected(
+                logger,
+                candidate.Window.LimitId ?? "(null)",
+                candidate.Window.Position,
+                candidate.Window.WindowDurationMinutes,
+                candidate.ResetCompletionReason.Value);
+        }
     }
 
     /// <summary>
@@ -309,4 +335,12 @@ public sealed partial class RateLimitNotificationProcessor
 
     [LoggerMessage(2303, LogLevel.Error, "監視失敗のWindows通知を表示できませんでした。")]
     private static partial void LogMonitoringFailureNotificationFailed(ILogger logger, Exception exception);
+
+    [LoggerMessage(2304, LogLevel.Information, "長期枠のリセット完了を判定しました。LimitId={LimitId}, Position={Position}, WindowDurationMinutes={WindowDurationMinutes}, Reason={Reason}")]
+    private static partial void LogResetCompletionDetected(
+        ILogger logger,
+        string limitId,
+        RateLimitPosition position,
+        int? windowDurationMinutes,
+        RateLimitResetCompletionReason reason);
 }

@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using CodexUsageNotifier.Application.Abstractions;
 using CodexUsageNotifier.Application.Monitoring;
+using CodexUsageNotifier.Application.Notifications;
 using CodexUsageNotifier.Domain.Models;
 using Microsoft.Extensions.Logging;
 using Forms = System.Windows.Forms;
@@ -8,7 +9,7 @@ using Forms = System.Windows.Forms;
 namespace CodexUsageNotifier.Presentation.Tray;
 
 /// <summary>
-/// タスクトレイアイコンとPhase 1で利用可能なメニューを管理します。
+/// タスクトレイアイコン、監視操作、およびPhase 3.1のテスト通知メニューを管理します。
 /// </summary>
 public sealed class TrayIconService : IDisposable
 {
@@ -21,10 +22,14 @@ public sealed class TrayIconService : IDisposable
     private static readonly Action<ILogger, Exception?> LogManualRefreshFailed =
         LoggerMessage.Define(LogLevel.Error, new EventId(3002, "ManualRefreshFailed"), "手動の利用枠確認に失敗しました。");
 
+    private static readonly Action<ILogger, Exception?> LogTestNotificationRequestFailed =
+        LoggerMessage.Define(LogLevel.Error, new EventId(3003, "TestNotificationRequestFailed"), "テスト通知の要求に失敗しました。");
+
     private readonly MainWindow mainWindow;
     private readonly ApplicationLifetime applicationLifetime;
     private readonly IAppDataPaths paths;
     private readonly UsageMonitor usageMonitor;
+    private readonly TestNotificationService testNotificationService;
     private readonly TrayIconHost trayIconHost;
     private readonly ILogger<TrayIconService> logger;
     private bool disposed;
@@ -36,6 +41,7 @@ public sealed class TrayIconService : IDisposable
     /// <param name="applicationLifetime">アプリケーションの終了制御です。</param>
     /// <param name="paths">アプリケーションデータの保存先です。</param>
     /// <param name="usageMonitor">手動確認を受け付ける利用枠監視です。</param>
+    /// <param name="testNotificationService">永続状態を変更しないテスト通知処理です。</param>
     /// <param name="trayIconHost">メニューと通知で共有するタスクトレイアイコンです。</param>
     /// <param name="logger">操作結果を記録するロガーです。</param>
     public TrayIconService(
@@ -43,6 +49,7 @@ public sealed class TrayIconService : IDisposable
         ApplicationLifetime applicationLifetime,
         IAppDataPaths paths,
         UsageMonitor usageMonitor,
+        TestNotificationService testNotificationService,
         TrayIconHost trayIconHost,
         ILogger<TrayIconService> logger)
     {
@@ -50,6 +57,7 @@ public sealed class TrayIconService : IDisposable
         ArgumentNullException.ThrowIfNull(applicationLifetime);
         ArgumentNullException.ThrowIfNull(paths);
         ArgumentNullException.ThrowIfNull(usageMonitor);
+        ArgumentNullException.ThrowIfNull(testNotificationService);
         ArgumentNullException.ThrowIfNull(trayIconHost);
         ArgumentNullException.ThrowIfNull(logger);
 
@@ -57,6 +65,7 @@ public sealed class TrayIconService : IDisposable
         this.applicationLifetime = applicationLifetime;
         this.paths = paths;
         this.usageMonitor = usageMonitor;
+        this.testNotificationService = testNotificationService;
         this.trayIconHost = trayIconHost;
         this.logger = logger;
     }
@@ -70,6 +79,7 @@ public sealed class TrayIconService : IDisposable
         Forms.ContextMenuStrip menu = new();
         menu.Items.Add("状態を開く", image: null, OnOpenStatus);
         menu.Items.Add("今すぐ確認", image: null, OnRefreshNow);
+        menu.Items.Add(CreateTestNotificationMenu());
         menu.Items.Add("ログフォルダーを開く", image: null, OnOpenLogDirectory);
         menu.Items.Add(new Forms.ToolStripSeparator());
         menu.Items.Add("終了", image: null, OnExit);
@@ -77,6 +87,62 @@ public sealed class TrayIconService : IDisposable
         trayIconHost.Initialize(menu, OnOpenStatus);
         trayIconHost.NotificationClicked += OnOpenStatus;
         LogTrayStarted(logger, null);
+    }
+
+    /// <summary>
+    /// 通知種類を個別に選べるテスト通知サブメニューを生成します。
+    /// </summary>
+    /// <returns>6種類のテスト通知項目を持つメニューです。</returns>
+    private Forms.ToolStripMenuItem CreateTestNotificationMenu()
+    {
+        Forms.ToolStripMenuItem menu = new("テスト通知");
+        AddTestNotificationItem(menu, "短期枠回復通知", RateLimitNotificationType.ShortWindowRecovered);
+        AddTestNotificationItem(menu, "Early通知", RateLimitNotificationType.LongWindowEarlyWarning);
+        AddTestNotificationItem(menu, "Standard通知", RateLimitNotificationType.LongWindowStandardWarning);
+        AddTestNotificationItem(menu, "Final通知", RateLimitNotificationType.LongWindowFinalWarning);
+        AddTestNotificationItem(menu, "リセット完了通知", RateLimitNotificationType.LongWindowResetCompleted);
+        AddTestNotificationItem(menu, "監視障害通知", RateLimitNotificationType.MonitoringFailure);
+        return menu;
+    }
+
+    /// <summary>
+    /// 指定種類をTagへ保持するテスト通知項目を追加します。
+    /// </summary>
+    /// <param name="parent">項目を追加する親メニューです。</param>
+    /// <param name="text">表示する項目名です。</param>
+    /// <param name="notificationType">送信する通知種類です。</param>
+    private void AddTestNotificationItem(
+        Forms.ToolStripMenuItem parent,
+        string text,
+        RateLimitNotificationType notificationType)
+    {
+        ArgumentNullException.ThrowIfNull(parent);
+        ArgumentException.ThrowIfNullOrWhiteSpace(text);
+        Forms.ToolStripMenuItem item = new(text) { Tag = notificationType };
+        item.Click += OnTestNotification;
+        parent.DropDownItems.Add(item);
+    }
+
+    /// <summary>
+    /// 選択された通知種類のテスト通知を送信します。
+    /// </summary>
+    /// <param name="sender">通知種類をTagへ保持するメニュー項目です。</param>
+    /// <param name="e">イベント引数です。</param>
+    private async void OnTestNotification(object? sender, EventArgs e)
+    {
+        if (sender is not Forms.ToolStripMenuItem { Tag: RateLimitNotificationType notificationType })
+        {
+            return;
+        }
+
+        try
+        {
+            await testNotificationService.SendAsync(notificationType, CancellationToken.None);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            LogTestNotificationRequestFailed(logger, exception);
+        }
     }
 
     /// <summary>

@@ -31,6 +31,11 @@ public static class WindowsNotificationMessageFactory
 
         return candidate.NotificationType switch
         {
+            RateLimitNotificationType.MonitoringFailure => new WindowsNotificationMessage
+            {
+                Title = "Codex利用枠の監視に失敗しています",
+                Body = "これは監視障害通知のテストです。状態画面とログを確認してください。",
+            },
             RateLimitNotificationType.ShortWindowRecovered => new WindowsNotificationMessage
             {
                 Title = "Codexの短期利用枠が回復しました",
@@ -39,7 +44,7 @@ public static class WindowsNotificationMessageFactory
             RateLimitNotificationType.LongWindowResetCompleted => new WindowsNotificationMessage
             {
                 Title = "Codex長期枠の新しい利用期間が始まりました",
-                Body = $"対象：{targetName}{Environment.NewLine}残り使用量：{candidate.Window.RemainingPercent:0.#}%{Environment.NewLine}次回リセット：{resetAt}{Environment.NewLine}{identity}",
+                Body = $"対象：{targetName}{Environment.NewLine}残り使用量：{candidate.Window.RemainingPercent:0.#}%{Environment.NewLine}次回リセット：{resetAt}{Environment.NewLine}判定理由：{candidate.ResetCompletionReason?.ToString() ?? "不明"}{Environment.NewLine}{identity}",
             },
             _ => CreateLongWindowWarning(candidate, capturedAtUtc, resetAt, identity),
         };

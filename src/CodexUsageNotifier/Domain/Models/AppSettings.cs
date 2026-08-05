@@ -32,24 +32,15 @@ public sealed class AppSettings
     public string CodexExecutablePath { get; init; } = "codex";
 
     /// <summary>
-    /// 通知判定で監視対象にする利用枠の選択設定を取得または設定します。
+    /// 利用枠ごとに上書きする通知設定を取得または設定します。
     /// </summary>
-    public NotificationTargetSelection NotificationTarget { get; init; } = new();
-
-    /// <summary>
-    /// 短期枠の回復通知が有効かどうかを取得または設定します。
-    /// </summary>
-    public bool ShortWindowRecoveryEnabled { get; init; } = true;
+    public IReadOnlyList<RateLimitNotificationSetting> RateLimitNotifications { get; init; } =
+        Array.Empty<RateLimitNotificationSetting>();
 
     /// <summary>
     /// 短期枠の回復通知に使用する残量閾値を取得または設定します。
     /// </summary>
     public int ShortWindowRecoveryThresholdPercent { get; init; } = 99;
-
-    /// <summary>
-    /// 長期枠のリセット前通知が有効かどうかを取得または設定します。
-    /// </summary>
-    public bool LongWindowPreResetNotificationEnabled { get; init; } = true;
 
     /// <summary>
     /// 長期枠の早期通知に使用する残量閾値を取得または設定します。
@@ -80,16 +71,6 @@ public sealed class AppSettings
     /// 長期枠の最終通知を開始する残り時間を時間単位で取得または設定します。
     /// </summary>
     public int LongWindowFinalWarningHours { get; init; } = 6;
-
-    /// <summary>
-    /// 長期枠のリセット完了通知が有効かどうかを取得または設定します。
-    /// </summary>
-    public bool LongWindowResetCompletedNotificationEnabled { get; init; } = true;
-
-    /// <summary>
-    /// Unknown枠を通知対象に含めるかどうかを取得または設定します。
-    /// </summary>
-    public bool IncludeUnknownRateLimitsInNotifications { get; init; }
 
     /// <summary>
     /// Windows通知が有効かどうかを取得または設定します。
@@ -165,8 +146,11 @@ public sealed class AppSettings
     {
         return SchemaVersion == CurrentSchemaVersion
             && !string.IsNullOrWhiteSpace(CodexExecutablePath)
-            && NotificationTarget is not null
-            && NotificationTarget.IsValid()
+            && RateLimitNotifications is not null
+            && RateLimitNotifications.All(setting => setting is not null && setting.IsValid())
+            && RateLimitNotifications
+                .GroupBy(setting => new { setting.LimitId, setting.Position, setting.WindowDurationMinutes })
+                .All(group => group.Count() == 1)
             && ShortWindowRecoveryThresholdPercent is >= 1 and <= 100
             && LongWindowEarlyWarningThresholdPercent is >= 0 and <= 100
             && LongWindowStandardWarningThresholdPercent is >= 0 and <= 100

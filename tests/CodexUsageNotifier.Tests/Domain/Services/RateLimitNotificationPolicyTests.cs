@@ -4,7 +4,7 @@ using CodexUsageNotifier.Domain.Services;
 namespace CodexUsageNotifier.Tests.Domain.Services;
 
 /// <summary>
-/// 短期枠回復、長期枠の段階通知、リセット完了、および重複防止を検証します。
+/// 複数利用枠、回復遷移、長期通知段階、リセット完了、および重複防止を検証します。
 /// </summary>
 [TestClass]
 public sealed class RateLimitNotificationPolicyTests
@@ -12,234 +12,355 @@ public sealed class RateLimitNotificationPolicyTests
     private static readonly DateTimeOffset NowUtc = new(2026, 8, 5, 0, 0, 0, TimeSpan.Zero);
 
     /// <summary>
-    /// FiveHourの残量が99%以上なら短期枠回復通知候補になることを検証します。
+    /// FiveHour回復通知とWeekly早期通知を同じ取得から同時に候補化できることを検証します。
     /// </summary>
     [TestMethod]
-    public void Evaluate_FiveHourAtThreshold_ReturnsRecoveredCandidate()
+    public void Evaluate_FiveHourAndWeekly_ReturnsBothCandidates()
     {
-        RateLimitWindow window = CreateWindow(RateLimitClassification.FiveHour, 300, 99, NowUtc.AddHours(5));
-        UsageSnapshot snapshot = CreateSnapshot(window, NowUtc);
+        RateLimitWindow shortWindow = CreateWindow(
+            "codex",
+            RateLimitPosition.Primary,
+            RateLimitClassification.FiveHour,
+            300,
+            99,
+            NowUtc.AddHours(5));
+        RateLimitWindow weeklyWindow = CreateWindow(
+            "codex",
+            RateLimitPosition.Secondary,
+            RateLimitClassification.Weekly,
+            10080,
+            50,
+            NowUtc.AddHours(47));
 
-        RateLimitNotificationCandidate? result = RateLimitNotificationPolicy.Evaluate(
-            snapshot,
-            previousSnapshot: null,
-            window,
-            AppSettings.CreateDefault(),
-            Array.Empty<RateLimitNotificationState>());
+        RateLimitNotificationEvaluation result = Evaluate([shortWindow, weeklyWindow]);
 
-        Assert.AreEqual(RateLimitNotificationType.ShortWindowRecovered, result?.NotificationType);
-        Assert.AreEqual(RateLimitNotificationStage.Recovered, result?.NotificationStage);
+        Assert.AreEqual(2, result.Candidates.Count);
+        CollectionAssert.AreEquivalent(
+            new[]
+            {
+                RateLimitNotificationType.ShortWindowRecovered,
+                RateLimitNotificationType.LongWindowEarlyWarning,
+            },
+            result.Candidates.Select(candidate => candidate.NotificationType).ToArray());
     }
 
     /// <summary>
-    /// Weeklyが48時間以内かつ残量50%以上なら早期通知候補になることを検証します。
+    /// Unknown枠は上書き設定がない初期状態では通知候補にならないことを検証します。
     /// </summary>
     [TestMethod]
-    public void Evaluate_WeeklyWithinFortyEightHours_ReturnsEarlyCandidate()
+    public void Evaluate_UnknownWithDefaultSettings_ReturnsNoCandidate()
     {
-        RateLimitWindow window = CreateWindow(RateLimitClassification.Weekly, 10080, 50, NowUtc.AddHours(47));
+        RateLimitWindow window = CreateWindow(
+            "future",
+            RateLimitPosition.Primary,
+            RateLimitClassification.Unknown,
+            1440,
+            100,
+            NowUtc.AddDays(1));
 
-        RateLimitNotificationCandidate? result = Evaluate(window);
+        RateLimitNotificationEvaluation result = Evaluate([window]);
 
-        Assert.AreEqual(RateLimitNotificationType.LongWindowEarlyWarning, result?.NotificationType);
-        Assert.AreEqual(RateLimitNotificationStage.Early, result?.NotificationStage);
+        Assert.AreEqual(0, result.Candidates.Count);
     }
 
     /// <summary>
-    /// Weeklyが24時間以内かつ残量20%以上なら通常通知候補になることを検証します。
+    /// リセット時刻のない短期枠が閾値未満から以上へ遷移すると回復連番1の候補になることを検証します。
     /// </summary>
     [TestMethod]
-    public void Evaluate_WeeklyWithinTwentyFourHours_ReturnsStandardCandidate()
+    public void Evaluate_NoResetShortWindow_CrossingThresholdCreatesRecovery()
     {
-        RateLimitWindow window = CreateWindow(RateLimitClassification.Weekly, 10080, 20, NowUtc.AddHours(23));
+        RateLimitWindow below = CreateWindow(
+            "codex",
+            RateLimitPosition.Primary,
+            RateLimitClassification.FiveHour,
+            300,
+            98,
+            resetsAtUtc: null);
+        RateLimitNotificationEvaluation first = Evaluate([below]);
+        RateLimitWindow recovered = WithRemaining(below, 99);
 
-        RateLimitNotificationCandidate? result = Evaluate(window);
+        RateLimitNotificationEvaluation second = Evaluate(
+            [recovered],
+            CreateSnapshot([below], NowUtc),
+            recoveryStates: first.RecoveryStates,
+            capturedAtUtc: NowUtc.AddMinutes(1));
 
-        Assert.AreEqual(RateLimitNotificationType.LongWindowStandardWarning, result?.NotificationType);
-        Assert.AreEqual(RateLimitNotificationStage.Standard, result?.NotificationStage);
+        RateLimitNotificationCandidate candidate = second.Candidates.Single();
+        Assert.AreEqual(RateLimitNotificationType.ShortWindowRecovered, candidate.NotificationType);
+        StringAssert.EndsWith(candidate.RecoveryWindowId, "recovery-sequence-1");
+        Assert.AreEqual(1, second.RecoveryStates.Single().RecoverySequence);
     }
 
     /// <summary>
-    /// Weeklyが6時間以内かつ残量10%以上なら最終通知候補になることを検証します。
+    /// リセット時刻のない短期枠が閾値以上のままなら回復通知を重複候補化しないことを検証します。
     /// </summary>
     [TestMethod]
-    public void Evaluate_WeeklyWithinSixHours_ReturnsFinalCandidate()
+    public void Evaluate_NoResetShortWindow_RemainingAboveDoesNotDuplicate()
     {
-        RateLimitWindow window = CreateWindow(RateLimitClassification.Weekly, 10080, 10, NowUtc.AddHours(5));
+        RateLimitWindow window = CreateWindow(
+            "codex",
+            RateLimitPosition.Primary,
+            RateLimitClassification.FiveHour,
+            300,
+            99,
+            resetsAtUtc: null);
+        RateLimitNotificationEvaluation first = Evaluate([window]);
 
-        RateLimitNotificationCandidate? result = Evaluate(window);
+        RateLimitNotificationEvaluation second = Evaluate(
+            [window],
+            CreateSnapshot([window], NowUtc),
+            recoveryStates: first.RecoveryStates,
+            capturedAtUtc: NowUtc.AddMinutes(1));
 
-        Assert.AreEqual(RateLimitNotificationType.LongWindowFinalWarning, result?.NotificationType);
-        Assert.AreEqual(RateLimitNotificationStage.Final, result?.NotificationStage);
+        Assert.AreEqual(1, first.Candidates.Count);
+        Assert.AreEqual(0, second.Candidates.Count);
+        Assert.AreEqual(1, second.RecoveryStates.Single().RecoverySequence);
     }
 
     /// <summary>
-    /// 同じ複合キーで送信済みの通知は再び候補にならないことを検証します。
+    /// 回復後に一度閾値未満へ下がり再び閾値以上になると回復連番が増えることを検証します。
     /// </summary>
     [TestMethod]
-    public void Evaluate_AlreadyDelivered_ReturnsNull()
+    public void Evaluate_NoResetShortWindow_SecondCrossingIncrementsSequence()
     {
-        RateLimitWindow window = CreateWindow(RateLimitClassification.Weekly, 10080, 65, NowUtc.AddHours(23));
-        UsageSnapshot snapshot = CreateSnapshot(window, NowUtc);
-        string recoveryWindowId = RateLimitNotificationPolicy.CreateRecoveryWindowId(window, NowUtc);
-        RateLimitNotificationState delivered = CreateNotificationState(
-            window,
-            recoveryWindowId,
-            RateLimitNotificationType.LongWindowStandardWarning,
-            RateLimitNotificationStage.Standard,
-            DeliveryStatus.Succeeded);
+        RateLimitWindow above = CreateWindow(
+            "codex",
+            RateLimitPosition.Primary,
+            RateLimitClassification.FiveHour,
+            300,
+            99,
+            resetsAtUtc: null);
+        RateLimitNotificationEvaluation first = Evaluate([above]);
+        RateLimitWindow below = WithRemaining(above, 98);
+        RateLimitNotificationEvaluation second = Evaluate(
+            [below],
+            CreateSnapshot([above], NowUtc),
+            recoveryStates: first.RecoveryStates,
+            capturedAtUtc: NowUtc.AddMinutes(1));
+        RateLimitNotificationEvaluation third = Evaluate(
+            [above],
+            CreateSnapshot([below], NowUtc.AddMinutes(1)),
+            recoveryStates: second.RecoveryStates,
+            capturedAtUtc: NowUtc.AddMinutes(2));
 
-        RateLimitNotificationCandidate? result = RateLimitNotificationPolicy.Evaluate(
-            snapshot,
-            previousSnapshot: null,
-            window,
-            AppSettings.CreateDefault(),
-            [delivered]);
+        Assert.AreEqual(2, third.RecoveryStates.Single().RecoverySequence);
+        StringAssert.EndsWith(third.Candidates.Single().RecoveryWindowId, "recovery-sequence-2");
+    }
 
-        Assert.IsNull(result);
+    /// <summary>
+    /// リセット時刻のない長期枠ではEarly、Standard、Finalを候補にしないことを検証します。
+    /// </summary>
+    [TestMethod]
+    public void Evaluate_NoResetLongWindow_ReturnsNoPreResetWarning()
+    {
+        RateLimitWindow weekly = CreateWindow(
+            "codex",
+            RateLimitPosition.Primary,
+            RateLimitClassification.Weekly,
+            10080,
+            100,
+            resetsAtUtc: null);
+
+        RateLimitNotificationEvaluation result = Evaluate([weekly]);
+
+        Assert.AreEqual(0, result.Candidates.Count);
+    }
+
+    /// <summary>
+    /// リセット時刻のない長期枠で使用率が50ポイント低下すると推定完了候補になることを検証します。
+    /// </summary>
+    [TestMethod]
+    public void Evaluate_NoResetLongWindow_FiftyPointDropInfersReset()
+    {
+        RateLimitWindow previous = CreateWindow(
+            "codex",
+            RateLimitPosition.Primary,
+            RateLimitClassification.Weekly,
+            10080,
+            20,
+            resetsAtUtc: null);
+        RateLimitWindow current = WithRemaining(previous, 70);
+
+        RateLimitNotificationEvaluation result = Evaluate(
+            [current],
+            CreateSnapshot([previous], NowUtc),
+            capturedAtUtc: NowUtc.AddMinutes(1));
+
+        RateLimitNotificationCandidate candidate = result.Candidates.Single();
+        Assert.AreEqual(RateLimitNotificationType.LongWindowResetCompleted, candidate.NotificationType);
+        Assert.AreEqual(RateLimitResetCompletionReason.UsageDropInference, candidate.ResetCompletionReason);
+    }
+
+    /// <summary>
+    /// リセット時刻のない長期枠で使用率低下が49ポイント以下なら完了候補にならないことを検証します。
+    /// </summary>
+    [TestMethod]
+    public void Evaluate_NoResetLongWindow_FortyNinePointDropDoesNotInferReset()
+    {
+        RateLimitWindow previous = CreateWindow(
+            "codex",
+            RateLimitPosition.Primary,
+            RateLimitClassification.Weekly,
+            10080,
+            20,
+            resetsAtUtc: null);
+        RateLimitWindow current = WithRemaining(previous, 69);
+
+        RateLimitNotificationEvaluation result = Evaluate(
+            [current],
+            CreateSnapshot([previous], NowUtc),
+            capturedAtUtc: NowUtc.AddMinutes(1));
+
+        Assert.AreEqual(0, result.Candidates.Count);
+    }
+
+    /// <summary>
+    /// リセット時刻が進んだ場合はResetTimeAdvanced理由の完了候補になることを検証します。
+    /// </summary>
+    [TestMethod]
+    public void Evaluate_ResetTimeAdvanced_RecordsReason()
+    {
+        RateLimitWindow previous = CreateWindow(
+            "codex",
+            RateLimitPosition.Primary,
+            RateLimitClassification.Weekly,
+            10080,
+            60,
+            NowUtc);
+        RateLimitWindow current = CreateWindow(
+            "codex",
+            RateLimitPosition.Primary,
+            RateLimitClassification.Weekly,
+            10080,
+            99,
+            NowUtc.AddDays(7));
+
+        RateLimitNotificationEvaluation result = Evaluate(
+            [current],
+            CreateSnapshot([previous], NowUtc.AddMinutes(-1)),
+            capturedAtUtc: NowUtc.AddMinutes(1));
+
+        Assert.AreEqual(
+            RateLimitResetCompletionReason.ResetTimeAdvanced,
+            result.Candidates.Single().ResetCompletionReason);
     }
 
     /// <summary>
     /// リセット予定時刻へ到達しただけではリセット完了候補にならないことを検証します。
     /// </summary>
     [TestMethod]
-    public void Evaluate_ResetTimeReachedWithoutChangedResponse_ReturnsNull()
+    public void Evaluate_ResetTimeReachedWithoutChangedResponse_ReturnsNoCandidate()
     {
-        DateTimeOffset resetAtUtc = NowUtc;
-        RateLimitWindow previousWindow = CreateWindow(RateLimitClassification.Weekly, 10080, 40, resetAtUtc);
-        RateLimitWindow currentWindow = CreateWindow(RateLimitClassification.Weekly, 10080, 40, resetAtUtc);
-        UsageSnapshot previous = CreateSnapshot(previousWindow, NowUtc.AddMinutes(-1));
-        UsageSnapshot current = CreateSnapshot(currentWindow, NowUtc.AddMinutes(1));
+        RateLimitWindow previous = CreateWindow(
+            "codex",
+            RateLimitPosition.Primary,
+            RateLimitClassification.Weekly,
+            10080,
+            60,
+            NowUtc);
 
-        RateLimitNotificationCandidate? result = RateLimitNotificationPolicy.Evaluate(
-            current,
-            previous,
-            currentWindow,
-            AppSettings.CreateDefault(),
-            Array.Empty<RateLimitNotificationState>());
+        RateLimitNotificationEvaluation result = Evaluate(
+            [previous],
+            CreateSnapshot([previous], NowUtc.AddMinutes(-1)),
+            capturedAtUtc: NowUtc.AddMinutes(1));
 
-        Assert.IsNull(result);
+        Assert.AreEqual(0, result.Candidates.Count);
     }
 
     /// <summary>
-    /// リセット予定後の再取得でresetsAtが進んだ場合に完了候補になることを検証します。
+    /// Weeklyの48時間、24時間、6時間の各段階を設定どおり判定できることを検証します。
     /// </summary>
     [TestMethod]
-    public void Evaluate_ResetTimeAdvanced_ReturnsResetCompletedCandidate()
+    public void Evaluate_WeeklyWarningBands_ReturnExpectedStages()
     {
-        RateLimitWindow previousWindow = CreateWindow(RateLimitClassification.Weekly, 10080, 40, NowUtc);
-        RateLimitWindow currentWindow = CreateWindow(RateLimitClassification.Weekly, 10080, 1, NowUtc.AddDays(7));
-        UsageSnapshot previous = CreateSnapshot(previousWindow, NowUtc.AddMinutes(-1));
-        UsageSnapshot current = CreateSnapshot(currentWindow, NowUtc.AddMinutes(1));
+        RateLimitNotificationCandidate early = Evaluate([
+            CreateWindow("early", RateLimitPosition.Primary, RateLimitClassification.Weekly, 10080, 50, NowUtc.AddHours(47))
+        ]).Candidates.Single();
+        RateLimitNotificationCandidate standard = Evaluate([
+            CreateWindow("standard", RateLimitPosition.Primary, RateLimitClassification.Weekly, 10080, 20, NowUtc.AddHours(23))
+        ]).Candidates.Single();
+        RateLimitNotificationCandidate final = Evaluate([
+            CreateWindow("final", RateLimitPosition.Primary, RateLimitClassification.Weekly, 10080, 10, NowUtc.AddHours(5))
+        ]).Candidates.Single();
 
-        RateLimitNotificationCandidate? result = RateLimitNotificationPolicy.Evaluate(
-            current,
-            previous,
-            currentWindow,
-            AppSettings.CreateDefault(),
-            Array.Empty<RateLimitNotificationState>());
-
-        Assert.AreEqual(RateLimitNotificationType.LongWindowResetCompleted, result?.NotificationType);
-        Assert.AreEqual(RateLimitNotificationStage.Completed, result?.NotificationStage);
+        Assert.AreEqual(RateLimitNotificationStage.Early, early.NotificationStage);
+        Assert.AreEqual(RateLimitNotificationStage.Standard, standard.NotificationStage);
+        Assert.AreEqual(RateLimitNotificationStage.Final, final.NotificationStage);
     }
 
     /// <summary>
-    /// リセット予定後に使用率が50ポイント以上低下した場合に完了候補になることを検証します。
+    /// 1つの利用枠で送信済み状態があっても別利用枠の通知候補を妨げないことを検証します。
     /// </summary>
     [TestMethod]
-    public void Evaluate_UsedPercentDroppedSignificantly_ReturnsResetCompletedCandidate()
+    public void Evaluate_DeliveredStateForOneWindow_DoesNotAffectOtherWindow()
     {
-        RateLimitWindow previousWindow = CreateWindow(RateLimitClassification.Weekly, 10080, 20, NowUtc);
-        previousWindow = WithPercent(previousWindow, usedPercent: 80, remainingPercent: 20);
-        RateLimitWindow currentWindow = CreateWindow(RateLimitClassification.Weekly, 10080, 70, NowUtc);
-        currentWindow = WithPercent(currentWindow, usedPercent: 30, remainingPercent: 70);
-        UsageSnapshot previous = CreateSnapshot(previousWindow, NowUtc.AddMinutes(-1));
-        UsageSnapshot current = CreateSnapshot(currentWindow, NowUtc.AddMinutes(1));
+        RateLimitWindow shortWindow = CreateWindow(
+            "codex",
+            RateLimitPosition.Primary,
+            RateLimitClassification.FiveHour,
+            300,
+            99,
+            NowUtc.AddHours(5));
+        RateLimitWindow weeklyWindow = CreateWindow(
+            "codex",
+            RateLimitPosition.Secondary,
+            RateLimitClassification.Weekly,
+            10080,
+            50,
+            NowUtc.AddHours(47));
+        RateLimitNotificationState delivered = new()
+        {
+            LimitId = "codex",
+            Position = RateLimitPosition.Primary,
+            WindowDurationMinutes = 300,
+            RecoveryWindowId = RateLimitNotificationPolicy.CreateRecoveryWindowId(shortWindow, NowUtc),
+            NotificationType = RateLimitNotificationType.ShortWindowRecovered,
+            NotificationStage = RateLimitNotificationStage.Recovered,
+            WindowsDeliveryStatus = DeliveryStatus.Succeeded,
+        };
 
-        RateLimitNotificationCandidate? result = RateLimitNotificationPolicy.Evaluate(
-            current,
-            previous,
-            currentWindow,
-            AppSettings.CreateDefault(),
-            Array.Empty<RateLimitNotificationState>());
+        RateLimitNotificationEvaluation result = Evaluate(
+            [shortWindow, weeklyWindow],
+            notificationStates: [delivered]);
 
-        Assert.AreEqual(RateLimitNotificationType.LongWindowResetCompleted, result?.NotificationType);
+        Assert.AreEqual(1, result.Candidates.Count);
+        Assert.AreEqual(RateLimitNotificationType.LongWindowEarlyWarning, result.Candidates.Single().NotificationType);
+        Assert.AreEqual(RateLimitPosition.Secondary, result.Candidates.Single().Window.Position);
     }
 
     /// <summary>
-    /// Unknown枠は既定設定では通知候補にならないことを検証します。
+    /// 指定した現在値と保存状態を通知ポリシーで評価します。
     /// </summary>
-    [TestMethod]
-    public void Evaluate_UnknownWithDefaultSettings_ReturnsNull()
+    private static RateLimitNotificationEvaluation Evaluate(
+        IReadOnlyList<RateLimitWindow> windows,
+        UsageSnapshot? previousSnapshot = null,
+        IReadOnlyList<RateLimitNotificationState>? notificationStates = null,
+        IReadOnlyList<RateLimitRecoveryState>? recoveryStates = null,
+        DateTimeOffset? capturedAtUtc = null)
     {
-        RateLimitWindow window = CreateWindow(RateLimitClassification.Unknown, 1440, 100, NowUtc.AddDays(1));
-
-        RateLimitNotificationCandidate? result = Evaluate(window);
-
-        Assert.IsNull(result);
-    }
-
-    /// <summary>
-    /// 禁止時間中に保留したリセット完了通知を次の取得でも復元できることを検証します。
-    /// </summary>
-    [TestMethod]
-    public void Evaluate_DeferredResetCompleted_ReturnsPendingCandidate()
-    {
-        RateLimitWindow window = CreateWindow(RateLimitClassification.Weekly, 10080, 99, NowUtc.AddDays(7));
-        UsageSnapshot current = CreateSnapshot(window, NowUtc.AddHours(1));
-        string recoveryWindowId = RateLimitNotificationPolicy.CreateRecoveryWindowId(window, current.CapturedAtUtc);
-        RateLimitNotificationState pending = CreateNotificationState(
-            window,
-            recoveryWindowId,
-            RateLimitNotificationType.LongWindowResetCompleted,
-            RateLimitNotificationStage.Completed,
-            DeliveryStatus.NotAttempted);
-
-        RateLimitNotificationCandidate? result = RateLimitNotificationPolicy.Evaluate(
-            current,
-            previousSnapshot: current,
-            window,
-            AppSettings.CreateDefault(),
-            [pending]);
-
-        Assert.AreEqual(RateLimitNotificationType.LongWindowResetCompleted, result?.NotificationType);
-        Assert.AreEqual(recoveryWindowId, result?.RecoveryWindowId);
-    }
-
-    /// <summary>
-    /// 1つの利用枠を既定設定で判定します。
-    /// </summary>
-    /// <param name="window">判定対象の利用枠です。</param>
-    /// <returns>通知候補、またはnullです。</returns>
-    private static RateLimitNotificationCandidate? Evaluate(RateLimitWindow window)
-    {
-        UsageSnapshot snapshot = CreateSnapshot(window, NowUtc);
         return RateLimitNotificationPolicy.Evaluate(
-            snapshot,
-            previousSnapshot: null,
-            window,
+            CreateSnapshot(windows, capturedAtUtc ?? NowUtc),
+            previousSnapshot,
             AppSettings.CreateDefault(),
-            Array.Empty<RateLimitNotificationState>());
+            notificationStates ?? Array.Empty<RateLimitNotificationState>(),
+            recoveryStates ?? Array.Empty<RateLimitRecoveryState>());
     }
 
     /// <summary>
     /// 指定条件のテスト用利用枠を生成します。
     /// </summary>
-    /// <param name="classification">利用枠分類です。</param>
-    /// <param name="durationMinutes">利用枠期間です。</param>
-    /// <param name="remainingPercent">残量です。</param>
-    /// <param name="resetsAtUtc">リセットUTC時刻です。</param>
-    /// <returns>テスト用利用枠です。</returns>
     private static RateLimitWindow CreateWindow(
+        string limitId,
+        RateLimitPosition position,
         RateLimitClassification classification,
         int durationMinutes,
         double remainingPercent,
-        DateTimeOffset resetsAtUtc)
+        DateTimeOffset? resetsAtUtc)
     {
         return new RateLimitWindow
         {
-            LimitId = "codex",
-            Position = RateLimitPosition.Primary,
+            LimitId = limitId,
+            Position = position,
             Classification = classification,
             WindowDurationMinutes = durationMinutes,
             UsedPercent = 100D - remainingPercent,
@@ -249,71 +370,36 @@ public sealed class RateLimitNotificationPolicyTests
     }
 
     /// <summary>
-    /// 使用率と残量だけを変更した利用枠を生成します。
+    /// 利用枠の残量と使用率だけを変更したコピーを生成します。
     /// </summary>
-    /// <param name="window">変更元の利用枠です。</param>
-    /// <param name="usedPercent">使用率です。</param>
-    /// <param name="remainingPercent">残量です。</param>
-    /// <returns>変更後の利用枠です。</returns>
-    private static RateLimitWindow WithPercent(
-        RateLimitWindow window,
-        double usedPercent,
-        double remainingPercent)
+    private static RateLimitWindow WithRemaining(RateLimitWindow window, double remainingPercent)
     {
-        ArgumentNullException.ThrowIfNull(window);
         return new RateLimitWindow
         {
             LimitId = window.LimitId,
+            LimitName = window.LimitName,
             Position = window.Position,
             Classification = window.Classification,
             WindowDurationMinutes = window.WindowDurationMinutes,
-            UsedPercent = usedPercent,
+            UsedPercent = 100D - remainingPercent,
             RemainingPercent = remainingPercent,
             ResetsAtUtc = window.ResetsAtUtc,
+            PlanType = window.PlanType,
+            RateLimitReachedType = window.RateLimitReachedType,
         };
     }
 
     /// <summary>
-    /// 1つの利用枠を含むテスト用スナップショットを生成します。
+    /// 指定利用枠を含むテスト用スナップショットを生成します。
     /// </summary>
-    /// <param name="window">含める利用枠です。</param>
-    /// <param name="capturedAtUtc">取得UTC時刻です。</param>
-    /// <returns>テスト用スナップショットです。</returns>
-    private static UsageSnapshot CreateSnapshot(RateLimitWindow window, DateTimeOffset capturedAtUtc)
+    private static UsageSnapshot CreateSnapshot(
+        IReadOnlyList<RateLimitWindow> windows,
+        DateTimeOffset capturedAtUtc)
     {
         return new UsageSnapshot
         {
             CapturedAtUtc = capturedAtUtc,
-            RateLimits = [window],
-        };
-    }
-
-    /// <summary>
-    /// 指定複合キーを持つテスト用通知状態を生成します。
-    /// </summary>
-    /// <param name="window">通知対象です。</param>
-    /// <param name="recoveryWindowId">リセット期間IDです。</param>
-    /// <param name="notificationType">通知種別です。</param>
-    /// <param name="notificationStage">通知段階です。</param>
-    /// <param name="status">Windows送信状態です。</param>
-    /// <returns>テスト用通知状態です。</returns>
-    private static RateLimitNotificationState CreateNotificationState(
-        RateLimitWindow window,
-        string recoveryWindowId,
-        RateLimitNotificationType notificationType,
-        RateLimitNotificationStage notificationStage,
-        DeliveryStatus status)
-    {
-        return new RateLimitNotificationState
-        {
-            LimitId = window.LimitId!,
-            Position = window.Position,
-            WindowDurationMinutes = window.WindowDurationMinutes!.Value,
-            RecoveryWindowId = recoveryWindowId,
-            NotificationType = notificationType,
-            NotificationStage = notificationStage,
-            ConditionMetAtUtc = NowUtc,
-            WindowsDeliveryStatus = status,
+            RateLimits = windows,
         };
     }
 }

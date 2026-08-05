@@ -29,4 +29,9 @@ public sealed class RateLimitNotificationCandidate
     /// 条件が成立したUTC時刻を取得または設定します。
     /// </summary>
     public DateTimeOffset ConditionMetAtUtc { get; init; }
+
+    /// <summary>
+    /// リセット完了通知を判定した理由を取得または設定します。
+    /// </summary>
+    public RateLimitResetCompletionReason? ResetCompletionReason { get; init; }
 }
