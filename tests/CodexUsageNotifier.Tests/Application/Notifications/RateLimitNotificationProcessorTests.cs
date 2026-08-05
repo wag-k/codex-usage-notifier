@@ -74,6 +74,51 @@ public sealed class RateLimitNotificationProcessorTests
     }
 
     /// <summary>
+    /// 同一取得で複数候補が成立してもWindows通知を1件だけ送り、各候補を成功として保存することを検証します。
+    /// </summary>
+    [TestMethod]
+    public async Task ProcessAsync_MultipleCandidates_SendsSingleAggregateNotification()
+    {
+        DateTimeOffset nowUtc = new(2026, 8, 5, 8, 0, 0, TimeSpan.Zero);
+        InMemoryStateRepository repository = new();
+        using ApplicationStateStore stateStore = new(repository);
+        RecordingWindowsNotificationSender sender = new();
+        RateLimitNotificationProcessor processor = CreateProcessor(
+            stateStore,
+            sender,
+            new MutableTimeProvider(nowUtc));
+        UsageSnapshot snapshot = new()
+        {
+            CapturedAtUtc = nowUtc,
+            RateLimits =
+            [
+                CreateFiveHourWindow(nowUtc),
+                new RateLimitWindow
+                {
+                    LimitId = "codex",
+                    Position = RateLimitPosition.Secondary,
+                    Classification = RateLimitClassification.Weekly,
+                    WindowDurationMinutes = 10080,
+                    UsedPercent = 35,
+                    RemainingPercent = 65,
+                    ResetsAtUtc = nowUtc.AddHours(23),
+                },
+            ],
+        };
+
+        NotificationProcessingResult result = await processor.ProcessAsync(
+            snapshot,
+            AppSettings.CreateDefault(),
+            CancellationToken.None);
+
+        Assert.AreEqual(1, sender.SendCount);
+        Assert.AreEqual("Codex利用枠のお知らせ（2件）", sender.Messages.Single().Title);
+        Assert.AreEqual(2, result.State.RateLimitNotificationStates.Count);
+        Assert.IsTrue(result.State.RateLimitNotificationStates.All(
+            state => state.WindowsDeliveryStatus == DeliveryStatus.Succeeded));
+    }
+
+    /// <summary>
     /// 監視失敗が3回へ達したときだけ障害通知を1回送ることを検証します。
     /// </summary>
     [TestMethod]
@@ -197,6 +242,11 @@ public sealed class RateLimitNotificationProcessorTests
     private sealed class RecordingWindowsNotificationSender : IWindowsNotificationSender
     {
         /// <summary>
+        /// 送信されたWindows通知を取得します。
+        /// </summary>
+        public List<WindowsNotificationMessage> Messages { get; } = [];
+
+        /// <summary>
         /// Windows通知の送信回数を取得します。
         /// </summary>
         public int SendCount { get; private set; }
@@ -213,6 +263,7 @@ public sealed class RateLimitNotificationProcessorTests
         {
             ArgumentNullException.ThrowIfNull(message);
             cancellationToken.ThrowIfCancellationRequested();
+            Messages.Add(message);
             SendCount++;
             return Task.CompletedTask;
         }

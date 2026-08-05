@@ -9,6 +9,37 @@ namespace CodexUsageNotifier.Application.Notifications;
 public static class WindowsNotificationMessageFactory
 {
     /// <summary>
+    /// 同一取得で成立した通知候補を、Windowsで確実に確認できる1件のメッセージへ変換します。
+    /// </summary>
+    /// <param name="candidates">同一取得で成立した通知候補です。</param>
+    /// <param name="capturedAtUtc">通知判定に使用した取得UTC時刻です。</param>
+    /// <returns>候補が1件なら従来形式、複数なら集約形式のWindows通知です。</returns>
+    public static WindowsNotificationMessage CreateAggregate(
+        IReadOnlyList<RateLimitNotificationCandidate> candidates,
+        DateTimeOffset capturedAtUtc)
+    {
+        ArgumentNullException.ThrowIfNull(candidates);
+        if (candidates.Count == 0)
+        {
+            throw new ArgumentException("通知候補を1件以上指定してください。", nameof(candidates));
+        }
+
+        if (candidates.Count == 1)
+        {
+            return Create(candidates[0], capturedAtUtc);
+        }
+
+        string body = string.Join(
+            Environment.NewLine,
+            candidates.Select(candidate => $"・{CreateAggregateLine(candidate, capturedAtUtc)}"));
+        return new WindowsNotificationMessage
+        {
+            Title = $"Codex利用枠のお知らせ（{candidates.Count.ToString(CultureInfo.CurrentCulture)}件）",
+            Body = body,
+        };
+    }
+
+    /// <summary>
     /// 通知種別に応じたタイトルと本文を生成します。
     /// </summary>
     /// <param name="candidate">通知対象と種別を含む候補です。</param>
@@ -72,5 +103,52 @@ public static class WindowsNotificationMessageFactory
             Title = "Codex週間枠のリセットが近づいています",
             Body = $"段階：{candidate.NotificationStage}{Environment.NewLine}残り使用量：{candidate.Window.RemainingPercent:0.#}%{Environment.NewLine}リセットまで：約{Math.Ceiling(remainingHours).ToString(CultureInfo.CurrentCulture)}時間{Environment.NewLine}リセット予定：{resetAt}{Environment.NewLine}{identity}{Environment.NewLine}実行したい作業がある場合は、バックログを確認してください。",
         };
+    }
+
+    /// <summary>
+    /// 集約通知に含める候補1件分の短い説明を生成します。
+    /// </summary>
+    /// <param name="candidate">説明対象の通知候補です。</param>
+    /// <param name="capturedAtUtc">通知判定に使用した取得UTC時刻です。</param>
+    /// <returns>利用枠と通知目的を識別できる1行の説明です。</returns>
+    private static string CreateAggregateLine(
+        RateLimitNotificationCandidate candidate,
+        DateTimeOffset capturedAtUtc)
+    {
+        ArgumentNullException.ThrowIfNull(candidate);
+        string targetName = candidate.Window.Classification switch
+        {
+            RateLimitClassification.FiveHour => "5時間枠",
+            RateLimitClassification.Weekly => "週間枠",
+            _ => $"{candidate.Window.WindowDurationMinutes?.ToString(CultureInfo.CurrentCulture) ?? "不明"}分枠",
+        };
+        return candidate.NotificationType switch
+        {
+            RateLimitNotificationType.ShortWindowRecovered =>
+                $"{targetName}が{candidate.Window.RemainingPercent:0.#}%まで回復",
+            RateLimitNotificationType.LongWindowResetCompleted =>
+                $"{targetName}の新しい利用期間を確認（残り{candidate.Window.RemainingPercent:0.#}%）",
+            RateLimitNotificationType.LongWindowEarlyWarning
+                or RateLimitNotificationType.LongWindowStandardWarning
+                or RateLimitNotificationType.LongWindowFinalWarning =>
+                $"{targetName}はリセットまで約{CreateRemainingHours(candidate, capturedAtUtc).ToString(CultureInfo.CurrentCulture)}時間、残り{candidate.Window.RemainingPercent:0.#}%（{candidate.NotificationStage}）",
+            _ => $"{targetName}：{candidate.NotificationType}",
+        };
+    }
+
+    /// <summary>
+    /// 集約通知向けにリセットまでの切り上げ時間を算出します。
+    /// </summary>
+    /// <param name="candidate">リセット時刻を含む通知候補です。</param>
+    /// <param name="capturedAtUtc">通知判定に使用した取得UTC時刻です。</param>
+    /// <returns>0以上へ補正した残り時間です。</returns>
+    private static double CreateRemainingHours(
+        RateLimitNotificationCandidate candidate,
+        DateTimeOffset capturedAtUtc)
+    {
+        ArgumentNullException.ThrowIfNull(candidate);
+        return candidate.Window.ResetsAtUtc is null
+            ? 0D
+            : Math.Ceiling(Math.Max(0D, (candidate.Window.ResetsAtUtc.Value - capturedAtUtc).TotalHours));
     }
 }

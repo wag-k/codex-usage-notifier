@@ -72,6 +72,32 @@ public sealed class WindowsNotificationMessageFactoryTests
     }
 
     /// <summary>
+    /// 複数候補を1件へ集約し、短期回復と長期警告の両方を本文へ含めることを検証します。
+    /// </summary>
+    [TestMethod]
+    public void CreateAggregate_MultipleCandidates_ContainsEveryCandidate()
+    {
+        RateLimitNotificationCandidate shortWindow = CreateCandidate(
+            RateLimitClassification.FiveHour,
+            300,
+            RateLimitNotificationType.ShortWindowRecovered,
+            RateLimitNotificationStage.Recovered);
+        RateLimitNotificationCandidate weekly = CreateCandidate(
+            RateLimitClassification.Weekly,
+            10080,
+            RateLimitNotificationType.LongWindowStandardWarning,
+            RateLimitNotificationStage.Standard);
+
+        WindowsNotificationMessage result = WindowsNotificationMessageFactory.CreateAggregate(
+            [shortWindow, weekly],
+            NowUtc);
+
+        Assert.AreEqual("Codex利用枠のお知らせ（2件）", result.Title);
+        StringAssert.Contains(result.Body, "・5時間枠が65%まで回復");
+        StringAssert.Contains(result.Body, "・週間枠はリセットまで約24時間、残り65%（Standard）");
+    }
+
+    /// <summary>
     /// 指定した分類と通知種別を持つテスト用候補を生成します。
     /// </summary>
     /// <param name="classification">利用枠分類です。</param>

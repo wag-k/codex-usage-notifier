@@ -108,6 +108,7 @@ public sealed partial class RateLimitNotificationProcessor
             };
         }
 
+        List<RateLimitNotificationState> inProgressStates = [];
         foreach (RateLimitNotificationCandidate candidate in evaluation.Candidates)
         {
             LogResetCompletionReason(candidate);
@@ -117,53 +118,66 @@ public sealed partial class RateLimitNotificationProcessor
                 deliveredAtUtc: null,
                 deferredUntilUtc: null);
             await SaveNotificationStateAsync(inProgress, cancellationToken);
-            WindowsNotificationMessage message = WindowsNotificationMessageFactory.Create(
-                candidate,
-                snapshot.CapturedAtUtc);
-            try
+            inProgressStates.Add(inProgress);
+        }
+
+        WindowsNotificationMessage message = WindowsNotificationMessageFactory.CreateAggregate(
+            evaluation.Candidates,
+            snapshot.CapturedAtUtc);
+        try
+        {
+            await windowsNotificationSender.SendAsync(message, cancellationToken);
+            DateTimeOffset deliveredAtUtc = timeProvider.GetUtcNow();
+            foreach ((RateLimitNotificationCandidate candidate, RateLimitNotificationState inProgress) in
+                     evaluation.Candidates.Zip(inProgressStates))
             {
-                await windowsNotificationSender.SendAsync(message, cancellationToken);
                 RateLimitNotificationState succeeded = inProgress with
                 {
                     WindowsDeliveryStatus = DeliveryStatus.Succeeded,
-                    DeliveredAtUtc = timeProvider.GetUtcNow(),
+                    DeliveredAtUtc = deliveredAtUtc,
                 };
                 currentState = await SaveNotificationStateAsync(succeeded, cancellationToken);
-                currentState = await stateStore.UpdateAsync(
-                    state => state with
-                    {
-                        LastNotifiedRecoveryWindowId = candidate.RecoveryWindowId,
-                        WindowsDeliveryResult = new DeliveryResultState
-                        {
-                            Status = DeliveryStatus.Succeeded,
-                            AttemptedAtUtc = succeeded.DeliveredAtUtc,
-                            Summary = $"{candidate.NotificationType}/{candidate.NotificationStage}",
-                        },
-                    },
-                    cancellationToken);
                 LogNotificationSucceeded(logger, candidate.NotificationType, candidate.NotificationStage);
             }
-            catch (Exception exception) when (exception is not OperationCanceledException)
+
+            currentState = await stateStore.UpdateAsync(
+                state => state with
+                {
+                    LastNotifiedRecoveryWindowId = evaluation.Candidates[^1].RecoveryWindowId,
+                    WindowsDeliveryResult = new DeliveryResultState
+                    {
+                        Status = DeliveryStatus.Succeeded,
+                        AttemptedAtUtc = deliveredAtUtc,
+                        Summary = CreateDeliverySummary(evaluation.Candidates),
+                    },
+                },
+                cancellationToken);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            DateTimeOffset attemptedAtUtc = timeProvider.GetUtcNow();
+            foreach ((RateLimitNotificationCandidate candidate, RateLimitNotificationState inProgress) in
+                     evaluation.Candidates.Zip(inProgressStates))
             {
-                DateTimeOffset attemptedAtUtc = timeProvider.GetUtcNow();
                 RateLimitNotificationState failed = inProgress with
                 {
                     WindowsDeliveryStatus = DeliveryStatus.Failed,
                 };
                 currentState = await SaveNotificationStateAsync(failed, cancellationToken);
-                currentState = await stateStore.UpdateAsync(
-                    state => state with
-                    {
-                        WindowsDeliveryResult = new DeliveryResultState
-                        {
-                            Status = DeliveryStatus.Failed,
-                            AttemptedAtUtc = attemptedAtUtc,
-                            Summary = "Windows通知を表示できませんでした。",
-                        },
-                    },
-                    cancellationToken);
                 LogNotificationFailed(logger, candidate.NotificationType, candidate.NotificationStage, exception);
             }
+
+            currentState = await stateStore.UpdateAsync(
+                state => state with
+                {
+                    WindowsDeliveryResult = new DeliveryResultState
+                    {
+                        Status = DeliveryStatus.Failed,
+                        AttemptedAtUtc = attemptedAtUtc,
+                        Summary = "Windows通知を表示できませんでした。",
+                    },
+                },
+                cancellationToken);
         }
 
         return new NotificationProcessingResult { State = currentState };
@@ -311,6 +325,17 @@ public sealed partial class RateLimitNotificationProcessor
             && string.Equals(left.RecoveryWindowId, right.RecoveryWindowId, StringComparison.Ordinal)
             && left.NotificationType == right.NotificationType
             && left.NotificationStage == right.NotificationStage;
+    }
+
+    /// <summary>
+    /// 集約して送信した通知候補を診断表示向けの短い文字列へ変換します。
+    /// </summary>
+    /// <param name="candidates">送信に含めた通知候補です。</param>
+    /// <returns>件数と通知種別を含む概要です。</returns>
+    private static string CreateDeliverySummary(IReadOnlyList<RateLimitNotificationCandidate> candidates)
+    {
+        ArgumentNullException.ThrowIfNull(candidates);
+        return $"{candidates.Count}件: {string.Join(", ", candidates.Select(candidate => $"{candidate.NotificationType}/{candidate.NotificationStage}"))}";
     }
 
     [LoggerMessage(2300, LogLevel.Information, "Windows通知を送信しました。NotificationType={NotificationType}, NotificationStage={NotificationStage}")]
