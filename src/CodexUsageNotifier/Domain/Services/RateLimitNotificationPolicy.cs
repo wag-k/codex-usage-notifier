@@ -9,11 +9,6 @@ namespace CodexUsageNotifier.Domain.Services;
 public static class RateLimitNotificationPolicy
 {
     /// <summary>
-    /// リセット完了の補助判定に使用する使用率低下幅です。
-    /// </summary>
-    public const double SignificantUsedPercentDrop = 50D;
-
-    /// <summary>
     /// 取得できた全利用枠を独立に評価し、複数の通知候補と回復状態を返します。
     /// </summary>
     /// <param name="currentSnapshot">現在取得した全利用枠です。</param>
@@ -40,7 +35,7 @@ public static class RateLimitNotificationPolicy
         {
             RateLimitNotificationSetting windowSetting = RateLimitNotificationSettingsResolver.Resolve(
                 window,
-                settings.RateLimitNotifications);
+                settings);
             RateLimitRecoveryState? recoveryState = FindRecoveryState(updatedRecoveryStates, window);
             bool recoveryStarted = false;
             if (windowSetting.ShortWindowRecoveryEnabled
@@ -184,7 +179,12 @@ public static class RateLimitNotificationPolicy
         AppSettings settings)
     {
         RateLimitResetCompletionReason? reason = windowSetting.LongWindowResetCompletedEnabled
-            ? GetResetCompletionReason(currentSnapshot, previousSnapshot, window, previousWindow)
+            ? GetResetCompletionReason(
+                currentSnapshot,
+                previousSnapshot,
+                window,
+                previousWindow,
+                settings.ResetInferenceUsageDropPoints)
             : null;
         if (reason is not null)
         {
@@ -253,11 +253,18 @@ public static class RateLimitNotificationPolicy
     /// <summary>
     /// 前回と今回の正常取得値からリセット完了理由を判定します。
     /// </summary>
+    /// <param name="currentSnapshot">現在の正常取得結果です。</param>
+    /// <param name="previousSnapshot">直前の正常取得結果です。</param>
+    /// <param name="currentWindow">現在の判定対象利用枠です。</param>
+    /// <param name="previousWindow">直前の同一利用枠です。</param>
+    /// <param name="usageDropPoints">使用率低下による推定に必要なポイント数です。</param>
+    /// <returns>確認できたリセット完了理由、または判定不能時のnullです。</returns>
     private static RateLimitResetCompletionReason? GetResetCompletionReason(
         UsageSnapshot currentSnapshot,
         UsageSnapshot? previousSnapshot,
         RateLimitWindow currentWindow,
-        RateLimitWindow? previousWindow)
+        RateLimitWindow? previousWindow,
+        int usageDropPoints)
     {
         if (previousSnapshot is null || previousWindow is null)
         {
@@ -277,7 +284,7 @@ public static class RateLimitNotificationPolicy
             return RateLimitResetCompletionReason.ResetTimeAdvanced;
         }
 
-        return previousWindow.UsedPercent - currentWindow.UsedPercent >= SignificantUsedPercentDrop
+        return previousWindow.UsedPercent - currentWindow.UsedPercent >= usageDropPoints
             ? RateLimitResetCompletionReason.UsageDropInference
             : null;
     }

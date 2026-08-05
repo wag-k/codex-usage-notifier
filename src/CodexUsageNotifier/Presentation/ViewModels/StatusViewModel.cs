@@ -19,7 +19,7 @@ public sealed class StatusViewModel : INotifyPropertyChanged, IUsageStatusSink
     private string monitoringStatus = "開始待ち";
     private string lastSuccessfulFetch = "未取得";
     private string nextCheck = "未設定";
-    private string gmailStatus = "未設定（Phase 4で実装）";
+    private string gmailStatus = "未認証（Phase 4Bで実装）";
     private string lastNotification = "通知実績なし";
     private string consecutiveFailures = "0回";
 
@@ -143,8 +143,8 @@ public sealed class StatusViewModel : INotifyPropertyChanged, IUsageStatusSink
             settings);
         LastSuccessfulFetch = FormatLocalDateTime(state.LastSuccessfulFetchAtUtc, "未取得");
         GmailStatus = settings.GmailNotificationEnabled
-            ? "有効・未認証（Phase 4で認証を実装）"
-            : "無効（Phase 4で設定を実装）";
+            ? "有効・未認証（Phase 4Bで認証を実装）"
+            : "無効・未認証（Phase 4Bで認証を実装）";
         LastNotification = FormatLastNotification(state);
         ConsecutiveFailures = $"{state.ConsecutiveFailures}回";
     }
@@ -279,7 +279,7 @@ public sealed class StatusViewModel : INotifyPropertyChanged, IUsageStatusSink
             {
                 RateLimitNotificationSetting windowSetting = RateLimitNotificationSettingsResolver.Resolve(
                     window,
-                    settings.RateLimitNotifications);
+                    settings);
                 string enabledTypes = FormatEnabledNotificationTypes(windowSetting);
                 string lastNotification = FormatLastWindowNotification(window, state.RateLimitNotificationStates);
                 string resetReason = FormatLastResetCompletionReason(window, state.RateLimitNotificationStates);
@@ -440,7 +440,7 @@ public sealed class StatusViewModel : INotifyPropertyChanged, IUsageStatusSink
             {
                 RateLimitNotificationSetting windowSetting = RateLimitNotificationSettingsResolver.Resolve(
                     window,
-                    settings.RateLimitNotifications);
+                    settings);
                 return $"LimitId={window.LimitId ?? "不明"}, Position={window.Position}, Duration={window.WindowDurationMinutes?.ToString(System.Globalization.CultureInfo.CurrentCulture) ?? "不明"}分：{(windowSetting.IsAnyEnabled ? FormatEnabledNotificationTypes(windowSetting) : "通知対象外")}";
             }));
     }

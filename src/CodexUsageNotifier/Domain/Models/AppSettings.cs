@@ -3,7 +3,7 @@ namespace CodexUsageNotifier.Domain.Models;
 /// <summary>
 /// アプリケーション設定の保存モデルを表します。
 /// </summary>
-public sealed class AppSettings
+public sealed record AppSettings
 {
     private static readonly HashSet<string> SupportedLogLevels = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -38,9 +38,19 @@ public sealed class AppSettings
         Array.Empty<RateLimitNotificationSetting>();
 
     /// <summary>
+    /// FiveHour枠の短期回復通知を既定で有効にするかどうかを取得または設定します。
+    /// </summary>
+    public bool ShortWindowRecoveryEnabled { get; init; } = true;
+
+    /// <summary>
     /// 短期枠の回復通知に使用する残量閾値を取得または設定します。
     /// </summary>
     public int ShortWindowRecoveryThresholdPercent { get; init; } = 99;
+
+    /// <summary>
+    /// Weekly枠のEarly通知を既定で有効にするかどうかを取得または設定します。
+    /// </summary>
+    public bool LongWindowEarlyWarningEnabled { get; init; } = true;
 
     /// <summary>
     /// 長期枠の早期通知に使用する残量閾値を取得または設定します。
@@ -53,6 +63,11 @@ public sealed class AppSettings
     public int LongWindowEarlyWarningHours { get; init; } = 48;
 
     /// <summary>
+    /// Weekly枠のStandard通知を既定で有効にするかどうかを取得または設定します。
+    /// </summary>
+    public bool LongWindowStandardWarningEnabled { get; init; } = true;
+
+    /// <summary>
     /// 長期枠の通常通知に使用する残量閾値を取得または設定します。
     /// </summary>
     public int LongWindowStandardWarningThresholdPercent { get; init; } = 20;
@@ -63,6 +78,11 @@ public sealed class AppSettings
     public int LongWindowStandardWarningHours { get; init; } = 24;
 
     /// <summary>
+    /// Weekly枠のFinal通知を既定で有効にするかどうかを取得または設定します。
+    /// </summary>
+    public bool LongWindowFinalWarningEnabled { get; init; } = true;
+
+    /// <summary>
     /// 長期枠の最終通知に使用する残量閾値を取得または設定します。
     /// </summary>
     public int LongWindowFinalWarningThresholdPercent { get; init; } = 10;
@@ -71,6 +91,16 @@ public sealed class AppSettings
     /// 長期枠の最終通知を開始する残り時間を時間単位で取得または設定します。
     /// </summary>
     public int LongWindowFinalWarningHours { get; init; } = 6;
+
+    /// <summary>
+    /// Weekly枠のリセット完了通知を既定で有効にするかどうかを取得または設定します。
+    /// </summary>
+    public bool LongWindowResetCompletedEnabled { get; init; } = true;
+
+    /// <summary>
+    /// 使用率低下からリセット完了を推定する最小ポイント数を取得または設定します。
+    /// </summary>
+    public int ResetInferenceUsageDropPoints { get; init; } = 50;
 
     /// <summary>
     /// Windows通知が有効かどうかを取得または設定します。
@@ -139,6 +169,20 @@ public sealed class AppSettings
     public static AppSettings CreateDefault() => new();
 
     /// <summary>
+    /// 設定ファイルから読み込んだ個別フォールバック対象を安全な初期値へ補正します。
+    /// </summary>
+    /// <returns>使用率低下推定閾値が有効範囲内に補正された設定です。</returns>
+    public AppSettings NormalizeLoadedValues()
+    {
+        return ResetInferenceUsageDropPoints is >= 1 and <= 100
+            ? this
+            : this with
+            {
+                ResetInferenceUsageDropPoints = CreateDefault().ResetInferenceUsageDropPoints,
+            };
+    }
+
+    /// <summary>
     /// 永続化可能な設定値かどうかを検証します。
     /// </summary>
     /// <returns>すべての値が有効ならtrueです。</returns>
@@ -152,16 +196,34 @@ public sealed class AppSettings
                 .GroupBy(setting => new { setting.LimitId, setting.Position, setting.WindowDurationMinutes })
                 .All(group => group.Count() == 1)
             && ShortWindowRecoveryThresholdPercent is >= 1 and <= 100
-            && LongWindowEarlyWarningThresholdPercent is >= 0 and <= 100
-            && LongWindowStandardWarningThresholdPercent is >= 0 and <= 100
-            && LongWindowFinalWarningThresholdPercent is >= 0 and <= 100
+            && LongWindowEarlyWarningThresholdPercent is >= 1 and <= 100
+            && LongWindowStandardWarningThresholdPercent is >= 1 and <= 100
+            && LongWindowFinalWarningThresholdPercent is >= 1 and <= 100
             && LongWindowEarlyWarningHours > LongWindowStandardWarningHours
             && LongWindowStandardWarningHours > LongWindowFinalWarningHours
             && LongWindowFinalWarningHours > 0
-            && FallbackPollingMinutes >= 1
+            && ResetInferenceUsageDropPoints is >= 1 and <= 100
+            && IsValidOptionalEmailAddress(GmailRecipient)
+            && FallbackPollingMinutes is >= 1 and <= 1440
             && ResetCheckDelaySeconds >= 0
             && HistoryRetentionDays >= 1
             && LogRetentionDays >= 1
             && SupportedLogLevels.Contains(MinimumLogLevel);
+    }
+
+    /// <summary>
+    /// 省略可能なGmail送信先が単純なメールアドレス形式か検証します。
+    /// </summary>
+    /// <param name="value">検証する送信先です。</param>
+    /// <returns>未入力またはメールアドレスとして解釈できる場合はtrueです。</returns>
+    public static bool IsValidOptionalEmailAddress(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return true;
+        }
+
+        return System.Net.Mail.MailAddress.TryCreate(value, out System.Net.Mail.MailAddress? address)
+            && string.Equals(address.Address, value, StringComparison.OrdinalIgnoreCase);
     }
 }

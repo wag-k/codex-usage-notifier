@@ -77,7 +77,7 @@ public enum RateLimitResetCompletionReason
     ResetTimeAdvanced,
 
     /// <summary>
-    /// 使用率が前回値から50ポイント以上低下した推定を表します。
+    /// 使用率が設定されたポイント数以上低下した推定を表します。
     /// </summary>
     UsageDropInference,
 }

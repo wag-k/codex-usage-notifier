@@ -215,6 +215,32 @@ public sealed class RateLimitNotificationPolicyTests
     }
 
     /// <summary>
+    /// 設定モデルの使用率低下推定閾値がリセット完了判定へ使用されることを検証します。
+    /// </summary>
+    [TestMethod]
+    public void Evaluate_CustomUsageDropThreshold_UsesConfiguredPoints()
+    {
+        RateLimitWindow previous = CreateWindow(
+            "codex",
+            RateLimitPosition.Primary,
+            RateLimitClassification.Weekly,
+            10080,
+            20,
+            resetsAtUtc: null);
+        RateLimitWindow current = WithRemaining(previous, 60);
+
+        RateLimitNotificationEvaluation result = Evaluate(
+            [current],
+            CreateSnapshot([previous], NowUtc),
+            capturedAtUtc: NowUtc.AddMinutes(1),
+            settings: AppSettings.CreateDefault() with { ResetInferenceUsageDropPoints = 40 });
+
+        Assert.AreEqual(
+            RateLimitResetCompletionReason.UsageDropInference,
+            result.Candidates.Single().ResetCompletionReason);
+    }
+
+    /// <summary>
     /// リセット時刻が進んだ場合はResetTimeAdvanced理由の完了候補になることを検証します。
     /// </summary>
     [TestMethod]
@@ -336,12 +362,13 @@ public sealed class RateLimitNotificationPolicyTests
         UsageSnapshot? previousSnapshot = null,
         IReadOnlyList<RateLimitNotificationState>? notificationStates = null,
         IReadOnlyList<RateLimitRecoveryState>? recoveryStates = null,
-        DateTimeOffset? capturedAtUtc = null)
+        DateTimeOffset? capturedAtUtc = null,
+        AppSettings? settings = null)
     {
         return RateLimitNotificationPolicy.Evaluate(
             CreateSnapshot(windows, capturedAtUtc ?? NowUtc),
             previousSnapshot,
-            AppSettings.CreateDefault(),
+            settings ?? AppSettings.CreateDefault(),
             notificationStates ?? Array.Empty<RateLimitNotificationState>(),
             recoveryStates ?? Array.Empty<RateLimitRecoveryState>());
     }

@@ -10,7 +10,7 @@ namespace CodexUsageNotifier.Application.Monitoring;
 /// <summary>
 /// 利用枠取得を最大1件へ直列化し、取得中の追加要求を1件へ集約します。
 /// </summary>
-public sealed partial class UsageMonitor : IAsyncDisposable
+public sealed partial class UsageMonitor : IAsyncDisposable, ISettingsChangeSink
 {
     private readonly ICodexRateLimitClient client;
     private readonly ApplicationStateStore stateStore;
@@ -34,6 +34,7 @@ public sealed partial class UsageMonitor : IAsyncDisposable
     private CancellationTokenSource? retryCancellation;
     private CancellationTokenSource? resetCancellation;
     private CancellationTokenSource? quietHoursCancellation;
+    private CancellationTokenSource? periodicDelayCancellation;
     private DateTimeOffset? periodicNextCheckUtc;
     private DateTimeOffset? resetNextCheckUtc;
     private DateTimeOffset? quietHoursNextCheckUtc;
@@ -103,6 +104,30 @@ public sealed partial class UsageMonitor : IAsyncDisposable
         }
 
         _ = RequestRefreshAsync(UsageCheckTrigger.Startup, CancellationToken.None);
+    }
+
+    /// <summary>
+    /// 保存済み設定で補助確認とリセット確認を再予約し、現在表示へ設定だけを反映します。
+    /// </summary>
+    /// <param name="settings">保存に成功した新しい設定です。</param>
+    /// <param name="cancellationToken">反映処理のキャンセル通知です。</param>
+    /// <returns>再予約と表示更新の完了を表す非同期処理です。</returns>
+    public async Task ApplyAsync(AppSettings settings, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+        ObjectDisposedException.ThrowIf(disposed, this);
+        ApplicationState state = await stateStore.LoadAsync(cancellationToken);
+
+        lock (syncRoot)
+        {
+            periodicDelayCancellation?.Cancel();
+        }
+
+        if (state.LastUsageSnapshot is not null)
+        {
+            ScheduleResetCheck(state.LastUsageSnapshot, settings);
+            statusSink.SetSnapshot(state.LastUsageSnapshot, state, settings);
+        }
     }
 
     /// <summary>
@@ -291,18 +316,48 @@ public sealed partial class UsageMonitor : IAsyncDisposable
             {
                 AppSettings settings = await settingsRepository.LoadAsync(lifetimeCancellation.Token);
                 TimeSpan delay = TimeSpan.FromMinutes(settings.FallbackPollingMinutes);
+                CancellationTokenSource scheduledCancellation =
+                    CancellationTokenSource.CreateLinkedTokenSource(lifetimeCancellation.Token);
                 lock (syncRoot)
                 {
+                    periodicDelayCancellation = scheduledCancellation;
                     periodicNextCheckUtc = timeProvider.GetUtcNow().Add(delay);
                 }
 
                 UpdateNextCheckDisplay();
-                await Task.Delay(delay, timeProvider, lifetimeCancellation.Token);
+                try
+                {
+                    await Task.Delay(delay, timeProvider, scheduledCancellation.Token);
+                }
+                catch (OperationCanceledException) when (
+                    scheduledCancellation.IsCancellationRequested
+                        && !lifetimeCancellation.IsCancellationRequested)
+                {
+                    lock (syncRoot)
+                    {
+                        if (ReferenceEquals(periodicDelayCancellation, scheduledCancellation))
+                        {
+                            periodicDelayCancellation = null;
+                            periodicNextCheckUtc = null;
+                        }
+                    }
+
+                    scheduledCancellation.Dispose();
+                    UpdateNextCheckDisplay();
+                    continue;
+                }
+
                 lock (syncRoot)
                 {
+                    if (ReferenceEquals(periodicDelayCancellation, scheduledCancellation))
+                    {
+                        periodicDelayCancellation = null;
+                    }
+
                     periodicNextCheckUtc = null;
                 }
 
+                scheduledCancellation.Dispose();
                 UpdateNextCheckDisplay();
                 await RequestRefreshAsync(UsageCheckTrigger.Scheduled, lifetimeCancellation.Token);
             }
@@ -666,6 +721,7 @@ public sealed partial class UsageMonitor : IAsyncDisposable
         retryCancellation?.Cancel();
         resetCancellation?.Cancel();
         quietHoursCancellation?.Cancel();
+        periodicDelayCancellation?.Cancel();
 
         Task?[] tasks;
         lock (syncRoot)
@@ -693,6 +749,7 @@ public sealed partial class UsageMonitor : IAsyncDisposable
         retryCancellation?.Dispose();
         resetCancellation?.Dispose();
         quietHoursCancellation?.Dispose();
+        periodicDelayCancellation?.Dispose();
         lifetimeCancellation.Dispose();
         executionGate.Dispose();
     }

@@ -10,20 +10,27 @@ namespace CodexUsageNotifier;
 public partial class MainWindow : System.Windows.Window
 {
     private readonly ApplicationLifetime applicationLifetime;
+    private readonly SettingsWindow settingsWindow;
 
     /// <summary>
     /// 状態表示用のデータとアプリケーション終了状態を受け取って初期化します。
     /// </summary>
     /// <param name="viewModel">状態表示用のビューモデルです。</param>
     /// <param name="applicationLifetime">アプリケーションの終了状態です。</param>
-    public MainWindow(StatusViewModel viewModel, ApplicationLifetime applicationLifetime)
+    /// <param name="settingsWindow">表示する設定画面です。</param>
+    public MainWindow(
+        StatusViewModel viewModel,
+        ApplicationLifetime applicationLifetime,
+        SettingsWindow settingsWindow)
     {
         ArgumentNullException.ThrowIfNull(viewModel);
         ArgumentNullException.ThrowIfNull(applicationLifetime);
+        ArgumentNullException.ThrowIfNull(settingsWindow);
 
         InitializeComponent();
         DataContext = viewModel;
         this.applicationLifetime = applicationLifetime;
+        this.settingsWindow = settingsWindow;
         Closing += OnClosing;
     }
 
@@ -41,5 +48,15 @@ public partial class MainWindow : System.Windows.Window
 
         e.Cancel = true;
         Hide();
+    }
+
+    /// <summary>
+    /// 状態画面から最新設定を読み込んで設定画面を開きます。
+    /// </summary>
+    /// <param name="sender">設定ボタンです。</param>
+    /// <param name="e">クリックイベントです。</param>
+    private async void OnOpenSettings(object sender, System.Windows.RoutedEventArgs e)
+    {
+        await settingsWindow.ShowSettingsAsync(this, CancellationToken.None);
     }
 }

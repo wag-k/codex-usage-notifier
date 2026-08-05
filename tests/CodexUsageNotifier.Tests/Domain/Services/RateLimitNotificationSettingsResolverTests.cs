@@ -49,6 +49,30 @@ public sealed class RateLimitNotificationSettingsResolverTests
     }
 
     /// <summary>
+    /// 編集されたClassification別既定値が未上書きのFiveHourとWeeklyへ適用されることを検証します。
+    /// </summary>
+    [TestMethod]
+    public void Resolve_EditedDefaults_DisablesConfiguredClassificationNotifications()
+    {
+        AppSettings settings = AppSettings.CreateDefault() with
+        {
+            ShortWindowRecoveryEnabled = false,
+            LongWindowEarlyWarningEnabled = false,
+        };
+
+        RateLimitNotificationSetting fiveHour = RateLimitNotificationSettingsResolver.Resolve(
+            CreateWindow(RateLimitClassification.FiveHour, 300),
+            settings);
+        RateLimitNotificationSetting weekly = RateLimitNotificationSettingsResolver.Resolve(
+            CreateWindow(RateLimitClassification.Weekly, 10080),
+            settings);
+
+        Assert.IsFalse(fiveHour.ShortWindowRecoveryEnabled);
+        Assert.IsFalse(weekly.LongWindowEarlyWarningEnabled);
+        Assert.IsTrue(weekly.LongWindowStandardWarningEnabled);
+    }
+
+    /// <summary>
     /// LimitId、Position、WindowDurationMinutesが一致する保存設定を分類別既定値より優先することを検証します。
     /// </summary>
     [TestMethod]
@@ -63,7 +87,9 @@ public sealed class RateLimitNotificationSettingsResolverTests
             ShortWindowRecoveryEnabled = true,
         };
 
-        RateLimitNotificationSetting result = RateLimitNotificationSettingsResolver.Resolve(window, [configured]);
+        RateLimitNotificationSetting result = RateLimitNotificationSettingsResolver.Resolve(
+            window,
+            AppSettings.CreateDefault() with { RateLimitNotifications = [configured] });
 
         Assert.AreSame(configured, result);
     }
@@ -77,7 +103,7 @@ public sealed class RateLimitNotificationSettingsResolverTests
     {
         return RateLimitNotificationSettingsResolver.Resolve(
             CreateWindow(classification, durationMinutes),
-            Array.Empty<RateLimitNotificationSetting>());
+            AppSettings.CreateDefault());
     }
 
     /// <summary>

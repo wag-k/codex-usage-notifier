@@ -13,10 +13,13 @@
     <Grid Background="#F3F5F7">
         <ScrollViewer VerticalScrollBarVisibility="Auto">
             <StackPanel Margin="28">
-                <TextBlock FontSize="26" FontWeight="SemiBold" Text="Codex Usage Notifier" />
+                <DockPanel>
+                    <Button DockPanel.Dock="Right" Padding="14,7" Content="設定を開く" Click="OnOpenSettings" />
+                    <TextBlock VerticalAlignment="Center" FontSize="26" FontWeight="SemiBold" Text="Codex Usage Notifier" />
+                </DockPanel>
                 <TextBlock Margin="0,6,0,24"
                            Foreground="#5B6573"
-                           Text="Phase 3.1 利用枠監視 — 複数枠の短期回復と長期リセットを通知します。" />
+                           Text="Phase 4A 利用枠監視 — 通知設定を再起動なしで編集できます。" />
 
                 <Border Padding="22" Background="White" CornerRadius="10">
                     <Grid>

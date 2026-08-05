@@ -26,6 +26,7 @@ public sealed class TrayIconService : IDisposable
         LoggerMessage.Define(LogLevel.Error, new EventId(3003, "TestNotificationRequestFailed"), "テスト通知の要求に失敗しました。");
 
     private readonly MainWindow mainWindow;
+    private readonly SettingsWindow settingsWindow;
     private readonly ApplicationLifetime applicationLifetime;
     private readonly IAppDataPaths paths;
     private readonly UsageMonitor usageMonitor;
@@ -38,6 +39,7 @@ public sealed class TrayIconService : IDisposable
     /// 表示対象ウィンドウ、終了制御、保存先、およびロガーを受け取って初期化します。
     /// </summary>
     /// <param name="mainWindow">表示対象の状態ウィンドウです。</param>
+    /// <param name="settingsWindow">表示対象の設定ウィンドウです。</param>
     /// <param name="applicationLifetime">アプリケーションの終了制御です。</param>
     /// <param name="paths">アプリケーションデータの保存先です。</param>
     /// <param name="usageMonitor">手動確認を受け付ける利用枠監視です。</param>
@@ -46,6 +48,7 @@ public sealed class TrayIconService : IDisposable
     /// <param name="logger">操作結果を記録するロガーです。</param>
     public TrayIconService(
         MainWindow mainWindow,
+        SettingsWindow settingsWindow,
         ApplicationLifetime applicationLifetime,
         IAppDataPaths paths,
         UsageMonitor usageMonitor,
@@ -54,6 +57,7 @@ public sealed class TrayIconService : IDisposable
         ILogger<TrayIconService> logger)
     {
         ArgumentNullException.ThrowIfNull(mainWindow);
+        ArgumentNullException.ThrowIfNull(settingsWindow);
         ArgumentNullException.ThrowIfNull(applicationLifetime);
         ArgumentNullException.ThrowIfNull(paths);
         ArgumentNullException.ThrowIfNull(usageMonitor);
@@ -62,6 +66,7 @@ public sealed class TrayIconService : IDisposable
         ArgumentNullException.ThrowIfNull(logger);
 
         this.mainWindow = mainWindow;
+        this.settingsWindow = settingsWindow;
         this.applicationLifetime = applicationLifetime;
         this.paths = paths;
         this.usageMonitor = usageMonitor;
@@ -78,6 +83,7 @@ public sealed class TrayIconService : IDisposable
         ObjectDisposedException.ThrowIf(disposed, this);
         Forms.ContextMenuStrip menu = new();
         menu.Items.Add("状態を開く", image: null, OnOpenStatus);
+        menu.Items.Add("設定", image: null, OnOpenSettings);
         menu.Items.Add("今すぐ確認", image: null, OnRefreshNow);
         menu.Items.Add(CreateTestNotificationMenu());
         menu.Items.Add("ログフォルダーを開く", image: null, OnOpenLogDirectory);
@@ -192,6 +198,16 @@ public sealed class TrayIconService : IDisposable
         }
 
         mainWindow.Activate();
+    }
+
+    /// <summary>
+    /// タスクトレイから最新設定を読み込んで設定画面を開きます。
+    /// </summary>
+    /// <param name="sender">イベント送信元です。</param>
+    /// <param name="e">イベント引数です。</param>
+    private async void OnOpenSettings(object? sender, EventArgs e)
+    {
+        await settingsWindow.ShowSettingsAsync(owner: null, CancellationToken.None);
     }
 
     /// <summary>

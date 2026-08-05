@@ -100,9 +100,12 @@ public partial class App : System.Windows.Application
         services.AddSingleton<ICodexRateLimitClient>(provider => provider.GetRequiredService<CodexAppServerClient>());
         services.AddSingleton<ApplicationLifetime>();
         services.AddSingleton<StatusViewModel>();
+        services.AddSingleton<SettingsViewModel>();
         services.AddSingleton<IUsageStatusSink>(provider => provider.GetRequiredService<StatusViewModel>());
         services.AddSingleton<UsageMonitor>();
+        services.AddSingleton<ISettingsChangeSink>(provider => provider.GetRequiredService<UsageMonitor>());
         services.AddSingleton<MainWindow>();
+        services.AddSingleton<SettingsWindow>();
         services.AddSingleton<TrayIconService>();
         return services.BuildServiceProvider();
     }

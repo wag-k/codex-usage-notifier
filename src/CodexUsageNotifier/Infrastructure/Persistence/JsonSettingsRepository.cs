@@ -41,6 +41,7 @@ public sealed class JsonSettingsRepository : ISettingsRepository
             AppSettings.CreateDefault,
             logger,
             cancellationToken);
+        settings = settings.NormalizeLoadedValues();
 
         if (settings.IsValid())
         {
