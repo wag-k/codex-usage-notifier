@@ -33,7 +33,7 @@ Codexの利用枠が回復していても、または長期枠のリセットが
 | 長期枠 | Weeklyなど、リセット前とリセット完了を通知する目的で扱う利用枠 |
 | Position | App Server内の格納位置。PrimaryまたはSecondaryであり、枠の意味を表さない |
 | Classification | ウィンドウ長によるFiveHour、Weekly、Unknownの分類 |
-| 通知対象 | 将来の通知判定に使用する、現在観測できる1つの利用枠 |
+| 利用枠別通知設定 | LimitId、Position、WindowDurationMinutesで識別した利用枠ごとの有効な通知種類 |
 | 残量 | `100 - usedPercent` で算出する利用可能割合 |
 | リセット期間 | 同一の`resetsAt`または同一ウィンドウとして識別する利用期間 |
 | リセット期間ID | 利用枠ごとのリセット期間を重複通知防止に使用できる識別子 |
@@ -74,7 +74,7 @@ Codexの利用枠が回復していても、または長期枠のリセットが
 └───────────────────────────┘
 ```
 
-Notification Policyは、PositionではなくClassificationと期間を基準に、短期枠回復、長期枠リセット前、長期枠リセット完了を個別に判定する。
+Notification Policyは、Positionではなく利用枠別通知設定、Classification、期間を基準に、取得できたすべての枠について短期枠回復、長期枠リセット前、長期枠リセット完了を独立に判定する。
 
 ### 4.2 外部インターフェース
 
@@ -132,15 +132,15 @@ Phase 1完了時の懸念点1「App Serverのプロセス所有権」と懸念�
 11. FiveHourは短期枠の回復通知、Weeklyは長期枠のリセット前・リセット完了通知に使用する。
 12. Unknownは表示と履歴保存の対象とするが、初期設定では通知対象にしない。
 
-#### 通知対象の選択
+#### 利用枠別通知設定
 
-1. 自動選択では300分枠を最優先する。
-2. 300分枠がなければ、観測できた既知の期間が最も短い枠を選択する。
-3. 手動選択ではLimitId、Position、WindowDurationMinutesの3項目で指定する。
-4. 手動選択した枠が未観測の場合は通知対象なしとする。
-5. Unknown枠は破棄しないが、初期設定では通知対象から除外する。
-6. Unknown枠を通知対象にする場合の通知目的は設定可能な拡張点とし、初版の既定動作では通知しない。
-7. Phase 2では選択結果を候補として表示し、Unknown除外を含む通知ポリシー、通知判定、通知送信はPhase 3の対象とする。
+1. 利用枠はLimitId、Position、WindowDurationMinutesの3項目で識別する。
+2. 複数の利用枠を同時に通知対象として有効化できる。
+3. FiveHourの既定値は短期枠回復通知だけを有効とする。
+4. Weeklyの既定値はEarly、Standard、Final、リセット完了通知を有効とする。
+5. Unknownの既定値はすべての通知を無効とするが、表示、履歴保存、新規検出ログの対象には残す。
+6. 保存済みの利用枠別設定がある場合は、Classificationによる既定値より完全一致した設定を優先する。
+7. 通知済み状態は利用枠ごとの複合キーで独立して保持し、別の利用枠の通知を抑止しない。
 
 #### 同時要求の集約
 
@@ -239,8 +239,10 @@ Gmail通知にはGmail APIを使用する。
    - 最終通知：6時間以内かつ残量10%以上
 9. 長期枠リセット完了通知
    - 初期表示：有効
-10. Unknown枠を通知対象にするか
-   - 初期表示：無効
+10. 利用枠別の通知種類
+   - FiveHour：短期枠回復通知だけを有効
+   - Weekly：Early、Standard、Final、リセット完了通知を有効
+   - Unknown：すべて無効
 
 初回設定を完了しなくても、Windows通知だけで監視を開始できる。
 
@@ -287,24 +289,24 @@ Gmail通知にはGmail APIを使用する。
 
 ### FR-006 短期枠の回復通知
 
-設定に従って選択したFiveHourなどの短期枠について、以下をすべて満たす場合に`ShortWindowRecovered`通知候補とする。
+利用枠別設定で短期回復通知を有効にした枠について、以下をすべて満たす場合に`ShortWindowRecovered`通知候補とする。
 
 1. 短期枠回復通知が有効である。
 2. 残量が短期枠回復通知の閾値以上である。
 3. 同じ利用枠・リセット期間・通知種別について未通知である。
 4. 取得結果が正常である。
 
-閾値は1～100%の範囲で設定でき、初期値は99%とする。300分枠を取得できる環境ではFiveHourとして判定できるが、300分枠が存在しない状態も正常とする。Phase 2では通知対象候補の表示まで、Phase 3では通知判定とWindows通知を実装する。
+閾値は1～100%の範囲で設定でき、初期値は99%とする。`resetsAt`がない場合は、利用枠ごとに永続化した回復連番を持ち、残量が一度閾値未満になった後で閾値以上へ遷移した場合だけ連番を増やす。過去状態がなく起動時点で閾値以上の場合は回復連番1の初回回復として最大1回通知できる。期間IDは`no-reset-time:{limitId}:{position}:{windowDurationMinutes}:recovery-sequence-{n}`形式とする。300分枠が存在しない状態も正常とする。
 
 ### FR-007 リセット期間の識別と重複通知防止
 
 重複通知防止のため、利用枠ごとのリセット期間を一意に識別する。
 
-優先順位は次のとおりとする。
+期間識別は通知種類に応じて次を使用する。
 
-1. App Serverから取得したリセット時刻およびウィンドウ情報
-2. 選択した通知対象の保存済みリセット時刻
-3. リセット時刻が取得できない短期枠では、閾値未満から閾値以上へ遷移した時刻を基準に生成した識別子
+1. `resetsAt`がある場合は、App Serverから取得したリセット時刻を使用する。
+2. `resetsAt`がない短期回復通知では、永続化した回復連番を使用する。
+3. `resetsAt`がない長期枠のリセット完了推定では、使用率低下を検出した取得イベントを識別する値を使用する。
 
 通知済み状態は、次の組み合わせで識別する。
 
@@ -344,7 +346,7 @@ Windows通知には少なくとも次を含める。
 
 - タイトル
 - 通知種別と通知段階
-- 選択した通知対象のLimitId、Position、Classification、ウィンドウ長、残量
+- 通知条件を満たした利用枠のLimitId、Position、Classification、ウィンドウ長、残量
 - 次回リセット時刻
 - リセットまでの残り時間
 - 確認時刻
@@ -352,6 +354,8 @@ Windows通知には少なくとも次を含める。
 通知をクリックした場合は、状態画面を開く。
 
 Windows通知が利用できない場合でも、Gmail通知と監視処理は継続する。
+
+タスクトレイの「テスト通知」サブメニューから、短期回復、Early、Standard、Final、リセット完了、監視障害を個別に送信できる。テスト通知は本番の通知済み状態、回復連番、利用枠履歴を変更せず、送信結果だけをログへ記録する。テスト通知のクリック時も状態画面を開く。
 
 ### FR-011 Gmail認証
 
@@ -402,6 +406,7 @@ Weeklyなどの長期枠について、リセット前通知を有効にでき�
 4. 取得時点で複数段階の条件が重なる場合の扱いは、段階の時間帯が重ならないよう上表の範囲で判定する。
 5. 未使用分が次の利用期間へ繰り越されることは確認できていないため、通知文では繰り越しまたは消滅を断定しない。
 6. 通知文では、リセット前に残量を確認できるよう通知していることを示す。
+7. `resetsAt`が存在しない場合は残り時間を推定せず、Early、Standard、Finalの候補にしない。
 
 ### FR-014 自動再接続
 
@@ -435,8 +440,9 @@ Codex App Serverまたは利用枠取得に失敗した場合、次の処理を�
 |---|---|
 | 5時間枠候補 | 存在しない場合は「5時間枠：未観測」 |
 | すべての利用枠 | 全LimitId、Position、Classification、期間、使用率、残量、次回リセット時刻、リセットまでの残り時間 |
-| 通知対象 | 各枠が現在の通知対象か |
-| 通知段階 | 各枠・リセット期間で送信済みの通知種別と段階 |
+| 通知設定 | 各枠の通知設定が有効か、および有効な通知種類 |
+| リセット情報 | `resetsAt`を取得できているか、次回リセット時刻、リセットまでの残り時間。未取得時は「リセット時刻未取得」 |
+| 枠別通知状態 | 各枠で最後に送信した通知、最後のリセット完了判定理由、回復連番 |
 | リセット回数 | 取得できる場合のみ |
 | 監視状態 | 正常、取得中、再接続中、エラー |
 | 最終取得 | 最終成功時刻 |
@@ -464,15 +470,13 @@ LimitId：codex
 
 次を設定できる。
 
+- LimitId、Position、WindowDurationMinutesで識別する利用枠別の通知種類
 - 短期枠回復通知の有効・無効と残量閾値
-- 長期枠リセット前通知の有効・無効
+- 長期枠のEarly、Standard、Final、リセット完了通知それぞれの有効・無効
 - 早期通知の残量閾値と残り時間
 - 通常通知の残量閾値と残り時間
 - 最終通知の残量閾値と残り時間
-- 長期枠リセット完了通知の有効・無効
 - Codex CLIの実行コマンドまたはパス
-- 通知対象の自動選択またはLimitId・Position・WindowDurationMinutesによる手動選択
-- Unknown枠を通知対象にするか
 - Windows通知の有効・無効
 - Gmail通知の有効・無効
 - Gmail送信先
@@ -507,6 +511,8 @@ LimitId：codex
 `state.json`には少なくとも次を保存する。
 
 - 利用枠・リセット期間・通知種別・通知段階ごとの通知状態
+- 利用枠ごとの閾値未満状態、直近残量、回復連番
+- 長期枠リセット完了の判定理由
 - Windows通知とGmail通知それぞれの送信結果
 - 条件成立時刻と送信時刻
 - 保留通知と保留終了時刻
@@ -529,6 +535,7 @@ LimitId：codex
 - 短期枠回復、長期枠リセット前、長期枠リセット完了の判定結果
 - 通知種別、通知段階、および重複抑止結果
 - Windows通知の成否
+- テスト通知の種類と送信成否
 - Gmail通知の成否
 - 再試行と復旧
 - 設定変更
@@ -545,12 +552,13 @@ Weeklyなどの長期枠について、新しい利用期間の開始を`LongWin
 1. `resetsAt`到達時は、初期値として60秒後に利用枠を再取得する。
 2. タイマーが`resetsAt`へ到達しただけでは、リセット完了または通知済みと確定しない。
 3. 再取得後、次のいずれかを確認した場合に新しいリセット期間と判定する。
-   - `resetsAt`が次の期間の値へ変化した。
-   - `usedPercent`がリセット前より50ポイント以上低下した。
-   - 保存済みのリセット期間IDと異なる期間として識別された。
+   - `resetsAt`が次の期間の値へ変化した場合は`ResetTimeAdvanced`とする。
+   - 同一のLimitId、Position、WindowDurationMinutesについて、前回の正常取得から`usedPercent`が50ポイント以上低下した場合は`UsageDropInference`とする。
 4. 新しい期間を確認できない場合は通知せず、補助確認または更新通知による次回取得を待つ。
 5. 同じ新しいリセット期間について最大1回だけ送る。
 6. 通知禁止時間中は保留し、禁止時間終了後に再取得して新しい期間を確認してから送る。
+7. `resetsAt`がない場合も`UsageDropInference`を適用できるが、49ポイント以下の低下では通知しない。
+8. 判定理由は通知状態と診断ログへ保存する。
 
 ## 7. 非機能要件
 
@@ -635,31 +643,56 @@ Weeklyなどの長期枠について、新しい利用期間の開始を`LongWin
 | WindowsDeliveryStatus | DeliveryStatus | Windows通知状態 |
 | GmailDeliveryStatus | DeliveryStatus | Gmail通知状態 |
 | DeferredUntilUtc | DateTimeOffset? | 保留終了時刻 |
+| ResetCompletionReason | ResetCompletionReason? | ResetTimeAdvancedまたはUsageDropInference |
 
 永続化キーはLimitId、Position、WindowDurationMinutes、RecoveryWindowId、NotificationType、NotificationStageの組み合わせとする。送信先ごとの成功・失敗を別々に保持し、一方の失敗によって成功済みの送信先へ重複送信しない。
 
-### 8.4 AppSettings
+### 8.4 RateLimitRecoveryState
 
-次の表は初版完成時の設定モデルを示す。通知別設定はPhase 3で内部設定モデルへ追加し、設定画面は後続フェーズで実装する。
+`resetsAt`がない短期枠の閾値遷移を再起動後も継続するため、次を利用枠ごとに保存する。
+
+| プロパティ | 型 | 説明 |
+|---|---|---|
+| LimitId | string | App Serverが返したlimitId |
+| Position | RateLimitPosition | PrimaryまたはSecondaryの位置 |
+| WindowDurationMinutes | int | ウィンドウ長 |
+| HasObservation | bool | 正常な残量を観測済みか |
+| WasBelowThreshold | bool | 直近観測が回復閾値未満だったか |
+| RecoverySequence | int | 閾値以上への回復連番 |
+| LastRemainingPercent | double | 直近観測の残量 |
+
+### 8.5 RateLimitNotificationSetting
+
+利用枠別設定はLimitId、Position、WindowDurationMinutesで識別し、ShortWindowRecovered、Early、Standard、Final、LongWindowResetCompletedをそれぞれ有効化できる。保存設定がない枠にはClassification別の既定値を適用する。
+
+| プロパティ | 型 | 説明 |
+|---|---|---|
+| LimitId | string | App Serverが返したlimitId |
+| Position | RateLimitPosition | PrimaryまたはSecondaryの位置 |
+| WindowDurationMinutes | int | ウィンドウ長 |
+| ShortWindowRecoveryEnabled | bool | 短期枠回復通知の有効状態 |
+| LongWindowEarlyWarningEnabled | bool | Early通知の有効状態 |
+| LongWindowStandardWarningEnabled | bool | Standard通知の有効状態 |
+| LongWindowFinalWarningEnabled | bool | Final通知の有効状態 |
+| LongWindowResetCompletedEnabled | bool | リセット完了通知の有効状態 |
+
+保存設定がない場合の既定値は、FiveHourがShortWindowRecoveryEnabledだけ有効、Weeklyが4種類の長期通知を有効、Unknownがすべて無効とする。保存設定がある場合は、Classificationにかかわらず指定された通知種類を適用する。
+
+### 8.6 AppSettings
+
+次の表は初版完成時の設定モデルを示す。通知別設定はPhase 3.1で内部設定モデルへ追加済みであり、設定画面からの編集は後続フェーズで実装する。
 
 | プロパティ | 初期値 |
 |---|---:|
 | CodexExecutablePath | codex |
-| NotificationTarget.Mode | Automatic |
-| NotificationTarget.LimitId | null |
-| NotificationTarget.Position | null |
-| NotificationTarget.WindowDurationMinutes | null |
-| ShortWindowRecoveryEnabled | true |
+| RateLimitNotifications | 空配列。観測枠にはClassification別既定値を適用 |
 | ShortWindowRecoveryThresholdPercent | 99 |
-| LongWindowPreResetNotificationEnabled | true |
 | LongWindowEarlyWarningThresholdPercent | 50 |
 | LongWindowEarlyWarningHours | 48 |
 | LongWindowStandardWarningThresholdPercent | 20 |
 | LongWindowStandardWarningHours | 24 |
 | LongWindowFinalWarningThresholdPercent | 10 |
 | LongWindowFinalWarningHours | 6 |
-| LongWindowResetCompletedNotificationEnabled | true |
-| IncludeUnknownRateLimitsInNotifications | false |
 | WindowsNotificationEnabled | true |
 | GmailNotificationEnabled | ユーザー選択 |
 | QuietHoursEnabled | true |
@@ -676,21 +709,22 @@ Weeklyなどの長期枠について、新しい利用期間の開始を`LongWin
 ```text
 利用枠取得成功
    │
-   ├─ 設定に従って通知対象を選択できない
-   │      └─ 正常な未観測状態として記録し、通知しない
+   ├─ すべての利用枠について利用枠別通知設定を解決
+   │      ├─ FiveHour既定：短期枠回復だけ有効
+   │      ├─ Weekly既定：Early／Standard／Final／リセット完了を有効
+   │      └─ Unknown既定：すべて無効
    │
-   ├─ Classification = FiveHourなどの短期枠
-   │      └─ 残量99%以上ならShortWindowRecovered候補
+   ├─ 短期枠回復が有効な各枠
+   │      ├─ resetsAtあり：残量99%以上ならShortWindowRecovered候補
+   │      └─ resetsAtなし：閾値未満→以上の遷移ごとに回復連番を増加
    │
-   ├─ Classification = Weeklyなどの長期枠
-   │      ├─ 48～24時間前・残量50%以上ならEarly候補
-   │      ├─ 24～6時間前・残量20%以上ならStandard候補
-   │      ├─ 6時間前～リセット前・残量10%以上ならFinal候補
-   │      └─ リセット予定後
-   │             └─ 再取得して新しいリセット期間か確認
-   │
-   ├─ Classification = Unknown
-   │      └─ 初期値では通知候補にしない
+   ├─ 長期枠通知が有効な各枠
+   │      ├─ resetsAtあり：48～24時間前・残量50%以上ならEarly候補
+   │      ├─ resetsAtあり：24～6時間前・残量20%以上ならStandard候補
+   │      ├─ resetsAtあり：6時間前～リセット前・残量10%以上ならFinal候補
+   │      ├─ resetsAtなし：リセット前通知は候補にしない
+   │      └─ リセット時刻の前進、または使用率50ポイント以上の低下
+   │             └─ リセット完了候補と判定理由を生成
    │
    ├─ 同じ利用枠・リセット期間・通知種別・段階で送信済み
    │      └─ 重複通知なし
@@ -727,6 +761,10 @@ Weeklyなどの長期枠について、新しい利用期間の開始を`LongWin
 - FiveHourの残量が前回98%、今回99%の場合に`ShortWindowRecovered`候補になる。
 - 短期枠回復閾値を100%に変更した場合、99%では通知候補にならない。
 - 同じ利用枠・リセット期間で再取得しても短期枠回復通知が重複しない。
+- `resetsAt`がないFiveHourで残量が閾値未満から閾値以上へ遷移した場合、回復連番を増やして通知候補になる。
+- `resetsAt`がなく閾値以上の状態が続く場合、同じ回復連番で重複通知しない。
+- 一度閾値未満へ戻った後に再び閾値以上になった場合、新しい回復連番の通知候補になる。
+- 過去状態がなく起動時点で閾値以上の場合、初回回復として最大1回だけ通知候補になる。
 
 ### AC-003 起動時通知
 
@@ -754,6 +792,7 @@ Weeklyなどの長期枠について、新しい利用期間の開始を`LongWin
 - リセットまで6時間以内かつ残量10%以上のWeekly枠が最終通知候補になる。
 - 同じ利用枠・リセット期間・通知段階について複数回送られない。
 - 各段階の有効時間を過ぎてから、期限切れの段階を遡って送らない。
+- `resetsAt`がない長期枠は残り時間を推定せず、Early、Standard、Finalの候補にならない。
 
 ### AC-007 Gmail
 
@@ -783,7 +822,9 @@ Weeklyなどの長期枠について、新しい利用期間の開始を`LongWin
 
 - リセット予定時刻へ到達しただけでは通知済み状態にならない。
 - リセット予定時刻後に利用枠を再取得する。
-- `resetsAt`の変化、`usedPercent`の50ポイント以上の低下、またはリセット期間IDの変化を確認した場合にリセット完了通知候補になる。
+- `resetsAt`が次の期間へ進んだ場合、`ResetTimeAdvanced`を理由としてリセット完了通知候補になる。
+- 前回と今回の正常取得で同一利用枠の`usedPercent`が50ポイント以上低下した場合、`resetsAt`の有無にかかわらず`UsageDropInference`を理由としてリセット完了通知候補になる。
+- `usedPercent`の低下が49ポイント以下の場合、使用率低下だけではリセット完了通知候補にならない。
 - 同じ新しいリセット期間についてリセット完了通知が重複しない。
 
 ### AC-012 Unknown枠と任意構成
@@ -792,6 +833,26 @@ Weeklyなどの長期枠について、新しい利用期間の開始を`LongWin
 - Unknown枠を通知対象にする設定の初期値が無効である。
 - primaryを短期枠、secondaryを長期枠と決めつけず、WindowDurationMinutesで分類できる。
 - 週間枠だけが存在する実アカウント相当のレスポンスをエラーなく処理できる。
+
+### AC-013 複数利用枠の同時通知
+
+- FiveHourとWeeklyが同時に存在する場合、両方を同時に通知対象にできる。
+- FiveHourの短期枠回復とWeeklyの各長期枠通知を独立して判定できる。
+- 一方の利用枠の通知済み状態が、別の利用枠の通知候補を抑止しない。
+- 利用枠別設定がない場合はClassification別の既定値を適用する。
+
+### AC-014 テスト通知
+
+- タスクトレイから短期枠回復、Early、Standard、Final、リセット完了、監視障害を個別に送信できる。
+- テスト通知の送信前後で、本番の通知済み状態、回復連番、利用枠履歴が変化しない。
+- テスト通知の種類と送信結果をログへ記録する。
+- テスト通知をクリックすると状態画面が開く。
+
+### AC-015 Phase 3.1状態表示
+
+- 取得した各枠について、通知設定の有効状態、有効な通知種類、`resetsAt`取得状態、リセットまでの残り時間を表示できる。
+- 取得した各枠について、最後に送信した通知、最後のリセット完了判定理由、回復連番を表示できる。
+- `resetsAt`がない枠には「リセット時刻未取得」、既定のUnknown枠には「通知対象外」と表示できる。
 
 ## 11. 単体テスト対象
 
@@ -810,7 +871,7 @@ Weeklyなどの長期枠について、新しい利用期間の開始を`LongWin
 11. 長期枠の6時間・10%以上の最終通知判定
 12. 期限切れのリセット前通知の破棄
 13. リセット予定後の再取得とリセット完了判定
-14. `resetsAt`変化、使用率低下、リセット期間ID変化の判定
+14. `resetsAt`変化と50ポイント以上の使用率低下、および各判定理由
 15. Unknown枠の通知除外、表示、履歴保存
 16. 再試行間隔
 17. 3回失敗時の障害通知
@@ -819,10 +880,15 @@ Weeklyなどの長期枠について、新しい利用期間の開始を`LongWin
 20. 通知種別に応じたGmail本文生成
 21. OAuth情報がログへ出ないこと
 22. 全limitId・全利用枠の保持
-23. 通知対象の自動・手動選択
+23. FiveHourとWeeklyの同時有効化およびUnknownの既定無効化
 24. 取得単位の全利用枠履歴保存
 25. 新しいLimitId・Position・WindowDurationMinutesの組み合わせの検出
 26. 週間枠だけの実アカウント相当レスポンスの処理
+27. `resetsAt`なしの短期枠における閾値遷移、継続中の重複抑止、回復連番の更新
+28. `resetsAt`なしの長期枠におけるリセット前通知の抑止
+29. 使用率が50ポイント低下した場合と49ポイント低下した場合の境界
+30. テスト通知によって本番の通知状態と利用枠履歴が変化しないこと
+31. 複数利用枠の通知状態が相互に干渉しないこと
 
 ## 12. 実装上の設計方針
 
@@ -970,7 +1036,7 @@ Codex実行用ワークスペースを準備
 - 画面表示
 - エラー表示
 - 全limitId・全利用枠の保持と分類
-- 通知対象候補の自動・手動選択モデル
+- 利用枠別通知設定の識別モデル
 - 全利用枠のJSONL観測履歴保存
 - 新規利用枠の検出ログ
 - 更新通知を契機としたデバウンス再取得
@@ -994,6 +1060,19 @@ Phase 2では通知判定、通知状態管理、通知段階・リセットま�
 
 Phase 3では、Windows通知を既存のタスクトレイアイコンから表示するバルーン通知として実装する。`usedPercent`によるリセット完了の補助判定は、初期値として50ポイント以上の低下を使用する。
 
+### Phase 3.1：複数枠通知基盤の完成
+
+- LimitId、Position、WindowDurationMinutes単位の通知種類設定
+- FiveHourとWeeklyを含む複数利用枠の独立した同時判定
+- Classification別の既定通知設定とUnknownの既定除外
+- `resetsAt`なしの短期枠に対する永続回復連番
+- `resetsAt`なしを含む使用率50ポイント低下によるリセット完了補助判定
+- ResetTimeAdvancedとUsageDropInferenceの判定理由保存・表示・ログ
+- 枠ごとの通知設定、リセット情報、最終通知、判定理由、回復連番の表示
+- 本番状態と履歴を変更しない6種類のWindowsテスト通知
+
+Phase 3.1ではGmail送信とGmail OAuthを実装しない。利用枠別設定の内部モデルとClassification別の既定値を実装し、設定画面からの編集は後続フェーズとする。
+
 ### Phase 4：Gmail
 
 - Google OAuth
@@ -1014,14 +1093,14 @@ Phase 3では、Windows通知を既存のタスクトレイアイコンから表
 以下は実装開始後、実機確認を踏まえて決定してよい。
 
 1. Gmail OAuthトークン保存の具体的なファイル形式
-2. 300分枠を返す実アカウントで、5時間枠候補と通知対象自動選択の実挙動を確認できるか
+2. 300分枠を返す実アカウントで、5時間枠候補と閾値遷移の実挙動を確認できるか
 3. 自分宛てGmailのスマートフォン通知の実機挙動
 4. 配布形式
 5. アプリ名・アイコン
 6. 短期枠回復通知の保留中に残量が閾値未満へ下がった場合も、回復していた事実を通知するか
-7. `resetsAt`が取得できない場合のリセット期間ID生成規則
-8. Unknown枠を通知対象にした場合、短期回復と長期リセット通知のどちらを適用するか
-9. 自動選択で短期枠と長期枠を同時に通知対象とするか、現在実装済みの単一候補選択を維持するか
+7. Unknown枠で通知を手動有効化する場合、どの通知種類を推奨するか
+8. 利用枠別通知設定を編集する画面の操作仕様
+9. `UsageDropInference`に使用する50ポイント閾値を設定可能にするか
 10. 未使用分が次の利用期間へ繰り越されるか。公式レスポンスからは未確認であり、通知文では断定しない
 
 ## 17. 公式参考資料
