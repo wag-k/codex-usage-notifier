@@ -11,6 +11,8 @@ namespace CodexUsageNotifier.Application.Notifications;
 /// </summary>
 public sealed partial class RateLimitNotificationProcessor
 {
+    private static readonly TimeSpan WindowsRetryDelay = TimeSpan.FromMinutes(5);
+    private static readonly TimeSpan WindowsInProgressTimeout = TimeSpan.FromMinutes(5);
     private readonly ApplicationStateStore stateStore;
     private readonly IWindowsNotificationSender windowsNotificationSender;
     private readonly TimeProvider timeProvider;
@@ -54,6 +56,10 @@ public sealed partial class RateLimitNotificationProcessor
         ArgumentNullException.ThrowIfNull(snapshot);
         ArgumentNullException.ThrowIfNull(settings);
         ApplicationState previousState = await stateStore.LoadAsync(cancellationToken);
+        previousState = await RecoverInterruptedWindowsAttemptsAsync(
+            previousState,
+            snapshot.CapturedAtUtc,
+            cancellationToken);
         RateLimitNotificationEvaluation evaluation = RateLimitNotificationPolicy.Evaluate(
             snapshot,
             previousState.LastUsageSnapshot,
@@ -88,11 +94,19 @@ public sealed partial class RateLimitNotificationProcessor
             foreach (RateLimitNotificationCandidate candidate in evaluation.Candidates)
             {
                 LogResetCompletionReason(candidate);
+                RateLimitNotificationState? existing = FindNotificationState(
+                    previousState.RateLimitNotificationStates,
+                    candidate);
                 RateLimitNotificationState deferred = CreateState(
                     candidate,
                     DeliveryStatus.NotAttempted,
                     deliveredAtUtc: null,
-                    deferredUntilUtc: quietHoursEnd);
+                    deferredUntilUtc: quietHoursEnd) with
+                {
+                    WindowsAttemptCount = existing?.WindowsAttemptCount ?? 0,
+                    WindowsLastAttemptedAtUtc = existing?.WindowsLastAttemptedAtUtc,
+                    WindowsNextRetryAtUtc = existing?.WindowsNextRetryAtUtc,
+                };
                 currentState = await SaveNotificationStateAsync(deferred, cancellationToken);
                 LogNotificationDeferred(
                     logger,
@@ -112,11 +126,13 @@ public sealed partial class RateLimitNotificationProcessor
         foreach (RateLimitNotificationCandidate candidate in evaluation.Candidates)
         {
             LogResetCompletionReason(candidate);
-            RateLimitNotificationState inProgress = CreateState(
+            RateLimitNotificationState? existing = FindNotificationState(
+                previousState.RateLimitNotificationStates,
+                candidate);
+            RateLimitNotificationState inProgress = CreateInProgressState(
                 candidate,
-                DeliveryStatus.InProgress,
-                deliveredAtUtc: null,
-                deferredUntilUtc: null);
+                existing,
+                timeProvider.GetUtcNow());
             await SaveNotificationStateAsync(inProgress, cancellationToken);
             inProgressStates.Add(inProgress);
         }
@@ -162,6 +178,7 @@ public sealed partial class RateLimitNotificationProcessor
                 RateLimitNotificationState failed = inProgress with
                 {
                     WindowsDeliveryStatus = DeliveryStatus.Failed,
+                    WindowsNextRetryAtUtc = attemptedAtUtc.Add(WindowsRetryDelay),
                 };
                 currentState = await SaveNotificationStateAsync(failed, cancellationToken);
                 LogNotificationFailed(logger, candidate.NotificationType, candidate.NotificationStage, exception);
@@ -267,6 +284,95 @@ public sealed partial class RateLimitNotificationProcessor
     }
 
     /// <summary>
+    /// 新規または再試行対象の候補からWindows送信中状態を生成します。
+    /// </summary>
+    /// <param name="candidate">今回送信する通知候補です。</param>
+    /// <param name="existing">同じ通知の保存済み状態です。</param>
+    /// <param name="attemptedAtUtc">表示要求を開始するUTC時刻です。</param>
+    /// <returns>試行回数を増加させた送信中状態です。</returns>
+    private static RateLimitNotificationState CreateInProgressState(
+        RateLimitNotificationCandidate candidate,
+        RateLimitNotificationState? existing,
+        DateTimeOffset attemptedAtUtc)
+    {
+        ArgumentNullException.ThrowIfNull(candidate);
+        RateLimitNotificationState state = CreateState(
+            candidate,
+            DeliveryStatus.InProgress,
+            deliveredAtUtc: existing?.DeliveredAtUtc,
+            deferredUntilUtc: null);
+        return state with
+        {
+            WindowsAttemptCount = (existing?.WindowsAttemptCount ?? 0) + 1,
+            WindowsLastAttemptedAtUtc = attemptedAtUtc,
+            WindowsNextRetryAtUtc = null,
+        };
+    }
+
+    /// <summary>
+    /// 強制終了などで残った古いWindows送信中状態を再試行可能な失敗状態へ戻します。
+    /// </summary>
+    /// <param name="state">読み込んだアプリケーション状態です。</param>
+    /// <param name="nowUtc">今回の正常取得UTC時刻です。</param>
+    /// <param name="cancellationToken">状態保存のキャンセル通知です。</param>
+    /// <returns>中断試行を回復済みの状態です。</returns>
+    private async Task<ApplicationState> RecoverInterruptedWindowsAttemptsAsync(
+        ApplicationState state,
+        DateTimeOffset nowUtc,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(state);
+        DateTimeOffset staleBeforeUtc = nowUtc.Subtract(WindowsInProgressTimeout);
+        bool hasInterrupted = state.RateLimitNotificationStates.Any(notification =>
+            notification.WindowsDeliveryStatus == DeliveryStatus.InProgress
+            && (notification.WindowsLastAttemptedAtUtc ?? notification.ConditionMetAtUtc) <= staleBeforeUtc);
+        if (!hasInterrupted)
+        {
+            return state;
+        }
+
+        ApplicationState recovered = await stateStore.UpdateAsync(
+            current => current with
+            {
+                RateLimitNotificationStates = current.RateLimitNotificationStates
+                    .Select(notification =>
+                        notification.WindowsDeliveryStatus == DeliveryStatus.InProgress
+                        && (notification.WindowsLastAttemptedAtUtc ?? notification.ConditionMetAtUtc) <= staleBeforeUtc
+                            ? notification with
+                            {
+                                WindowsDeliveryStatus = DeliveryStatus.Failed,
+                                WindowsNextRetryAtUtc = nowUtc,
+                            }
+                            : notification)
+                    .ToArray(),
+            },
+            cancellationToken);
+        LogInterruptedWindowsAttemptsRecovered(logger);
+        return recovered;
+    }
+
+    /// <summary>
+    /// 保存済み状態から通知候補と同じ複合キーの状態を検索します。
+    /// </summary>
+    /// <param name="states">検索対象の通知状態です。</param>
+    /// <param name="candidate">検索する通知候補です。</param>
+    /// <returns>同じ通知を表す状態、または未登録時のnullです。</returns>
+    private static RateLimitNotificationState? FindNotificationState(
+        IReadOnlyList<RateLimitNotificationState> states,
+        RateLimitNotificationCandidate candidate)
+    {
+        ArgumentNullException.ThrowIfNull(states);
+        ArgumentNullException.ThrowIfNull(candidate);
+        return states.FirstOrDefault(state =>
+            string.Equals(state.LimitId, candidate.Window.LimitId, StringComparison.Ordinal)
+            && state.Position == candidate.Window.Position
+            && state.WindowDurationMinutes == candidate.Window.WindowDurationMinutes
+            && string.Equals(state.RecoveryWindowId, candidate.RecoveryWindowId, StringComparison.Ordinal)
+            && state.NotificationType == candidate.NotificationType
+            && state.NotificationStage == candidate.NotificationStage);
+    }
+
+    /// <summary>
     /// リセット完了候補に判定理由がある場合は診断ログへ記録します。
     /// </summary>
     /// <param name="candidate">判定理由を確認する通知候補です。</param>
@@ -368,4 +474,7 @@ public sealed partial class RateLimitNotificationProcessor
         RateLimitPosition position,
         int? windowDurationMinutes,
         RateLimitResetCompletionReason reason);
+
+    [LoggerMessage(2305, LogLevel.Warning, "古いWindows通知送信中状態を再試行可能な状態へ戻しました。")]
+    private static partial void LogInterruptedWindowsAttemptsRecovered(ILogger logger);
 }

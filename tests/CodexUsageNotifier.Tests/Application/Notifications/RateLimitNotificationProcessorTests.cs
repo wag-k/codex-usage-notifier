@@ -2,6 +2,7 @@ using CodexUsageNotifier.Application.Abstractions;
 using CodexUsageNotifier.Application.Notifications;
 using CodexUsageNotifier.Application.State;
 using CodexUsageNotifier.Domain.Models;
+using CodexUsageNotifier.Domain.Services;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace CodexUsageNotifier.Tests.Application.Notifications;
@@ -116,6 +117,133 @@ public sealed class RateLimitNotificationProcessorTests
         Assert.AreEqual(2, result.State.RateLimitNotificationStates.Count);
         Assert.IsTrue(result.State.RateLimitNotificationStates.All(
             state => state.WindowsDeliveryStatus == DeliveryStatus.Succeeded));
+    }
+
+    /// <summary>
+    /// Windows通知が1回失敗した場合に指定時刻以降で再送し、成功後は重複しないことを検証します。
+    /// </summary>
+    [TestMethod]
+    public async Task ProcessAsync_FirstSendFails_RetriesThenStopsAfterSuccess()
+    {
+        DateTimeOffset nowUtc = new(2026, 8, 5, 8, 0, 0, TimeSpan.Zero);
+        InMemoryStateRepository repository = new();
+        using ApplicationStateStore stateStore = new(repository);
+        RecordingWindowsNotificationSender sender = new() { FailuresRemaining = 1 };
+        MutableTimeProvider timeProvider = new(nowUtc);
+        RateLimitNotificationProcessor processor = CreateProcessor(stateStore, sender, timeProvider);
+        RateLimitWindow window = CreateFiveHourWindow(nowUtc);
+
+        NotificationProcessingResult failed = await processor.ProcessAsync(
+            CreateSnapshot(window, nowUtc),
+            AppSettings.CreateDefault(),
+            CancellationToken.None);
+        timeProvider.SetUtcNow(nowUtc.AddMinutes(4));
+        await processor.ProcessAsync(
+            CreateSnapshot(window, nowUtc.AddMinutes(4)),
+            AppSettings.CreateDefault(),
+            CancellationToken.None);
+        timeProvider.SetUtcNow(nowUtc.AddMinutes(5));
+        NotificationProcessingResult succeeded = await processor.ProcessAsync(
+            CreateSnapshot(window, nowUtc.AddMinutes(5)),
+            AppSettings.CreateDefault(),
+            CancellationToken.None);
+        timeProvider.SetUtcNow(nowUtc.AddMinutes(6));
+        await processor.ProcessAsync(
+            CreateSnapshot(window, nowUtc.AddMinutes(6)),
+            AppSettings.CreateDefault(),
+            CancellationToken.None);
+
+        RateLimitNotificationState failedState = failed.State.RateLimitNotificationStates.Single();
+        RateLimitNotificationState succeededState = succeeded.State.RateLimitNotificationStates.Single();
+        Assert.AreEqual(2, sender.SendCount);
+        Assert.AreEqual(DeliveryStatus.Failed, failedState.WindowsDeliveryStatus);
+        Assert.AreEqual(1, failedState.WindowsAttemptCount);
+        Assert.AreEqual(nowUtc.AddMinutes(5), failedState.WindowsNextRetryAtUtc);
+        Assert.AreEqual(DeliveryStatus.Succeeded, succeededState.WindowsDeliveryStatus);
+        Assert.AreEqual(2, succeededState.WindowsAttemptCount);
+        Assert.IsNull(succeededState.WindowsNextRetryAtUtc);
+    }
+
+    /// <summary>
+    /// 強制終了で残った古い送信中状態を次の正常取得で回復し、再送することを検証します。
+    /// </summary>
+    [TestMethod]
+    public async Task ProcessAsync_StaleInProgress_RetriesOnNextFetch()
+    {
+        DateTimeOffset nowUtc = new(2026, 8, 5, 8, 0, 0, TimeSpan.Zero);
+        RateLimitWindow window = CreateFiveHourWindow(nowUtc);
+        string recoveryWindowId = RateLimitNotificationPolicy.CreateRecoveryWindowId(window, nowUtc);
+        InMemoryStateRepository repository = new();
+        await repository.SaveAsync(
+            new ApplicationState
+            {
+                InitialSetupCompleted = true,
+                RateLimitNotificationStates =
+                [
+                    new RateLimitNotificationState
+                    {
+                        LimitId = "codex",
+                        Position = RateLimitPosition.Primary,
+                        WindowDurationMinutes = 300,
+                        RecoveryWindowId = recoveryWindowId,
+                        NotificationType = RateLimitNotificationType.ShortWindowRecovered,
+                        NotificationStage = RateLimitNotificationStage.Recovered,
+                        ConditionMetAtUtc = nowUtc.AddMinutes(-10),
+                        WindowsDeliveryStatus = DeliveryStatus.InProgress,
+                        WindowsAttemptCount = 1,
+                        WindowsLastAttemptedAtUtc = nowUtc.AddMinutes(-10),
+                    },
+                ],
+            },
+            CancellationToken.None);
+        using ApplicationStateStore stateStore = new(repository);
+        RecordingWindowsNotificationSender sender = new();
+        RateLimitNotificationProcessor processor = CreateProcessor(
+            stateStore,
+            sender,
+            new MutableTimeProvider(nowUtc));
+
+        NotificationProcessingResult result = await processor.ProcessAsync(
+            CreateSnapshot(window, nowUtc),
+            AppSettings.CreateDefault(),
+            CancellationToken.None);
+
+        RateLimitNotificationState state = result.State.RateLimitNotificationStates.Single();
+        Assert.AreEqual(1, sender.SendCount);
+        Assert.AreEqual(DeliveryStatus.Succeeded, state.WindowsDeliveryStatus);
+        Assert.AreEqual(2, state.WindowsAttemptCount);
+    }
+
+    /// <summary>
+    /// Windows通知が失敗し続けても最大3回で再試行を停止することを検証します。
+    /// </summary>
+    [TestMethod]
+    public async Task ProcessAsync_RepeatedFailures_StopsAfterMaximumAttempts()
+    {
+        DateTimeOffset nowUtc = new(2026, 8, 5, 8, 0, 0, TimeSpan.Zero);
+        InMemoryStateRepository repository = new();
+        using ApplicationStateStore stateStore = new(repository);
+        RecordingWindowsNotificationSender sender = new() { FailuresRemaining = 4 };
+        MutableTimeProvider timeProvider = new(nowUtc);
+        RateLimitNotificationProcessor processor = CreateProcessor(stateStore, sender, timeProvider);
+        RateLimitWindow window = CreateFiveHourWindow(nowUtc);
+        NotificationProcessingResult? result = null;
+
+        for (int attempt = 0; attempt < 4; attempt++)
+        {
+            DateTimeOffset capturedAtUtc = nowUtc.AddMinutes(attempt * 5);
+            timeProvider.SetUtcNow(capturedAtUtc);
+            result = await processor.ProcessAsync(
+                CreateSnapshot(window, capturedAtUtc),
+                AppSettings.CreateDefault(),
+                CancellationToken.None);
+        }
+
+        Assert.IsNotNull(result);
+        RateLimitNotificationState state = result.State.RateLimitNotificationStates.Single();
+        Assert.AreEqual(3, sender.SendCount);
+        Assert.AreEqual(DeliveryStatus.Failed, state.WindowsDeliveryStatus);
+        Assert.AreEqual(3, state.WindowsAttemptCount);
     }
 
     /// <summary>
@@ -242,6 +370,11 @@ public sealed class RateLimitNotificationProcessorTests
     private sealed class RecordingWindowsNotificationSender : IWindowsNotificationSender
     {
         /// <summary>
+        /// 送信時に発生させる残り失敗回数を取得または設定します。
+        /// </summary>
+        public int FailuresRemaining { get; set; }
+
+        /// <summary>
         /// 送信されたWindows通知を取得します。
         /// </summary>
         public List<WindowsNotificationMessage> Messages { get; } = [];
@@ -265,6 +398,12 @@ public sealed class RateLimitNotificationProcessorTests
             cancellationToken.ThrowIfCancellationRequested();
             Messages.Add(message);
             SendCount++;
+            if (FailuresRemaining > 0)
+            {
+                FailuresRemaining--;
+                throw new InvalidOperationException("テスト用のWindows通知失敗です。");
+            }
+
             return Task.CompletedTask;
         }
     }

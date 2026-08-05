@@ -58,6 +58,9 @@ public sealed class JsonApplicationStateRepositoryTests
                     ConditionMetAtUtc = capturedAtUtc,
                     DeliveredAtUtc = capturedAtUtc,
                     WindowsDeliveryStatus = DeliveryStatus.Succeeded,
+                    WindowsAttemptCount = 2,
+                    WindowsLastAttemptedAtUtc = capturedAtUtc.AddMinutes(-1),
+                    WindowsNextRetryAtUtc = capturedAtUtc.AddMinutes(4),
                 },
             ],
             RateLimitRecoveryStates =
@@ -94,6 +97,13 @@ public sealed class JsonApplicationStateRepositoryTests
         Assert.AreEqual(
             RateLimitNotificationType.ShortWindowRecovered,
             actual.RateLimitNotificationStates.Single().NotificationType);
+        Assert.AreEqual(2, actual.RateLimitNotificationStates.Single().WindowsAttemptCount);
+        Assert.AreEqual(
+            capturedAtUtc.AddMinutes(-1),
+            actual.RateLimitNotificationStates.Single().WindowsLastAttemptedAtUtc);
+        Assert.AreEqual(
+            capturedAtUtc.AddMinutes(4),
+            actual.RateLimitNotificationStates.Single().WindowsNextRetryAtUtc);
         Assert.AreEqual(3, actual.RateLimitRecoveryStates.Single().RecoverySequence);
         Assert.IsFalse(Directory.EnumerateFiles(temporaryDirectory.Path, "*.tmp").Any());
     }

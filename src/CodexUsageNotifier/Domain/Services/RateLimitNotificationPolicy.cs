@@ -9,6 +9,11 @@ namespace CodexUsageNotifier.Domain.Services;
 public static class RateLimitNotificationPolicy
 {
     /// <summary>
+    /// 1つのWindows通知に許可する最大表示試行回数です。
+    /// </summary>
+    internal const int MaxWindowsAttemptCount = 3;
+
+    /// <summary>
     /// 取得できた全利用枠を独立に評価し、複数の通知候補と回復状態を返します。
     /// </summary>
     /// <param name="currentSnapshot">現在取得した全利用枠です。</param>
@@ -70,7 +75,8 @@ public static class RateLimitNotificationPolicy
                         recoveryState,
                         recoveryStarted,
                         settings),
-                    notificationStates);
+                    notificationStates,
+                    currentSnapshot.CapturedAtUtc);
             }
 
             RateLimitNotificationCandidate? deferredReset = RestoreDeferredResetCompleted(
@@ -86,7 +92,8 @@ public static class RateLimitNotificationPolicy
                     FindMatchingWindow(previousSnapshot, window),
                     windowSetting,
                     settings),
-                notificationStates);
+                notificationStates,
+                currentSnapshot.CapturedAtUtc);
         }
 
         return new RateLimitNotificationEvaluation
@@ -380,7 +387,8 @@ public static class RateLimitNotificationPolicy
     private static void AddIfPending(
         List<RateLimitNotificationCandidate> candidates,
         RateLimitNotificationCandidate? candidate,
-        IReadOnlyList<RateLimitNotificationState> notificationStates)
+        IReadOnlyList<RateLimitNotificationState> notificationStates,
+        DateTimeOffset nowUtc)
     {
         ArgumentNullException.ThrowIfNull(candidates);
         ArgumentNullException.ThrowIfNull(notificationStates);
@@ -394,10 +402,30 @@ public static class RateLimitNotificationPolicy
             && string.Equals(state.RecoveryWindowId, candidate.RecoveryWindowId, StringComparison.Ordinal)
             && state.NotificationType == candidate.NotificationType
             && state.NotificationStage == candidate.NotificationStage);
-        if (existing is null || existing.WindowsDeliveryStatus == DeliveryStatus.NotAttempted)
+        if (CanAttemptWindows(existing, nowUtc))
         {
             candidates.Add(candidate);
         }
+    }
+
+    /// <summary>
+    /// 保存済みWindows配送状態から、新規送信または失敗後の再試行が可能か判定します。
+    /// </summary>
+    /// <param name="existing">同じ通知を表す保存済み状態です。</param>
+    /// <param name="nowUtc">今回の正常取得UTC時刻です。</param>
+    /// <returns>Windows通知を試行できる場合はtrueです。</returns>
+    private static bool CanAttemptWindows(
+        RateLimitNotificationState? existing,
+        DateTimeOffset nowUtc)
+    {
+        if (existing is null || existing.WindowsDeliveryStatus == DeliveryStatus.NotAttempted)
+        {
+            return true;
+        }
+
+        return existing.WindowsDeliveryStatus == DeliveryStatus.Failed
+            && existing.WindowsAttemptCount < MaxWindowsAttemptCount
+            && (existing.WindowsNextRetryAtUtc is null || existing.WindowsNextRetryAtUtc <= nowUtc);
     }
 
     /// <summary>

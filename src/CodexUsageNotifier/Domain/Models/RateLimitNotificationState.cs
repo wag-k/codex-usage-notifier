@@ -51,6 +51,21 @@ public sealed record RateLimitNotificationState
     public DeliveryStatus WindowsDeliveryStatus { get; init; }
 
     /// <summary>
+    /// Windows通知を表示要求した累計回数を取得または設定します。
+    /// </summary>
+    public int WindowsAttemptCount { get; init; }
+
+    /// <summary>
+    /// Windows通知を最後に表示要求したUTC時刻を取得または設定します。
+    /// </summary>
+    public DateTimeOffset? WindowsLastAttemptedAtUtc { get; init; }
+
+    /// <summary>
+    /// Windows通知を次に再試行できるUTC時刻を取得または設定します。
+    /// </summary>
+    public DateTimeOffset? WindowsNextRetryAtUtc { get; init; }
+
+    /// <summary>
     /// Gmail通知の送信状態を取得または設定します。
     /// </summary>
     public DeliveryStatus GmailDeliveryStatus { get; init; }
