@@ -468,25 +468,47 @@ LimitId：codex
 
 ### FR-017 設定画面
 
-次を設定できる。
+Phase 4Aでは、タスクトレイの「設定」と状態画面からWPF設定画面を開き、次を設定できる。
 
-- LimitId、Position、WindowDurationMinutesで識別する利用枠別の通知種類
-- 短期枠回復通知の有効・無効と残量閾値
-- 長期枠のEarly、Standard、Final、リセット完了通知それぞれの有効・無効
+- FiveHourへ適用する短期枠回復通知の既定有効状態と残量閾値
+- Weeklyへ適用するEarly、Standard、Final、リセット完了通知それぞれの既定有効状態
 - 早期通知の残量閾値と残り時間
 - 通常通知の残量閾値と残り時間
 - 最終通知の残量閾値と残り時間
-- Codex CLIの実行コマンドまたはパス
 - Windows通知の有効・無効
 - Gmail通知の有効・無効
 - Gmail送信先
-- 通知禁止時間
-- 自動起動
-- 補助確認間隔
-- 履歴保存日数
-- ログレベル
+- 通知禁止時間の有効・無効、開始時刻、終了時刻
+- Windowsログイン時の自動起動設定値
+- 補助確認間隔（分）
 
-設定値の検証を行い、不正値を保存しない。
+Phase 4AではGoogle OAuth、Gmail API、Gmail送信を実装しない。認証状態は「未認証（Phase 4Bで実装）」と表示し、Google認証とテストメール送信ボタンを無効化する。Gmail通知は初期値を無効とし、未認証状態では有効化して保存できない。自動起動は設定値だけを保存し、Windowsへの登録は後続フェーズで実装する。
+
+取得済みの各利用枠について、LimitId、Position、WindowDurationMinutes、Classification、適用される通知設定、通知有効状態を表示する。FiveHourとWeeklyには編集した分類別既定値を適用する。Unknownは表示するが設定画面から有効化せず、「利用期間の意味を識別できないため、通知対象外です」と表示する。LimitId、Position、WindowDurationMinutesが一致する既存の利用枠別上書き設定は保持する。
+
+#### 入力検証
+
+1. 短期・長期の残量閾値は1～100%とする。
+2. Early、Standard、Finalの残り時間は正の整数とする。
+3. 残り時間は`Early > Standard > Final`の順とする。初期値は48時間、24時間、6時間とする。
+4. Gmail送信先は、入力されている場合だけメールアドレス形式とする。
+5. 補助確認間隔は1～1440分とする。
+6. 通知禁止時間は`HH:mm`形式とし、開始時刻が終了時刻より後の日付をまたぐ設定を許容する。
+7. 不正値がある場合は保存ボタンを無効にし、該当入力の近くへ理由を文字で表示する。
+
+#### 編集と保存
+
+1. 「保存」「キャンセル」「初期値へ戻す」を提供する。
+2. キャンセルは未保存変更を破棄して最後に読み込んだ設定へ戻す。
+3. タイトルバーから未保存変更がある画面を閉じる場合は、破棄確認を表示する。
+4. 初期値へ戻す操作だけでは保存せず、保存ボタンで確定する。
+5. 設定ファイルは一時ファイルへの書き込み後に置換する。
+6. ファイルI/OはUIスレッドで実行しない。
+7. 保存成功後、補助確認とリセット確認を再設定し、状態画面へ新設定を反映する。
+8. 保存だけを契機とした利用枠の即時取得や通知判定は行わず、次の正常取得から新設定を使用する。
+9. 設定保存時に通知済み状態、回復連番、利用枠履歴を初期化しない。
+10. 保存失敗時は編集前の永続設定を維持し、エラー理由を表示する。
+11. Tab、Enter、Escapeによるキーボード操作を可能とし、入力エラーは色だけで表現しない。
 
 ### FR-018 履歴保存
 
@@ -553,11 +575,11 @@ Weeklyなどの長期枠について、新しい利用期間の開始を`LongWin
 2. タイマーが`resetsAt`へ到達しただけでは、リセット完了または通知済みと確定しない。
 3. 再取得後、次のいずれかを確認した場合に新しいリセット期間と判定する。
    - `resetsAt`が次の期間の値へ変化した場合は`ResetTimeAdvanced`とする。
-   - 同一のLimitId、Position、WindowDurationMinutesについて、前回の正常取得から`usedPercent`が50ポイント以上低下した場合は`UsageDropInference`とする。
+   - 同一のLimitId、Position、WindowDurationMinutesについて、前回の正常取得から`usedPercent`が設定値`ResetInferenceUsageDropPoints`以上低下した場合は`UsageDropInference`とする。
 4. 新しい期間を確認できない場合は通知せず、補助確認または更新通知による次回取得を待つ。
 5. 同じ新しいリセット期間について最大1回だけ送る。
 6. 通知禁止時間中は保留し、禁止時間終了後に再取得して新しい期間を確認してから送る。
-7. `resetsAt`がない場合も`UsageDropInference`を適用できるが、49ポイント以下の低下では通知しない。
+7. `resetsAt`がない場合も`UsageDropInference`を適用できる。推定閾値の初期値は50ポイントとする。
 8. 判定理由は通知状態と診断ログへ保存する。
 
 ## 7. 非機能要件
@@ -585,6 +607,7 @@ Weeklyなどの長期枠について、新しい利用期間の開始を`LongWin
 - 待機中に高頻度ポーリングを行わない。
 - 取得処理が長時間応答しない場合はタイムアウトする。
 - UIスレッドで外部プロセス通信やネットワーク処理を行わない。
+- UIスレッドで設定ファイルの読み書きを行わない。
 
 ### NFR-004 保守性
 
@@ -680,21 +703,28 @@ Weeklyなどの長期枠について、新しい利用期間の開始を`LongWin
 
 ### 8.6 AppSettings
 
-次の表は初版完成時の設定モデルを示す。通知別設定はPhase 3.1で内部設定モデルへ追加済みであり、設定画面からの編集は後続フェーズで実装する。
+次の表はPhase 4A時点の設定モデルを示す。分類別既定値と画面項目は設定画面から編集でき、利用枠別上書き設定と非表示項目はJSON永続化時に保持する。
 
 | プロパティ | 初期値 |
 |---|---:|
 | CodexExecutablePath | codex |
 | RateLimitNotifications | 空配列。観測枠にはClassification別既定値を適用 |
+| ShortWindowRecoveryEnabled | true |
 | ShortWindowRecoveryThresholdPercent | 99 |
+| LongWindowEarlyWarningEnabled | true |
 | LongWindowEarlyWarningThresholdPercent | 50 |
 | LongWindowEarlyWarningHours | 48 |
+| LongWindowStandardWarningEnabled | true |
 | LongWindowStandardWarningThresholdPercent | 20 |
 | LongWindowStandardWarningHours | 24 |
+| LongWindowFinalWarningEnabled | true |
 | LongWindowFinalWarningThresholdPercent | 10 |
 | LongWindowFinalWarningHours | 6 |
+| LongWindowResetCompletedEnabled | true |
+| ResetInferenceUsageDropPoints | 50。画面には表示せず1～100の範囲で保持 |
 | WindowsNotificationEnabled | true |
-| GmailNotificationEnabled | ユーザー選択 |
+| GmailNotificationEnabled | false。Phase 4Aでは未認証のため有効化不可 |
+| GmailRecipient | null。入力時はメールアドレス形式 |
 | QuietHoursEnabled | true |
 | QuietHoursStart | 00:00 |
 | QuietHoursEnd | 07:00 |
@@ -703,6 +733,8 @@ Weeklyなどの長期枠について、新しい利用期間の開始を`LongWin
 | HistoryRetentionDays | 90 |
 | LogRetentionDays | 30 |
 | AutoStartEnabled | 初回設定で選択、初期表示はtrue |
+
+`ResetInferenceUsageDropPoints`が設定ファイル上で1～100の範囲外の場合は、この項目だけを50へ補正し、他の有効な設定値は維持する。Phase 4Aでは一般ユーザー向け画面から変更できない。
 
 ## 9. 通知判定フロー
 
@@ -723,7 +755,7 @@ Weeklyなどの長期枠について、新しい利用期間の開始を`LongWin
    │      ├─ resetsAtあり：24～6時間前・残量20%以上ならStandard候補
    │      ├─ resetsAtあり：6時間前～リセット前・残量10%以上ならFinal候補
    │      ├─ resetsAtなし：リセット前通知は候補にしない
-   │      └─ リセット時刻の前進、または使用率50ポイント以上の低下
+   │      └─ リセット時刻の前進、または設定閾値以上の使用率低下
    │             └─ リセット完了候補と判定理由を生成
    │
    ├─ 同じ利用枠・リセット期間・通知種別・段階で送信済み
@@ -854,6 +886,22 @@ Weeklyなどの長期枠について、新しい利用期間の開始を`LongWin
 - 取得した各枠について、最後に送信した通知、最後のリセット完了判定理由、回復連番を表示できる。
 - `resetsAt`がない枠には「リセット時刻未取得」、既定のUnknown枠には「通知対象外」と表示できる。
 
+### AC-016 Phase 4A設定画面
+
+- タスクトレイと状態画面の両方から設定画面を開ける。
+- 保存済み設定を読み込み、編集、理由付き検証、保存、キャンセル、初期値復元ができる。
+- 1%と100%の通知閾値を保存でき、0%と101%は保存できない。
+- Early、Standard、Finalの残り時間が正で、かつ降順の場合だけ保存できる。
+- 通知禁止時間に日付をまたぐ開始・終了時刻を保存できる。
+- Gmail送信先は未入力またはメールアドレス形式の場合だけ保存できる。
+- Gmail未認証のPhase 4AではGmail通知を有効化できず、認証とテスト送信ボタンが無効である。
+- 取得済みのFiveHourとWeeklyへ編集した既定設定を表示し、Unknownは説明付きの通知対象外として表示する。
+- 保存成功後は再起動せず監視スケジュールと状態表示へ反映し、次の正常取得から通知判定に使用する。
+- 保存操作だけでは利用枠を即時取得せず、通知済み状態、回復連番、履歴を消去しない。
+- 保存失敗時は元の永続設定を維持する。
+- `ResetInferenceUsageDropPoints`の初期値が50で、不正なファイル値はこの項目だけ50へ補正される。
+- 保存後にアプリを再起動しても設定値が維持される。
+
 ## 11. 単体テスト対象
 
 最低限、次を単体テストする。
@@ -889,6 +937,20 @@ Weeklyなどの長期枠について、新しい利用期間の開始を`LongWin
 29. 使用率が50ポイント低下した場合と49ポイント低下した場合の境界
 30. テスト通知によって本番の通知状態と利用枠履歴が変化しないこと
 31. 複数利用枠の通知状態が相互に干渉しないこと
+32. 設定画面ViewModelの初期設定読み込み
+33. 設定編集、JSON保存、および監視反映先への通知
+34. キャンセルによる変更破棄
+35. 画面項目の初期値復元
+36. 通知閾値1%・100%と範囲外の境界
+37. Early、Standard、Finalの正数と時間順序
+38. Gmail送信先のメールアドレス形式
+39. 日付をまたぐ通知禁止時間の入力
+40. 不正なResetInferenceUsageDropPointsだけの初期値フォールバック
+41. 設定保存時に通知済み状態と回復連番を維持すること
+42. Unknown枠の設定画面上の通知除外
+43. Gmail未認証時の有効化抑止
+44. 分類別既定通知設定の編集反映
+45. 設定した使用率低下推定閾値によるリセット完了判定
 
 ## 12. 実装上の設計方針
 
@@ -904,6 +966,7 @@ IGmailNotificationSender
 IUsageHistoryRepository
 IApplicationStateRepository
 ISettingsRepository
+ISettingsChangeSink
 IClock
 IAutoStartManager
 IPowerEventSource
@@ -1073,7 +1136,21 @@ Phase 3では、Windows通知を既存のタスクトレイアイコンから表
 
 Phase 3.1ではGmail送信とGmail OAuthを実装しない。利用枠別設定の内部モデルとClassification別の既定値を実装し、設定画面からの編集は後続フェーズとする。
 
-### Phase 4：Gmail
+### Phase 4A：設定画面
+
+- タスクトレイと状態画面から開くWPF設定画面
+- 全般、短期枠、長期枠、Gmail表示項目の編集と検証
+- FiveHourとWeeklyの分類別既定通知設定
+- 取得済み利用枠と適用通知設定の表示
+- Unknown枠の表示と設定画面上の通知有効化抑止
+- 非同期の設定読み込み・原子的保存
+- キャンセル、初期値復元、未保存変更の破棄確認
+- 保存後の監視タイマーと状態表示への再起動なし反映
+- `ResetInferenceUsageDropPoints`の内部設定化と不正値フォールバック
+
+Phase 4AではGoogle OAuth、Gmail API、Gmail送信、テストメール送信を実装しない。Gmail認証関連ボタンは無効表示とする。自動起動は設定値だけを扱い、Windowsへの登録処理は実装しない。
+
+### Phase 4B：Gmail
 
 - Google OAuth
 - 認証情報保護
@@ -1099,8 +1176,8 @@ Phase 3.1ではGmail送信とGmail OAuthを実装しない。利用枠別設定�
 5. アプリ名・アイコン
 6. 短期枠回復通知の保留中に残量が閾値未満へ下がった場合も、回復していた事実を通知するか
 7. Unknown枠で通知を手動有効化する場合、どの通知種類を推奨するか
-8. 利用枠別通知設定を編集する画面の操作仕様
-9. `UsageDropInference`に使用する50ポイント閾値を設定可能にするか
+8. LimitId単位の上書き通知設定を設定画面から直接編集できるようにするか
+9. `ResetInferenceUsageDropPoints`を一般ユーザー向け画面へ公開するか
 10. 未使用分が次の利用期間へ繰り越されるか。公式レスポンスからは未確認であり、通知文では断定しない
 
 ## 17. 公式参考資料
