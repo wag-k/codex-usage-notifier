@@ -131,6 +131,45 @@ public sealed class UsageMonitorTests
     }
 
     /// <summary>
+    /// 更新通知が短時間に連続しても最後のデバウンス処理だけが1回取得することを検証します。
+    /// </summary>
+    [TestMethod]
+    public async Task RateLimitsUpdated_BurstEvents_DebouncesToSingleRefresh()
+    {
+        BlockingRateLimitClient client = new();
+        client.ReleaseFirstRequest.TrySetResult();
+        InMemoryStateRepository repository = new();
+        using ApplicationStateStore stateStore = new(repository);
+        RecordingStatusSink statusSink = new();
+        RateLimitNotificationProcessor notificationProcessor = new(
+            stateStore,
+            new RecordingWindowsNotificationSender(),
+            TimeProvider.System,
+            NullLogger<RateLimitNotificationProcessor>.Instance);
+        await using UsageMonitor monitor = new(
+            client,
+            stateStore,
+            new InMemorySettingsRepository(),
+            new RecordingHistoryRepository(),
+            new FakePowerEventSource(),
+            notificationProcessor,
+            statusSink,
+            TimeProvider.System,
+            NullLogger<UsageMonitor>.Instance);
+
+        for (int index = 0; index < 20; index++)
+        {
+            client.RaiseRateLimitsUpdated();
+        }
+
+        await statusSink.SnapshotReceived.Task.WaitAsync(TimeSpan.FromSeconds(3));
+        await Task.Delay(TimeSpan.FromMilliseconds(200));
+
+        Assert.AreEqual(1, client.CallCount);
+        Assert.AreEqual(1, statusSink.SnapshotCount);
+    }
+
+    /// <summary>
     /// 最初の要求だけを任意の時点まで停止できる利用枠クライアントです。
     /// </summary>
     private sealed class BlockingRateLimitClient : ICodexRateLimitClient
@@ -206,6 +245,11 @@ public sealed class UsageMonitorTests
             _ = RateLimitsUpdated;
             _ = ConnectionLost;
         }
+
+        /// <summary>
+        /// App Serverからの利用枠更新通知を発行します。
+        /// </summary>
+        public void RaiseRateLimitsUpdated() => RateLimitsUpdated?.Invoke(this, EventArgs.Empty);
     }
 
     /// <summary>

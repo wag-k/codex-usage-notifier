@@ -282,9 +282,11 @@ public sealed partial class UsageMonitor : IAsyncDisposable, ISettingsChangeSink
         {
             debounceCancellation?.Cancel();
             debounceCancellation?.Dispose();
-            debounceCancellation = CancellationTokenSource.CreateLinkedTokenSource(lifetimeCancellation.Token);
+            CancellationTokenSource scheduledCancellation =
+                CancellationTokenSource.CreateLinkedTokenSource(lifetimeCancellation.Token);
+            debounceCancellation = scheduledCancellation;
             debounceTask = Task.Run(
-                () => DebounceRefreshAsync(debounceCancellation.Token),
+                () => DebounceRefreshAsync(scheduledCancellation.Token),
                 CancellationToken.None);
         }
     }
