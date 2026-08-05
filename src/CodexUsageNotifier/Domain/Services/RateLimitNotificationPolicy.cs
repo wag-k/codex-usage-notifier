@@ -218,40 +218,43 @@ public static class RateLimitNotificationPolicy
             return null;
         }
 
-        if (windowSetting.LongWindowFinalWarningEnabled
-            && remaining <= TimeSpan.FromHours(settings.LongWindowFinalWarningHours)
-            && window.RemainingPercent >= settings.LongWindowFinalWarningThresholdPercent)
+        if (remaining <= TimeSpan.FromHours(settings.LongWindowFinalWarningHours))
         {
-            return CreateCandidate(
-                currentSnapshot,
-                window,
-                CreateRecoveryWindowId(window, currentSnapshot.CapturedAtUtc),
-                RateLimitNotificationType.LongWindowFinalWarning,
-                RateLimitNotificationStage.Final);
+            return windowSetting.LongWindowFinalWarningEnabled
+                && window.RemainingPercent >= settings.LongWindowFinalWarningThresholdPercent
+                    ? CreateCandidate(
+                        currentSnapshot,
+                        window,
+                        CreateRecoveryWindowId(window, currentSnapshot.CapturedAtUtc),
+                        RateLimitNotificationType.LongWindowFinalWarning,
+                        RateLimitNotificationStage.Final)
+                    : null;
         }
 
-        if (windowSetting.LongWindowStandardWarningEnabled
-            && remaining <= TimeSpan.FromHours(settings.LongWindowStandardWarningHours)
-            && window.RemainingPercent >= settings.LongWindowStandardWarningThresholdPercent)
+        if (remaining <= TimeSpan.FromHours(settings.LongWindowStandardWarningHours))
         {
-            return CreateCandidate(
-                currentSnapshot,
-                window,
-                CreateRecoveryWindowId(window, currentSnapshot.CapturedAtUtc),
-                RateLimitNotificationType.LongWindowStandardWarning,
-                RateLimitNotificationStage.Standard);
+            return windowSetting.LongWindowStandardWarningEnabled
+                && window.RemainingPercent >= settings.LongWindowStandardWarningThresholdPercent
+                    ? CreateCandidate(
+                        currentSnapshot,
+                        window,
+                        CreateRecoveryWindowId(window, currentSnapshot.CapturedAtUtc),
+                        RateLimitNotificationType.LongWindowStandardWarning,
+                        RateLimitNotificationStage.Standard)
+                    : null;
         }
 
-        if (windowSetting.LongWindowEarlyWarningEnabled
-            && remaining <= TimeSpan.FromHours(settings.LongWindowEarlyWarningHours)
-            && window.RemainingPercent >= settings.LongWindowEarlyWarningThresholdPercent)
+        if (remaining <= TimeSpan.FromHours(settings.LongWindowEarlyWarningHours))
         {
-            return CreateCandidate(
-                currentSnapshot,
-                window,
-                CreateRecoveryWindowId(window, currentSnapshot.CapturedAtUtc),
-                RateLimitNotificationType.LongWindowEarlyWarning,
-                RateLimitNotificationStage.Early);
+            return windowSetting.LongWindowEarlyWarningEnabled
+                && window.RemainingPercent >= settings.LongWindowEarlyWarningThresholdPercent
+                    ? CreateCandidate(
+                        currentSnapshot,
+                        window,
+                        CreateRecoveryWindowId(window, currentSnapshot.CapturedAtUtc),
+                        RateLimitNotificationType.LongWindowEarlyWarning,
+                        RateLimitNotificationStage.Early)
+                    : null;
         }
 
         return null;

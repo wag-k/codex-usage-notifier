@@ -315,6 +315,42 @@ public sealed class RateLimitNotificationPolicyTests
     }
 
     /// <summary>
+    /// Final時間帯でFinalを無効にしてもStandardへフォールバックしないことを検証します。
+    /// </summary>
+    [TestMethod]
+    public void Evaluate_FinalBandWithFinalDisabled_DoesNotSendStandard()
+    {
+        AppSettings settings = AppSettings.CreateDefault() with
+        {
+            LongWindowFinalWarningEnabled = false,
+        };
+
+        RateLimitNotificationEvaluation result = Evaluate(
+            [CreateWindow("codex", RateLimitPosition.Primary, RateLimitClassification.Weekly, 10080, 65, NowUtc.AddHours(5))],
+            settings: settings);
+
+        Assert.AreEqual(0, result.Candidates.Count);
+    }
+
+    /// <summary>
+    /// Standard時間帯でStandardを無効にしてもEarlyへフォールバックしないことを検証します。
+    /// </summary>
+    [TestMethod]
+    public void Evaluate_StandardBandWithStandardDisabled_DoesNotSendEarly()
+    {
+        AppSettings settings = AppSettings.CreateDefault() with
+        {
+            LongWindowStandardWarningEnabled = false,
+        };
+
+        RateLimitNotificationEvaluation result = Evaluate(
+            [CreateWindow("codex", RateLimitPosition.Primary, RateLimitClassification.Weekly, 10080, 65, NowUtc.AddHours(20))],
+            settings: settings);
+
+        Assert.AreEqual(0, result.Candidates.Count);
+    }
+
+    /// <summary>
     /// 1つの利用枠で送信済み状態があっても別利用枠の通知候補を妨げないことを検証します。
     /// </summary>
     [TestMethod]
