@@ -151,14 +151,23 @@ Phase 1完了時の懸念点1「App Serverのプロセス所有権」と懸念�
 
 ### 4.4 Gmail API
 
-Gmail通知にはGmail APIを使用する。
+Phase 4Bの認証とテストメール、およびPhase 4Cの本番通知にはGmail APIを使用する。
 
 - 認証方式：OAuth 2.0
 - アプリ種別：デスクトップアプリ
+- 認証UI：システム既定ブラウザー
+- リダイレクト：ローカルループバックIP
+- 認証コード保護：PKCE
 - メール送信：`users.messages.send`
+- `userId`：認証ユーザー自身を示す`me`
 - メール形式：MIME形式をBase64URLエンコード
 - 送信元：認証したGoogleアカウント
 - 送信先：初期値は送信元と同じアドレス
+- OAuthスコープ：`https://www.googleapis.com/auth/gmail.send`、`openid`、`email`
+
+`gmail.send`はメール送信、`openid`と`email`は認証アカウントの識別とメールアドレス表示にだけ使用する。Gmail本文・一覧の読み取り、削除、設定変更、Google Drive、Google Contactsの権限は要求しない。
+
+Phase 4BはGoogle認証と設定画面からのテストメール送信だけを提供する。通知候補をGmailへ本番配送する処理、Gmail配送再試行、および通知禁止時間中の本番Gmail保留はPhase 4Cの対象とする。
 
 ## 5. 対象範囲
 
@@ -210,7 +219,7 @@ Gmail通知にはGmail APIを使用する。
    - 状態を開く
    - 今すぐ確認
    - 設定
-   - Gmailテスト送信
+   - Windowsテスト通知
    - ログフォルダを開く
    - 終了
 4. 明示的に「終了」を選択した場合のみプロセスを終了する。
@@ -365,23 +374,36 @@ Windows通知が利用できない場合でも、Gmail通知と監視処理は�
 
 1. Gmail APIのOAuth 2.0を使用する。
 2. 認証にはシステム既定ブラウザを使用する。
-3. Gmailの通常パスワードを取得・保存しない。
-4. 必要最小限の送信権限を要求する。
-5. 認証状態を画面に表示する。
-6. 認証解除機能を設ける。
-7. 失効・取消時には再認証を案内する。
-8. アクセストークンの更新はGoogleのクライアントライブラリまたは同等の安全な処理へ委譲する。
-9. 永続化する認証情報はWindowsのユーザー単位で暗号化する。
-10. OAuthクライアント設定ファイルはGit管理対象外とする。
+3. デスクトップアプリ用OAuthクライアント、PKCE、ローカルループバックIPリダイレクトを使用し、Device Code Flow、埋め込みブラウザー、OOBコピーは使用しない。
+4. Gmailの通常パスワードを取得・保存しない。
+5. `gmail.send`、`openid`、`email`だけを要求し、用途は4.4に従う。
+6. OAuthクライアント設定の標準配置先を`%LOCALAPPDATA%\CodexUsageNotifier\auth\google-oauth-client.json`とする。
+7. 設定画面から選択したJSONは、デスクトップアプリ用の必須項目とループバックURIを検証し、正常な場合だけ一時ファイルから標準配置先へ置換する。不正時は既存ファイルを上書きしない。
+8. クライアントIDとクライアントシークレットをソースへ埋め込まず、設定ファイルと認証情報ファイルをGit管理対象外とする。
+9. 認証処理は最大1件とし、多重ブラウザー起動を防ぐ。アプリ終了とユーザー操作でキャンセルでき、リダイレクト待機は5分でタイムアウトする。
+10. `state`検証、PKCE、認証コード交換はGoogle公式クライアントライブラリへ委譲する。
+11. 認証状態として`NotConfigured`、`Unauthenticated`、`Authenticating`、`Authenticated`、`RefreshRequired`、`ReauthenticationRequired`、`Error`を表現する。
+12. 認証状態には認証済みメールアドレス、最終認証成功UTC時刻、最終トークン更新UTC時刻、安全な最終エラー概要、クライアント設定有無、テスト送信可否、再認証要否を保持できる。トークン本体を画面モデルと`AppSettings`へ含めない。
+13. アクセストークン、リフレッシュトークン、IDトークンを含むGoogleデータストア全体を、Windows DPAPIの`CurrentUser`スコープで暗号化する。
+14. 暗号化済み認証情報は`%LOCALAPPDATA%\CodexUsageNotifier\auth\google-oauth-credentials.dat`へ、スキーマバージョン付き形式で一時ファイルから置換して保存する。
+15. Google公式クライアントの平文ファイルデータストアは使用しない。`IDataStore`をDPAPIストアへ差し替え、更新されたトークンも同じストアへ保存する。
+16. ファイル破損、復号失敗、別Windowsユーザーからの読み込みはアプリ全体を終了させず、`ReauthenticationRequired`として案内する。
+17. 期限切れアクセストークンはGoogle公式クライアントで単一実行更新する。通常の更新成功ではブラウザー再認証を要求しない。
+18. `invalid_grant`、権限取消、リフレッシュトークン失効、Gmail API 401では再認証必要状態へ移行する。一時的なネットワーク障害では認証情報を削除しない。
+19. 認証解除前に確認し、Google側のトークン失効を可能な範囲で試みた後、ローカル認証情報を削除して`GmailNotificationEnabled`をfalseへ保存する。送信先設定は維持してよい。
+20. Google側の失効失敗とローカル削除結果を区別し、Google側失効が失敗してもユーザーが明示したローカル削除は試行する。ローカル削除失敗を隠さない。
+21. OAuth設定なし・不正、ユーザーキャンセル、ブラウザーを閉じた後の待機タイムアウト、ローカルポート使用不可、ネットワーク障害、OAuthサーバーエラー、権限拒否、リフレッシュトークン未取得、更新失敗、`invalid_grant`、権限取消、暗号化・復号・保存・削除失敗を安全な状態とメッセージへ分類する。
+22. ユーザーキャンセルは正常操作として`Unauthenticated`を維持する。ブラウザーを閉じてコールバックがない場合はタイムアウト後に再試行を案内する。
+23. 認証サービス、資格情報ストア、Google APIクライアント、MIME生成、テスト送信、認証状態表示を分離し、OAuth、暗号化、MIME、API通信をViewModelとコードビハインドへ実装しない。
 
 ### FR-012 Gmail送信
 
 1. Gmail通知の有効・無効を設定できる。
 2. 送信先の初期値は、認証したGmailアドレスと同じアドレスとする。
 3. 送信先は設定画面で変更できる。
-4. 件名は通知種別に応じて、短期枠回復、長期枠リセット前、長期枠リセット完了を判別できる内容とする。
+4. Phase 4Cの本番通知件名は通知種別に応じて、短期枠回復、長期枠リセット前、長期枠リセット完了を判別できる内容とする。
 
-5. 本文に次を含める。
+5. Phase 4Cの本番通知本文に次を含める。
    - 通知種別と通知段階
    - 通知対象のLimitId、Position、Classification、ウィンドウ長、残量
    - 次回リセット時刻
@@ -389,10 +411,12 @@ Windows通知が利用できない場合でも、Gmail通知と監視処理は�
    - 条件成立時刻
    - 送信時刻
 6. MIMEメールをBase64URL形式でエンコードし、Gmail APIで送信する。
-7. テスト送信機能を提供する。
+7. Phase 4Bでは設定画面からUTF-8日本語の件名・本文を持つテストメールを個別送信できる。SMTPは使用しない。
 8. 自分宛てメールで端末通知が届くか、初期設定時に確認を促す。
-9. 送信失敗時はログへ記録し、Windows通知で知らせる。
-10. 同じリセット期間・通知種別・通知段階の送信失敗は、指数バックオフを用いて最大3回再試行する。
+9. Phase 4Bのテスト送信結果は画面と安全なログだけへ記録し、本番の`RateLimitNotificationState`、`GmailDeliveryStatus`、試行回数、回復連番、利用枠履歴を作成・変更しない。
+10. テスト送信は同時に最大1件とし、認証済みかつ送信先が有効な場合だけ実行できる。
+11. Gmail APIの401、403、API未有効化、一時的なネットワーク・サーバー障害を区別し、安全で操作可能な概要を表示する。
+12. Phase 4Cの本番送信失敗はログとWindows通知で知らせ、同じリセット期間・通知種別・通知段階についてチャネル別の再試行方針を適用する。
 
 ### FR-013 長期枠のリセット前通知
 
@@ -472,7 +496,7 @@ LimitId：codex
 
 ### FR-017 設定画面
 
-Phase 4Aでは、タスクトレイの「設定」と状態画面からWPF設定画面を開き、次を設定できる。
+タスクトレイの「設定」と状態画面からWPF設定画面を開き、次を設定できる。
 
 - FiveHourへ適用する短期枠回復通知の既定有効状態と残量閾値
 - Weeklyへ適用するEarly、Standard、Final、リセット完了通知それぞれの既定有効状態
@@ -486,7 +510,9 @@ Phase 4Aでは、タスクトレイの「設定」と状態画面からWPF設定
 - Windowsログイン時の自動起動設定値
 - 補助確認間隔（分）
 
-Phase 4AではGoogle OAuth、Gmail API、Gmail送信を実装しない。認証状態は「未認証（Phase 4Bで実装）」と表示し、Google認証とテストメール送信ボタンを無効化する。Gmail通知は初期値を無効とし、未認証状態では有効化して保存できない。自動起動は設定値だけを保存し、Windowsへの登録は後続フェーズで実装する。
+Phase 4Bでは、OAuthクライアント設定の状態と標準配置先、認証状態、認証済みGoogleアカウント、最終認証成功時刻、再認証要否、最終テスト送信結果を表示する。「OAuthクライアント設定ファイルを選択」「Googleアカウントで認証」「再認証」「認証解除」「テストメール送信」を提供する。OAuth設定がない場合は認証、未認証または送信先不正の場合はテスト送信を無効化し、認証中・送信中の同じ操作を重複実行しない。
+
+認証成功後に`GmailRecipient`が空なら認証済みアドレスを初期入力する。Gmail通知は初期値を無効とし、認証済みかつ送信先が有効な場合だけtrueとして保存できる。画面には、Phase 4Bは認証とテスト送信だけであり、本番の利用枠通知メールはPhase 4Cで実装することを明記する。自動起動は設定値だけを保存し、Windowsへの登録は後続フェーズで実装する。
 
 取得済みの各利用枠について、LimitId、Position、WindowDurationMinutes、Classification、適用される通知設定、通知有効状態を表示する。FiveHourとWeeklyには編集した分類別既定値を適用する。Unknownは表示するが設定画面から有効化せず、「利用期間の意味を識別できないため、通知対象外です」と表示する。LimitId、Position、WindowDurationMinutesが一致する既存の利用枠別上書き設定は保持する。
 
@@ -513,6 +539,8 @@ Phase 4AではGoogle OAuth、Gmail API、Gmail送信を実装しない。認証�
 9. 設定保存時に通知済み状態、回復連番、利用枠履歴を初期化しない。
 10. 保存失敗時は編集前の永続設定を維持し、エラー理由を表示する。
 11. Tab、Enter、Escapeによるキーボード操作を可能とし、入力エラーは色だけで表現しない。
+12. OAuth設定ファイルI/O、DPAPI、OAuth通信、Gmail API通信はUIスレッドで実行しない。
+13. 認証解除でGmail通知設定だけを即時無効化しても、他の未保存編集、通知済み状態、回復連番、利用枠履歴を消去しない。
 
 ### FR-018 履歴保存
 
@@ -550,6 +578,8 @@ Phase 4AではGoogle OAuth、Gmail API、Gmail送信を実装しない。認証�
 
 状態ファイルは一時ファイルへ書き込んだ後に置換し、書き込み途中の破損を防止する。
 
+OAuthトークンと認証メタデータは`state.json`や`settings.json`へ混在させず、FR-011のDPAPI保護ストアへ分離する。Phase 4Bのテストメールは`state.json`を更新しない。
+
 ### FR-020 ログ
 
 通常ログには次を記録する。
@@ -563,11 +593,16 @@ Phase 4AではGoogle OAuth、Gmail API、Gmail送信を実装しない。認証�
 - Windows通知の成否
 - テスト通知の種類と送信成否
 - Gmail通知の成否
+- OAuthクライアント設定の読み込み
+- OAuth認証の開始、成功、キャンセル、失敗
+- アクセストークン更新と再認証必要状態への移行
+- 認証解除のGoogle側失効結果とローカル削除結果
+- Gmailテスト送信の開始、成功、失敗
 - 再試行と復旧
 - 設定変更
 - 履歴削除
 
-認証トークン、メール本文の機密情報、OAuthシークレットをログへ出力しない。
+`access_token`、`refresh_token`、`id_token`、認証コード、クライアントシークレット、Authorizationヘッダー、Cookie、MIMEメール全文、OAuth応答本文をログへ出力しない。例外は安全な分類と概要だけをログへ渡す。メールアドレスをログへ記録する場合は、`ex***@gmail.com`のようにローカル部を部分マスクする。
 
 初期ログ保持期間は30日とする。
 
@@ -604,6 +639,9 @@ Weeklyなどの長期枠について、新しい利用期間の開始を`LongWin
 - 外部プロセス起動時に、ユーザー入力をそのままコマンドラインへ連結しない。
 - JSON-RPCログには認証情報を含めない。
 - 通知メールにはソースコードや機密情報を含めない。
+- OAuthトークンはDPAPI CurrentUserで暗号化し、平文ファイルデータストアを使用しない。
+- OAuthクライアント設定、認証情報、および実トークン値をGit追跡対象にしない。
+- 認証情報をViewModel、`AppSettings`、画面表示用モデルへ露出しない。
 
 ### NFR-003 性能
 
@@ -713,7 +751,7 @@ Weeklyなどの長期枠について、新しい利用期間の開始を`LongWin
 
 ### 8.6 AppSettings
 
-次の表はPhase 4A時点の設定モデルを示す。分類別既定値と画面項目は設定画面から編集でき、利用枠別上書き設定と非表示項目はJSON永続化時に保持する。
+次の表はPhase 4B時点の設定モデルを示す。分類別既定値と画面項目は設定画面から編集でき、利用枠別上書き設定と非表示項目はJSON永続化時に保持する。OAuthトークンと認証済みアカウント情報は`AppSettings`へ含めない。
 
 | プロパティ | 初期値 |
 |---|---:|
@@ -733,7 +771,7 @@ Weeklyなどの長期枠について、新しい利用期間の開始を`LongWin
 | LongWindowResetCompletedEnabled | true |
 | ResetInferenceUsageDropPoints | 50。画面には表示せず1～100の範囲で保持 |
 | WindowsNotificationEnabled | true |
-| GmailNotificationEnabled | false。Phase 4Aでは未認証のため有効化不可 |
+| GmailNotificationEnabled | false。認証済みかつGmailRecipientが有効な場合だけtrueを保存可能。本番配送はPhase 4C |
 | GmailRecipient | null。入力時はメールアドレス形式 |
 | QuietHoursEnabled | true |
 | QuietHoursStart | 00:00 |
@@ -745,6 +783,31 @@ Weeklyなどの長期枠について、新しい利用期間の開始を`LongWin
 | AutoStartEnabled | 初回設定で選択、初期表示はtrue |
 
 `ResetInferenceUsageDropPoints`が設定ファイル上で1～100の範囲外の場合は、この項目だけを50へ補正し、他の有効な設定値は維持する。Phase 4Aでは一般ユーザー向け画面から変更できない。
+
+### 8.7 GmailAuthenticationStatus（画面用モデル）
+
+トークンを含めず、認証専用サービスが次の安全な状態だけを画面へ公開する。
+
+| プロパティ | 型 | 説明 |
+|---|---|---|
+| State | GmailAuthenticationState | NotConfigured、Unauthenticated、Authenticating、Authenticated、RefreshRequired、ReauthenticationRequired、Error |
+| AuthenticatedEmailAddress | string? | 認証済みアカウント。トークンではない |
+| LastAuthenticatedAtUtc | DateTimeOffset? | 最終認証成功時刻 |
+| LastTokenRefreshedAtUtc | DateTimeOffset? | 最終トークン更新時刻 |
+| LastErrorSummary | string? | 機密情報を含まない概要 |
+| HasClientConfiguration | bool | OAuthクライアント設定の有無 |
+| CanSendTestMail | bool | 認証状態から見たテスト送信可否 |
+| RequiresReauthentication | bool | 再認証要否 |
+
+### 8.8 GmailCredentialEnvelope（暗号化前の概念モデル）
+
+| プロパティ | 型 | 説明 |
+|---|---|---|
+| SchemaVersion | int | 初期値1。将来のマイグレーション判定に使用 |
+| GoogleDataStoreEntries | Dictionary&lt;string, string&gt; | Google公式クライアントが保存するTokenResponse等のJSON |
+| CredentialMetadata | GmailCredentialMetadata | 認証済みメールアドレス、最終認証成功時刻、最終更新時刻 |
+
+この概念モデル全体をメモリ上でJSON化した後、DPAPI CurrentUserで暗号化する。ディスクへ書き込む`google-oauth-credentials.dat`は暗号文であり、平文JSON、トークン断片、JWT本文を含めない。
 
 ## 9. 通知判定フロー
 
@@ -776,7 +839,7 @@ Weeklyなどの長期枠について、新しい利用期間の開始を`LongWin
    │
    └─ 通知可能
           ├─ Windows通知
-          ├─ Gmail通知
+          ├─ Gmail通知候補と未送信状態を保持（本番配送はPhase 4C）
           └─ 結果を状態保存
 
 通知禁止時間終了
@@ -838,9 +901,21 @@ Weeklyなどの長期枠について、新しい利用期間の開始を`LongWin
 
 ### AC-007 Gmail
 
-- OAuth認証後、同じGmailアドレス宛てにテストメールを送信できる。
-- Gmail通知を無効にした場合、Windows通知だけが送られる。
-- 認証失効時に再認証が案内される。
+- OAuthクライアント設定がない場合は`NotConfigured`となり、標準配置先と準備手順を表示して認証ボタンを無効にできる。
+- 不正なOAuthクライアントJSONを拒否し、既存の有効設定を上書きしない。
+- 有効なデスクトップアプリ用JSONを標準配置先へ登録し、システム既定ブラウザー、PKCE、ループバックで認証できる。
+- OAuth同意画面で要求する権限が`gmail.send`、`openid`、`email`に限定される。
+- OAuth認証後、認証済みアドレスを表示し、空の送信先へ初期入力できる。
+- 認証済みかつ送信先が有効な場合だけGmail通知設定とテスト送信を有効にできる。
+- 同じGmailアドレスまたは別の有効な送信先へ、日本語の件名・本文を持つテストメールを`users.messages.send`で送信できる。
+- OAuth認証とテスト送信をそれぞれ同時に最大1件へ制限できる。
+- アクセストークン期限切れ時にリフレッシュトークンで自動更新し、通常の期限切れでは再認証を要求しない。
+- `invalid_grant`、権限取消、401、資格情報破損・復号失敗時に再認証が案内され、一時通信障害では認証情報を削除しない。
+- 認証解除でGoogle側失効を試み、結果にかかわらずローカル削除を試行し、成功時はGmail通知をfalseへ保存する。
+- 認証情報ファイルが平文JSONでなく、同じWindowsユーザーのDPAPI CurrentUserでのみ復号できる。
+- テスト送信の成功・失敗によって本番通知状態、Windows/Gmail配送状態、試行回数、回復連番、利用枠履歴が変化しない。
+- ログとGit追跡対象へOAuthトークン、認証コード、クライアントシークレット、MIME全文が含まれない。
+- Phase 4Bでは本番の利用枠通知メールを送信しない。
 
 ### AC-008 再接続
 
@@ -896,7 +971,7 @@ Weeklyなどの長期枠について、新しい利用期間の開始を`LongWin
 - 取得した各枠について、最後に送信した通知、最後のリセット完了判定理由、回復連番を表示できる。
 - `resetsAt`がない枠には「リセット時刻未取得」、既定のUnknown枠には「通知対象外」と表示できる。
 
-### AC-016 Phase 4A設定画面
+### AC-016 設定画面
 
 - タスクトレイと状態画面の両方から設定画面を開ける。
 - 保存済み設定を読み込み、編集、理由付き検証、保存、キャンセル、初期値復元ができる。
@@ -904,7 +979,7 @@ Weeklyなどの長期枠について、新しい利用期間の開始を`LongWin
 - Early、Standard、Finalの残り時間が正で、かつ降順の場合だけ保存できる。
 - 通知禁止時間に日付をまたぐ開始・終了時刻を保存できる。
 - Gmail送信先は未入力またはメールアドレス形式の場合だけ保存できる。
-- Gmail未認証のPhase 4AではGmail通知を有効化できず、認証とテスト送信ボタンが無効である。
+- Gmail未認証ではGmail通知を有効化できず、OAuth設定がなければ認証、認証済みでなければテスト送信を無効化できる。
 - 取得済みのFiveHourとWeeklyへ編集した既定設定を表示し、Unknownは説明付きの通知対象外として表示する。
 - 保存成功後は再起動せず監視スケジュールと状態表示へ反映し、次の正常取得から通知判定に使用する。
 - 保存操作だけでは利用枠を即時取得せず、通知済み状態、回復連番、履歴を消去しない。
@@ -921,6 +996,13 @@ Weeklyなどの長期枠について、新しい利用期間の開始を`LongWin
 - 保留終了前、24時間超過、現在期間と不一致の保留を送らない。
 - 短時間に連続した更新通知を最後の1回へデバウンスできる。
 - Windows無効・Gmail有効でも候補とGmail未送信状態を保持でき、Windows成功済み・Gmail未送信の状態でWindowsを重複送信しない。
+
+### AC-018 Phase 4B境界
+
+- Gmailテスト送信サービスが`RateLimitNotificationProcessor`から参照されず、本番通知候補の配送へ組み込まれていない。
+- `GmailDeliveryStatus`、`GmailAttemptCount`、`GmailLastAttemptedAtUtc`、`GmailNextRetryAtUtc`を維持するが、Phase 4Bのテスト送信では更新しない。
+- Gmail通知設定を保存しても、Phase 4BではGmail候補を未送信状態として保持するだけで、Gmail APIへ本番送信しない。
+- Phase 4Cで、Windowsと独立したGmail本番配送、再試行、通知禁止時間中の扱いを追加できる責務分離になっている。
 
 ## 11. 単体テスト対象
 
@@ -980,6 +1062,26 @@ Weeklyなどの長期枠について、新しい利用期間の開始を`LongWin
 52. Windows無効・Gmail有効時の候補保持
 53. Windows成功済み・Gmail未送信時のWindows重複送信抑止
 54. WindowsとGmailそれぞれの試行情報のJSON永続化
+55. OAuthクライアント設定なしのNotConfigured状態
+56. 不正なOAuthクライアント設定の拒否と既存ファイル維持
+57. 正常なデスクトップアプリ設定の標準配置
+58. OAuth認証成功とキャンセル後の状態
+59. OAuth認証の同時実行抑止
+60. DPAPIストアの保存・同一ユーザー読み込み・非平文確認
+61. 破損・復号失敗した認証情報の再認証案内
+62. 認証解除のGoogle側失効結果とローカル削除、およびGmail設定無効化
+63. 期限切れアクセストークンの更新と更新時刻保存
+64. `invalid_grant`および401の再認証必要状態
+65. 一時通信障害時の認証情報維持
+66. 認証成功時の空のGmailRecipient初期設定
+67. 認証済みかつ有効送信先の場合だけのGmail設定保存・テスト送信
+68. MIMEのFrom、To、Subject、本文、CRLF、およびUTF-8日本語
+69. Base64URLから`+`、`/`、末尾`=`が除かれること
+70. Gmail APIの403、API未有効化、一時サーバーエラー分類
+71. Gmailテスト送信の同時実行抑止
+72. テスト送信成功・失敗時の本番通知状態、回復連番、履歴非変更
+73. Gmailテスト送信によるWindows配送状態非変更
+74. トークンとクライアントシークレット相当値がログへ出ないこと
 
 ## 12. 実装上の設計方針
 
@@ -992,6 +1094,15 @@ INotificationPolicy
 INotificationSender
 IWindowsNotificationSender
 IGmailNotificationSender
+IGoogleOAuthClientConfigurationService
+IGmailAuthenticationService
+IGmailAuthenticationStatusProvider
+IGmailCredentialStore
+IGoogleOAuthFlow
+IGmailApiClient
+IGoogleGmailMessageGateway
+IGmailMimeMessageFactory
+IGmailTestMailSender
 IUsageHistoryRepository
 IApplicationStateRepository
 ISettingsRepository
@@ -1175,7 +1286,7 @@ Phase 3.1ではGmail送信とGmail OAuthを実装しない。利用枠別設定�
 - 更新通知デバウンスのCTS競合解消
 - WindowsとGmailのチャネル別配送状態・試行情報
 
-Phase 3.2ではGmail APIによる送信は行わない。Gmailだけが有効な場合も候補と未送信状態を保持し、Phase 4Bの配送実装が引き継げる構造とする。
+Phase 3.2ではGmail APIによる送信は行わない。Gmailだけが有効な場合も候補と未送信状態を保持し、Phase 4Cの本番配送実装が引き継げる構造とする。
 
 ### Phase 4A：設定画面
 
@@ -1193,11 +1304,23 @@ Phase 4AではGoogle OAuth、Gmail API、Gmail送信、テストメール送信�
 
 ### Phase 4B：Gmail
 
-- Google OAuth
-- 認証情報保護
-- Gmailテスト送信
-- 短期枠回復・長期枠リセット前・長期枠リセット完了通知
-- 再試行
+- デスクトップアプリ用Google OAuthクライアント設定の検証・標準配置
+- システム既定ブラウザー、PKCE、ローカルループバックによるGoogle OAuth
+- Gmail認証状態、再認証案内、認証解除
+- DPAPI CurrentUserによるスキーマバージョン付き認証情報保護
+- Google公式クライアントによるアクセストークン自動更新
+- Gmail API `users.messages.send`によるUTF-8テストメール
+- 設定画面への認証・解除・テスト送信統合
+- 機密情報を出さないログとエラー分類
+
+Phase 4Bでは短期枠回復、長期枠リセット前、長期枠リセット完了の本番通知メールを送らない。テスト送信は本番通知状態と履歴を変更しない。
+
+### Phase 4C：Gmail本番配送
+
+- 既存の通知候補からチャネル別にGmail未送信分を配送
+- Gmail配送の再試行と`GmailDeliveryStatus`・試行情報更新
+- 通知禁止時間中の本番Gmail保留
+- Windows無効・Gmail有効を含むチャネル独立動作
 
 ### Phase 5：運用機能
 
@@ -1210,16 +1333,19 @@ Phase 4AではGoogle OAuth、Gmail API、Gmail送信、テストメール送信�
 
 以下は実装開始後、実機確認を踏まえて決定してよい。
 
-1. Gmail OAuthトークン保存の具体的なファイル形式
-2. 300分枠を返す実アカウントで、5時間枠候補と閾値遷移の実挙動を確認できるか
-3. 自分宛てGmailのスマートフォン通知の実機挙動
-4. 配布形式
-5. アプリ名・アイコン
-6. 短期枠回復通知の保留中に残量が閾値未満へ下がった場合も、回復していた事実を通知するか
-7. Unknown枠で通知を手動有効化する場合、どの通知種類を推奨するか
-8. LimitId単位の上書き通知設定を設定画面から直接編集できるようにするか
-9. `ResetInferenceUsageDropPoints`を一般ユーザー向け画面へ公開するか
-10. 未使用分が次の利用期間へ繰り越されるか。公式レスポンスからは未確認であり、通知文では断定しない
+1. Google OAuth同意画面がテスト公開・本番公開の各構成で期待どおり表示されるか
+2. アクセストークン自動更新、Google側権限取消、再認証を実アカウントで一巡確認できるか
+3. 自分宛てGmailのPC・スマートフォン・タブレット通知の実機挙動
+4. Phase 4CのGmail本番配送で、Windows通知と異なる再試行間隔・最大回数を採用するか
+5. Phase 4Cで複数候補を1通へ集約するか、通知候補ごとに個別メールとするか
+6. 配布形式
+7. アプリ名・アイコン
+8. 300分枠を返す実アカウントで、5時間枠候補と閾値遷移の実挙動を確認できるか
+9. 短期枠回復通知の保留中に残量が閾値未満へ下がった場合も、回復していた事実を通知するか
+10. Unknown枠で通知を手動有効化する場合、どの通知種類を推奨するか
+11. LimitId単位の上書き通知設定を設定画面から直接編集できるようにするか
+12. `ResetInferenceUsageDropPoints`を一般ユーザー向け画面へ公開するか
+13. 未使用分が次の利用期間へ繰り越されるか。公式レスポンスからは未確認であり、通知文では断定しない
 
 ## 17. 公式参考資料
 
