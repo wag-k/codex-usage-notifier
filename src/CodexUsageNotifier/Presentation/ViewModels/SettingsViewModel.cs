@@ -4,6 +4,7 @@ using System.Globalization;
 using System.Runtime.CompilerServices;
 using CodexUsageNotifier.Application.Abstractions;
 using CodexUsageNotifier.Application.State;
+using CodexUsageNotifier.Application.Gmail;
 using CodexUsageNotifier.Domain.Models;
 using CodexUsageNotifier.Domain.Services;
 using Microsoft.Extensions.Logging;
@@ -13,7 +14,7 @@ namespace CodexUsageNotifier.Presentation.ViewModels;
 /// <summary>
 /// Phase 4A設定画面の編集値、入力検証、保存、および変更破棄を管理します。
 /// </summary>
-public sealed class SettingsViewModel : INotifyPropertyChanged
+public sealed partial class SettingsViewModel : INotifyPropertyChanged
 {
     private static readonly Action<ILogger, Exception?> LogSettingsSaved =
         LoggerMessage.Define(LogLevel.Information, new EventId(2500, "SettingsSaved"), "設定画面から設定を保存しました。");
@@ -27,10 +28,10 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
     private readonly ISettingsRepository settingsRepository;
     private readonly ApplicationStateStore stateStore;
     private readonly ISettingsChangeSink settingsChangeSink;
+    private readonly IGoogleOAuthClientConfigurationService googleOAuthConfigurationService;
+    private readonly IGmailAuthenticationService gmailAuthenticationService;
+    private readonly IGmailTestMailSender gmailTestMailSender;
     private readonly ILogger<SettingsViewModel> logger;
-    private readonly string gmailAuthenticationStatus = "未認証（Phase 4Bで実装）";
-    private readonly bool isGmailAuthenticationAvailable;
-    private readonly bool isTestEmailAvailable;
     private AppSettings baselineSettings = AppSettings.CreateDefault();
     private UsageSnapshot? observedSnapshot;
     private string baselineSignature = string.Empty;
@@ -88,18 +89,25 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         ISettingsRepository settingsRepository,
         ApplicationStateStore stateStore,
         ISettingsChangeSink settingsChangeSink,
+        IGoogleOAuthClientConfigurationService googleOAuthConfigurationService,
+        IGmailAuthenticationService gmailAuthenticationService,
+        IGmailTestMailSender gmailTestMailSender,
         ILogger<SettingsViewModel> logger)
     {
         ArgumentNullException.ThrowIfNull(settingsRepository);
         ArgumentNullException.ThrowIfNull(stateStore);
         ArgumentNullException.ThrowIfNull(settingsChangeSink);
+        ArgumentNullException.ThrowIfNull(googleOAuthConfigurationService);
+        ArgumentNullException.ThrowIfNull(gmailAuthenticationService);
+        ArgumentNullException.ThrowIfNull(gmailTestMailSender);
         ArgumentNullException.ThrowIfNull(logger);
         this.settingsRepository = settingsRepository;
         this.stateStore = stateStore;
         this.settingsChangeSink = settingsChangeSink;
+        this.googleOAuthConfigurationService = googleOAuthConfigurationService;
+        this.gmailAuthenticationService = gmailAuthenticationService;
+        this.gmailTestMailSender = gmailTestMailSender;
         this.logger = logger;
-        isGmailAuthenticationAvailable = false;
-        isTestEmailAvailable = false;
     }
 
     /// <summary>
@@ -270,7 +278,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
     }
 
     /// <summary>
-    /// Gmail通知の設定値を取得または設定します。Phase 4Aではtrueを保存できません。
+    /// Gmail通知の設定値を取得または設定します。認証済みかつ送信先が有効な場合だけ保存できます。
     /// </summary>
     public bool GmailNotificationEnabled
     {
@@ -288,9 +296,13 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
     }
 
     /// <summary>
-    /// Gmail認証状態の固定表示を取得します。
+    /// Gmail認証状態の表示を取得します。
     /// </summary>
-    public string GmailAuthenticationStatus => gmailAuthenticationStatus;
+    public string GmailAuthenticationStatus
+    {
+        get => gmailAuthenticationStatus;
+        private set => SetProperty(ref gmailAuthenticationStatus, value);
+    }
 
     /// <summary>
     /// Google認証操作が利用可能かどうかを取得します。
@@ -331,6 +343,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
             if (SetProperty(ref isBusy, value))
             {
                 UpdateCanSave();
+                UpdateGmailActionAvailability();
             }
         }
     }
@@ -419,6 +432,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
             baselineSettings = settings;
             observedSnapshot = state.LastUsageSnapshot;
             ApplySettings(settings);
+            await RefreshGmailStatusAsync(cancellationToken);
             baselineSignature = CaptureEditSignature();
             ValidateAndTrackChanges();
         }
@@ -556,7 +570,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         LongWindowFinalWarningHours = settings.LongWindowFinalWarningHours.ToString(CultureInfo.InvariantCulture);
         LongWindowFinalWarningThresholdPercent = settings.LongWindowFinalWarningThresholdPercent.ToString(CultureInfo.InvariantCulture);
         LongWindowResetCompletedEnabled = settings.LongWindowResetCompletedEnabled;
-        GmailNotificationEnabled = false;
+        GmailNotificationEnabled = settings.GmailNotificationEnabled;
         GmailRecipient = settings.GmailRecipient ?? string.Empty;
         resetInferenceUsageDropPoints = settings.ResetInferenceUsageDropPoints;
         isApplyingValues = false;
@@ -607,14 +621,19 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         GmailRecipientError = AppSettings.IsValidOptionalEmailAddress(GmailRecipient.Trim())
             ? string.Empty
             : "送信先をメールアドレス形式で入力してください。";
-        GmailNotificationError = GmailNotificationEnabled
-            ? "Gmail認証は未実装です。Phase 4BまでGmail通知を有効にできません。"
+        if (GmailNotificationEnabled && string.IsNullOrWhiteSpace(GmailRecipient))
+        {
+            GmailRecipientError = "Gmail通知を有効にする場合は送信先を入力してください。";
+        }
+        GmailNotificationError = GmailNotificationEnabled && !CanEnableGmailNotification
+            ? "Gmail通知は、Googleアカウント認証済みかつ有効な送信先がある場合だけ有効にできます。"
             : string.Empty;
 
         HasUnsavedChanges = !string.Equals(
             baselineSignature,
             CaptureEditSignature(),
             StringComparison.Ordinal);
+        UpdateGmailActionAvailability();
         UpdateCanSave();
         if (TryCreateSettings(out AppSettings candidate))
         {
@@ -663,7 +682,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
             || !TryParsePositive(LongWindowFinalWarningHours, out int finalHours)
             || !TryParseRange(LongWindowFinalWarningThresholdPercent, 1, 100, out int finalThreshold)
             || !(earlyHours > standardHours && standardHours > finalHours)
-            || GmailNotificationEnabled
+            || (GmailNotificationEnabled && string.IsNullOrWhiteSpace(GmailRecipient))
             || !AppSettings.IsValidOptionalEmailAddress(GmailRecipient.Trim()))
         {
             return false;
@@ -690,7 +709,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
             LongWindowFinalWarningThresholdPercent = finalThreshold,
             LongWindowResetCompletedEnabled = LongWindowResetCompletedEnabled,
             ResetInferenceUsageDropPoints = resetInferenceUsageDropPoints,
-            GmailNotificationEnabled = false,
+            GmailNotificationEnabled = GmailNotificationEnabled,
             GmailRecipient = string.IsNullOrWhiteSpace(GmailRecipient) ? null : GmailRecipient.Trim(),
         };
         return settings.IsValid();

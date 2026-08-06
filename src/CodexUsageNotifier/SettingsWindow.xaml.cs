@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Windows;
 using CodexUsageNotifier.Presentation;
 using CodexUsageNotifier.Presentation.ViewModels;
+using Microsoft.Win32;
 
 namespace CodexUsageNotifier;
 
@@ -73,6 +74,59 @@ public partial class SettingsWindow : Window
     private void OnRestoreDefaults(object sender, RoutedEventArgs e)
     {
         viewModel.RestoreDefaults();
+    }
+
+    /// <summary>
+    /// デスクトップアプリ用OAuthクライアントJSONを選択して標準配置先へ登録します。
+    /// </summary>
+    /// <param name="sender">設定ファイル選択ボタンです。</param>
+    /// <param name="e">クリックイベントです。</param>
+    private async void OnSelectGoogleOAuthClient(object sender, RoutedEventArgs e)
+    {
+        Microsoft.Win32.OpenFileDialog dialog = new()
+        {
+            CheckFileExists = true,
+            DefaultExt = ".json",
+            Filter = "JSONファイル (*.json)|*.json|すべてのファイル (*.*)|*.*",
+            Title = "Google OAuthクライアント設定を選択",
+        };
+        if (dialog.ShowDialog(this) == true)
+        {
+            await viewModel.ImportGoogleOAuthClientAsync(dialog.FileName, CancellationToken.None);
+        }
+    }
+
+    /// <summary>Googleアカウントの初回認証を開始します。</summary>
+    private async void OnAuthenticateGmail(object sender, RoutedEventArgs e)
+    {
+        await viewModel.AuthenticateGmailAsync(forceReauthentication: false, CancellationToken.None);
+    }
+
+    /// <summary>保存済み認証情報を破棄してGoogleアカウントを再認証します。</summary>
+    private async void OnReauthenticateGmail(object sender, RoutedEventArgs e)
+    {
+        await viewModel.AuthenticateGmailAsync(forceReauthentication: true, CancellationToken.None);
+    }
+
+    /// <summary>確認後にGoogle側の失効とローカル認証情報の削除を実行します。</summary>
+    private async void OnDisconnectGmail(object sender, RoutedEventArgs e)
+    {
+        MessageBoxResult result = System.Windows.MessageBox.Show(
+            this,
+            "Googleアカウントの認証を解除しますか？ローカルの認証情報は削除されます。",
+            "Gmail認証解除",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Warning);
+        if (result == MessageBoxResult.Yes)
+        {
+            await viewModel.DisconnectGmailAsync(CancellationToken.None);
+        }
+    }
+
+    /// <summary>入力済み送信先へGmail APIのテストメールを送信します。</summary>
+    private async void OnSendGmailTestMail(object sender, RoutedEventArgs e)
+    {
+        await viewModel.SendGmailTestMailAsync(CancellationToken.None);
     }
 
     /// <summary>

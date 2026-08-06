@@ -180,7 +180,7 @@
                     </Grid>
                 </GroupBox>
 
-                <GroupBox Header="Gmail（Phase 4Bで実装）">
+                <GroupBox Header="Gmail認証とテスト送信（Phase 4B）">
                     <Grid>
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="250" />
@@ -191,25 +191,56 @@
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
                         </Grid.RowDefinitions>
-                        <TextBlock Grid.Row="0" Style="{StaticResource SectionLabel}" Text="Gmail通知" />
+                        <TextBlock Grid.Row="0" Style="{StaticResource SectionLabel}" Text="OAuthクライアント設定" />
                         <StackPanel Grid.Row="0" Grid.Column="1">
-                            <CheckBox Content="Gmail通知を有効にする" IsEnabled="False"
-                                      IsChecked="{Binding GmailNotificationEnabled}" />
-                            <TextBlock Style="{StaticResource ErrorText}" Text="{Binding GmailNotificationError}" />
+                            <TextBlock Text="{Binding OAuthClientConfigurationStatus}" TextWrapping="Wrap" />
+                            <TextBlock Margin="0,4,0,0" Foreground="#5B6573" Text="{Binding OAuthClientConfigurationPath}" TextWrapping="Wrap" />
+                            <Button Margin="0,8,0,0" Padding="12,6" HorizontalAlignment="Left"
+                                    Content="OAuthクライアント設定ファイルを選択" Click="OnSelectGoogleOAuthClient" />
                         </StackPanel>
-                        <TextBlock Grid.Row="1" Style="{StaticResource SectionLabel}" Text="送信先メールアドレス" />
+                        <TextBlock Grid.Row="1" Style="{StaticResource SectionLabel}" Text="認証状態" />
                         <StackPanel Grid.Row="1" Grid.Column="1">
+                            <TextBlock Text="{Binding GmailAuthenticationStatus}" />
+                            <TextBlock Margin="0,4,0,0"><Run Text="アカウント: " /><Run Text="{Binding AuthenticatedGmailAddress}" /></TextBlock>
+                            <TextBlock Margin="0,4,0,0"><Run Text="最終認証成功: " /><Run Text="{Binding LastGmailAuthenticationAt}" /></TextBlock>
+                            <TextBlock Margin="0,4,0,0" Text="{Binding GmailReauthenticationStatus}" TextWrapping="Wrap" />
+                        </StackPanel>
+                        <TextBlock Grid.Row="2" Style="{StaticResource SectionLabel}" Text="認証操作" />
+                        <WrapPanel Grid.Row="2" Grid.Column="1" Margin="0,4,0,4">
+                            <Button Margin="0,0,10,0" Padding="12,6" Content="Googleアカウントで認証する"
+                                    IsEnabled="{Binding IsGmailAuthenticationAvailable}" Click="OnAuthenticateGmail" />
+                            <Button Margin="0,0,10,0" Padding="12,6" Content="再認証"
+                                    IsEnabled="{Binding IsGmailReauthenticationAvailable}" Click="OnReauthenticateGmail" />
+                            <Button Padding="12,6" Content="認証解除"
+                                    IsEnabled="{Binding IsGmailDisconnectAvailable}" Click="OnDisconnectGmail" />
+                        </WrapPanel>
+                        <TextBlock Grid.Row="3" Style="{StaticResource SectionLabel}" Text="送信先メールアドレス" />
+                        <StackPanel Grid.Row="3" Grid.Column="1">
                             <TextBox Style="{StaticResource InputBox}" Text="{Binding GmailRecipient, UpdateSourceTrigger=PropertyChanged}" />
                             <TextBlock Style="{StaticResource ErrorText}" Text="{Binding GmailRecipientError}" />
                         </StackPanel>
-                        <TextBlock Grid.Row="2" Style="{StaticResource SectionLabel}" Text="認証状態" />
-                        <TextBlock Grid.Row="2" Grid.Column="1" VerticalAlignment="Center" Text="{Binding GmailAuthenticationStatus}" />
-                        <StackPanel Grid.Row="3" Grid.Column="1" Margin="0,8,0,0" Orientation="Horizontal">
-                            <Button Margin="0,0,10,0" Padding="12,6" Content="Googleアカウントで認証する"
-                                    IsEnabled="{Binding IsGmailAuthenticationAvailable}" />
-                            <Button Padding="12,6" Content="テストメール送信" IsEnabled="{Binding IsTestEmailAvailable}" />
+                        <TextBlock Grid.Row="4" Style="{StaticResource SectionLabel}" Text="テストメール" />
+                        <StackPanel Grid.Row="4" Grid.Column="1">
+                            <Button Padding="12,6" HorizontalAlignment="Left" Content="テストメール送信"
+                                    IsEnabled="{Binding IsTestEmailAvailable}" Click="OnSendGmailTestMail" />
+                            <TextBlock Margin="0,6,0,0" Text="{Binding LastTestMailResult}" TextWrapping="Wrap" />
                         </StackPanel>
+                        <TextBlock Grid.Row="5" Style="{StaticResource SectionLabel}" Text="Gmail通知" />
+                        <StackPanel Grid.Row="5" Grid.Column="1">
+                            <CheckBox Content="Gmail通知を有効にする" IsEnabled="{Binding CanEnableGmailNotification}"
+                                      IsChecked="{Binding GmailNotificationEnabled}" />
+                            <TextBlock Style="{StaticResource ErrorText}" Text="{Binding GmailNotificationError}" />
+                        </StackPanel>
+                        <Border Grid.Row="6" Grid.Column="1" Margin="0,8,0,0" Padding="10" Background="#FFF8E1" CornerRadius="4">
+                            <TextBlock TextWrapping="Wrap"
+                                       Text="現在はGoogle認証とテストメール送信のみ利用できます。Codex利用枠通知のGmail配送はPhase 4Cで実装します。" />
+                        </Border>
                     </Grid>
                 </GroupBox>
 

@@ -31,6 +31,16 @@ public interface IAppDataPaths
     string AuthDirectory { get; }
 
     /// <summary>
+    /// Google OAuthクライアント設定ファイルのパスを取得します。
+    /// </summary>
+    string GoogleOAuthClientFilePath { get; }
+
+    /// <summary>
+    /// DPAPI保護されたGmail認証情報ファイルのパスを取得します。
+    /// </summary>
+    string GoogleCredentialFilePath { get; }
+
+    /// <summary>
     /// ログディレクトリのパスを取得します。
     /// </summary>
     string LogDirectory { get; }

@@ -1,7 +1,9 @@
 using CodexUsageNotifier.Application.Abstractions;
 using CodexUsageNotifier.Application.State;
+using CodexUsageNotifier.Application.Gmail;
 using CodexUsageNotifier.Domain.Models;
 using CodexUsageNotifier.Presentation.ViewModels;
+using CodexUsageNotifier.Tests.TestDoubles;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace CodexUsageNotifier.Tests.Presentation.ViewModels;
@@ -217,7 +219,7 @@ public sealed class SettingsViewModelTests
     }
 
     /// <summary>
-    /// Gmail未認証のPhase 4AではGmail通知を有効化して保存できないことを検証します。
+    /// Gmail未認証ではGmail通知を有効化して保存できないことを検証します。
     /// </summary>
     [TestMethod]
     public async Task GmailNotification_Unauthenticated_CannotEnable()
@@ -227,9 +229,96 @@ public sealed class SettingsViewModelTests
 
         context.ViewModel.GmailNotificationEnabled = true;
 
-        Assert.IsFalse(context.ViewModel.IsGmailAuthenticationAvailable);
+        Assert.IsTrue(context.ViewModel.IsGmailAuthenticationAvailable);
         Assert.IsFalse(context.ViewModel.CanSave);
-        StringAssert.Contains(context.ViewModel.GmailNotificationError, "Phase 4B");
+        StringAssert.Contains(context.ViewModel.GmailNotificationError, "認証済み");
+    }
+
+    /// <summary>
+    /// 認証成功時に空のGmail送信先へ認証済みアドレスを初期設定することを検証します。
+    /// </summary>
+    [TestMethod]
+    public async Task AuthenticateGmailAsync_EmptyRecipient_UsesAuthenticatedAddress()
+    {
+        TestContext context = CreateContext(AppSettings.CreateDefault());
+        await context.ViewModel.LoadAsync(CancellationToken.None);
+
+        await context.ViewModel.AuthenticateGmailAsync(false, CancellationToken.None);
+
+        Assert.AreEqual("user@example.com", context.ViewModel.GmailRecipient);
+        Assert.AreEqual("認証済み", context.ViewModel.GmailAuthenticationStatus);
+        Assert.IsFalse(context.ViewModel.IsGmailAuthenticationAvailable);
+        Assert.IsTrue(context.ViewModel.IsGmailReauthenticationAvailable);
+        Assert.IsTrue(context.ViewModel.IsTestEmailAvailable);
+    }
+
+    /// <summary>
+    /// 認証済みかつ送信先が有効な場合にGmail通知をtrueとして保存できることを検証します。
+    /// </summary>
+    [TestMethod]
+    public async Task SaveAsync_AuthenticatedGmail_AllowsGmailNotification()
+    {
+        TestContext context = CreateContext(AppSettings.CreateDefault());
+        await context.ViewModel.LoadAsync(CancellationToken.None);
+        await context.ViewModel.AuthenticateGmailAsync(false, CancellationToken.None);
+        context.ViewModel.GmailNotificationEnabled = true;
+
+        bool result = await context.ViewModel.SaveAsync(CancellationToken.None);
+
+        Assert.IsTrue(result);
+        Assert.IsTrue(context.SettingsRepository.Settings.GmailNotificationEnabled);
+        Assert.AreEqual("user@example.com", context.SettingsRepository.Settings.GmailRecipient);
+    }
+
+    /// <summary>
+    /// 認証解除で永続設定のGmail通知をfalseにし、送信先は維持することを検証します。
+    /// </summary>
+    [TestMethod]
+    public async Task DisconnectGmailAsync_EnabledSetting_DisablesNotificationAndKeepsRecipient()
+    {
+        AppSettings settings = AppSettings.CreateDefault() with
+        {
+            GmailNotificationEnabled = true,
+            GmailRecipient = "target@example.com",
+        };
+        TestContext context = CreateContext(settings);
+        context.AuthenticationService.Status = new GmailAuthenticationStatus
+        {
+            State = GmailAuthenticationState.Authenticated,
+            HasClientConfiguration = true,
+            AuthenticatedEmailAddress = "user@example.com",
+        };
+        await context.ViewModel.LoadAsync(CancellationToken.None);
+
+        await context.ViewModel.DisconnectGmailAsync(CancellationToken.None);
+
+        Assert.IsFalse(context.SettingsRepository.Settings.GmailNotificationEnabled);
+        Assert.AreEqual("target@example.com", context.SettingsRepository.Settings.GmailRecipient);
+        Assert.IsFalse(context.ViewModel.IsTestEmailAvailable);
+    }
+
+    /// <summary>
+    /// ViewModelのテスト送信が専用送信サービスだけを呼び、本番状態を変更しないことを検証します。
+    /// </summary>
+    [TestMethod]
+    public async Task SendGmailTestMailAsync_Authenticated_DoesNotChangeApplicationState()
+    {
+        ApplicationState original = CreateStateWithWindows();
+        TestContext context = CreateContext(AppSettings.CreateDefault(), original);
+        context.AuthenticationService.Status = new GmailAuthenticationStatus
+        {
+            State = GmailAuthenticationState.Authenticated,
+            HasClientConfiguration = true,
+            AuthenticatedEmailAddress = "user@example.com",
+        };
+        await context.ViewModel.LoadAsync(CancellationToken.None);
+        context.ViewModel.GmailRecipient = "target@example.com";
+
+        await context.ViewModel.SendGmailTestMailAsync(CancellationToken.None);
+        ApplicationState after = await context.StateStore.LoadAsync(CancellationToken.None);
+
+        Assert.AreEqual(1, context.TestMailSender.SendCallCount);
+        Assert.AreSame(original, after);
     }
 
     /// <summary>
@@ -244,12 +333,24 @@ public sealed class SettingsViewModelTests
         InMemoryStateRepository stateRepository = new(state ?? ApplicationState.CreateDefault());
         ApplicationStateStore stateStore = new(stateRepository);
         RecordingSettingsChangeSink settingsSink = new();
+        StubGoogleOAuthClientConfigurationService configurationService = new();
+        StubGmailAuthenticationService authenticationService = new();
+        StubGmailTestMailSender testMailSender = new();
         SettingsViewModel viewModel = new(
             settingsRepository,
             stateStore,
             settingsSink,
+            configurationService,
+            authenticationService,
+            testMailSender,
             NullLogger<SettingsViewModel>.Instance);
-        return new TestContext(viewModel, settingsRepository, stateStore, settingsSink);
+        return new TestContext(
+            viewModel,
+            settingsRepository,
+            stateStore,
+            settingsSink,
+            authenticationService,
+            testMailSender);
     }
 
     /// <summary>
@@ -335,12 +436,16 @@ public sealed class SettingsViewModelTests
             SettingsViewModel viewModel,
             InMemorySettingsRepository settingsRepository,
             ApplicationStateStore stateStore,
-            RecordingSettingsChangeSink settingsSink)
+            RecordingSettingsChangeSink settingsSink,
+            StubGmailAuthenticationService authenticationService,
+            StubGmailTestMailSender testMailSender)
         {
             ViewModel = viewModel;
             SettingsRepository = settingsRepository;
             StateStore = stateStore;
             SettingsSink = settingsSink;
+            AuthenticationService = authenticationService;
+            TestMailSender = testMailSender;
         }
 
         /// <summary>
@@ -362,6 +467,16 @@ public sealed class SettingsViewModelTests
         /// 監視反映の記録先を取得します。
         /// </summary>
         public RecordingSettingsChangeSink SettingsSink { get; }
+
+        /// <summary>
+        /// Gmail認証状態を制御するテスト用サービスを取得します。
+        /// </summary>
+        public StubGmailAuthenticationService AuthenticationService { get; }
+
+        /// <summary>
+        /// Gmailテスト送信を記録するテスト用サービスを取得します。
+        /// </summary>
+        public StubGmailTestMailSender TestMailSender { get; }
     }
 
     /// <summary>

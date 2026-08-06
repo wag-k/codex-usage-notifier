@@ -43,6 +43,16 @@ public sealed class AppDataPaths : IAppDataPaths
     public string AuthDirectory => Path.Combine(RootDirectory, "auth");
 
     /// <summary>
+    /// Google OAuthクライアント設定ファイルのパスを取得します。
+    /// </summary>
+    public string GoogleOAuthClientFilePath => Path.Combine(AuthDirectory, "google-oauth-client.json");
+
+    /// <summary>
+    /// DPAPI保護されたGmail認証情報ファイルのパスを取得します。
+    /// </summary>
+    public string GoogleCredentialFilePath => Path.Combine(AuthDirectory, "google-oauth-credentials.dat");
+
+    /// <summary>
     /// ログディレクトリのパスを取得します。
     /// </summary>
     public string LogDirectory => Path.Combine(RootDirectory, "logs");

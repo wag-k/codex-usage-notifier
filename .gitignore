@@ -8,3 +8,5 @@ obj/
 client_secret*.json
 credentials*.json
 auth/
+google-oauth-client.json
+google-oauth-credentials.dat
