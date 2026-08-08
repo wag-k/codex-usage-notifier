@@ -43,6 +43,7 @@ public sealed class GmailAuthenticationService :
     private readonly CancellationTokenSource lifetimeCancellation = new();
     private GmailAuthenticationStatus currentStatus = new() { State = GmailAuthenticationState.Unauthenticated };
     private UserCredential? currentCredential;
+    private int disposed;
 
     /// <summary>OAuth設定、資格情報、Googleフロー、時刻、およびログ出力先を受け取ります。</summary>
     public GmailAuthenticationService(
@@ -445,6 +446,11 @@ public sealed class GmailAuthenticationService :
     /// <inheritdoc />
     public void Dispose()
     {
+        if (Interlocked.Exchange(ref disposed, 1) != 0)
+        {
+            return;
+        }
+
         lifetimeCancellation.Cancel();
         lifetimeCancellation.Dispose();
         authenticationGate.Dispose();

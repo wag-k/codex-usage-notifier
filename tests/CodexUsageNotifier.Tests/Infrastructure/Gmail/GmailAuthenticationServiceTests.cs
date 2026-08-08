@@ -229,6 +229,16 @@ public sealed class GmailAuthenticationServiceTests
         Assert.IsFalse(log.Contains(secretMarker, StringComparison.Ordinal));
     }
 
+    /// <summary>DIコンテナから複数回破棄されても例外が発生しないことを検証します。</summary>
+    [TestMethod]
+    public void Dispose_CalledMultipleTimes_DoesNotThrow()
+    {
+        GmailAuthenticationService service = CreateService(new(), new InMemoryCredentialStore(), new StubOAuthFlow());
+
+        service.Dispose();
+        service.Dispose();
+    }
+
     /// <summary>認証サービスを生成します。</summary>
     private static GmailAuthenticationService CreateService(
         StubGoogleOAuthClientConfigurationService configuration,
