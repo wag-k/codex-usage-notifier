@@ -521,6 +521,7 @@ public sealed partial class SettingsViewModel : INotifyPropertyChanged
             {
                 GmailDeliveryEnabledSinceUtc = enabledSinceUtc,
                 GmailDeliveryEnabledLastObserved = true,
+                GmailAuthenticationWasUsable = true,
             },
             cancellationToken);
     }

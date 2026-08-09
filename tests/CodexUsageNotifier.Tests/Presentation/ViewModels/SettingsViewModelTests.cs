@@ -277,6 +277,7 @@ public sealed class SettingsViewModelTests
         ApplicationState state = await context.StateStore.LoadAsync(CancellationToken.None);
         Assert.AreEqual(enabledSinceUtc, state.GmailDeliveryEnabledSinceUtc);
         Assert.IsTrue(state.GmailDeliveryEnabledLastObserved);
+        Assert.IsTrue(state.GmailAuthenticationWasUsable);
     }
 
     /// <summary>
@@ -301,6 +302,7 @@ public sealed class SettingsViewModelTests
         ApplicationState state = await context.StateStore.LoadAsync(CancellationToken.None);
         Assert.AreEqual(enabledSinceUtc, state.GmailDeliveryEnabledSinceUtc);
         Assert.IsTrue(state.GmailDeliveryEnabledLastObserved);
+        Assert.IsTrue(state.GmailAuthenticationWasUsable);
     }
 
     /// <summary>
