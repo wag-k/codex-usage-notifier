@@ -44,9 +44,12 @@ public sealed record GmailAuthenticationStatus
     /// <summary>OAuthクライアント設定が存在するかを取得します。</summary>
     public bool HasClientConfiguration { get; init; }
 
-    /// <summary>テストメールを送信できる認証状態かを取得します。</summary>
-    public bool CanSendTestMail => (State is GmailAuthenticationState.Authenticated or GmailAuthenticationState.RefreshRequired)
+    /// <summary>Gmail APIでメールを送信できる認証状態かを取得します。</summary>
+    public bool CanSendMail => (State is GmailAuthenticationState.Authenticated or GmailAuthenticationState.RefreshRequired)
         && !string.IsNullOrWhiteSpace(AuthenticatedEmailAddress);
+
+    /// <summary>テストメールを送信できる認証状態かを取得します。</summary>
+    public bool CanSendTestMail => CanSendMail;
 
     /// <summary>再認証が必要かを取得します。</summary>
     public bool RequiresReauthentication => State == GmailAuthenticationState.ReauthenticationRequired;

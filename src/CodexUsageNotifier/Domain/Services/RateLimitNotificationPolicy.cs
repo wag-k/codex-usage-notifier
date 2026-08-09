@@ -16,9 +16,9 @@ public static class RateLimitNotificationPolicy
     internal const int MaxWindowsAttemptCount = 3;
 
     /// <summary>
-    /// 1つのGmail通知に許可する最大送信試行回数です。
+    /// Phase 4C-1で1つのGmail通知に許可する送信試行回数です。
     /// </summary>
-    internal const int MaxGmailAttemptCount = 3;
+    internal const int MaxGmailAttemptCount = 1;
 
     /// <summary>
     /// 取得できた全利用枠を独立に評価し、複数の通知候補と回復状態を返します。
@@ -488,7 +488,7 @@ public static class RateLimitNotificationPolicy
     }
 
     /// <summary>
-    /// 保存済みGmail配送状態から、新規送信または失敗後の再試行が可能か判定します。
+    /// 保存済みGmail配送状態から、Phase 4C-1の初回送信が可能か判定します。
     /// </summary>
     /// <param name="existing">同じ通知を表す保存済み状態です。</param>
     /// <param name="nowUtc">今回の正常取得UTC時刻です。</param>
@@ -504,12 +504,11 @@ public static class RateLimitNotificationPolicy
 
         if (existing.GmailDeliveryStatus == DeliveryStatus.NotAttempted)
         {
-            return existing.DeferredUntilUtc is null || existing.DeferredUntilUtc <= nowUtc;
+            return existing.GmailAttemptCount < MaxGmailAttemptCount
+                && (existing.DeferredUntilUtc is null || existing.DeferredUntilUtc <= nowUtc);
         }
 
-        return existing.GmailDeliveryStatus == DeliveryStatus.Failed
-            && existing.GmailAttemptCount < MaxGmailAttemptCount
-            && (existing.GmailNextRetryAtUtc is null || existing.GmailNextRetryAtUtc <= nowUtc);
+        return false;
     }
 
     /// <summary>

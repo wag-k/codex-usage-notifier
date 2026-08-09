@@ -239,7 +239,7 @@
                         </StackPanel>
                         <Border Grid.Row="6" Grid.Column="1" Margin="0,8,0,0" Padding="10" Background="#FFF8E1" CornerRadius="4">
                             <TextBlock TextWrapping="Wrap"
-                                       Text="現在はGoogle認証とテストメール送信のみ利用できます。Codex利用枠通知のGmail配送はPhase 4Cで実装します。" />
+                                       Text="Google認証、テストメール、本番の利用枠通知を利用できます。Gmail送信失敗後の自動再試行はPhase 4C-2で実装します。" />
                         </Border>
                     </Grid>
                 </GroupBox>

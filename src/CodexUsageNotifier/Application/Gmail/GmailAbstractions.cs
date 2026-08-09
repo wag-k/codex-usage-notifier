@@ -135,3 +135,15 @@ public interface IGmailTestMailSender
     /// <summary>指定送信先へ状態を変更しないテストメールを送信します。</summary>
     Task<GmailOperationResult> SendAsync(string recipient, CancellationToken cancellationToken);
 }
+
+/// <summary>
+/// 本番の利用枠通知メールをGmail APIへ送信します。
+/// </summary>
+public interface IGmailNotificationSender
+{
+    /// <summary>指定送信先へ生成済みの本番通知メールを送信します。</summary>
+    Task SendAsync(
+        string recipient,
+        GmailNotificationMessage message,
+        CancellationToken cancellationToken);
+}

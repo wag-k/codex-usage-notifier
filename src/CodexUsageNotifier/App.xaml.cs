@@ -100,6 +100,7 @@ public partial class App : System.Windows.Application
         services.AddSingleton<IGoogleGmailMessageGateway, GoogleGmailMessageGateway>();
         services.AddSingleton<IGmailApiClient, GmailApiClient>();
         services.AddSingleton<IGmailTestMailSender, GmailTestMailSender>();
+        services.AddSingleton<IGmailNotificationSender, GmailNotificationSender>();
         services.AddSingleton<ApplicationStateStore>();
         services.AddSingleton<TimeProvider>(TimeProvider.System);
         services.AddSingleton<IPowerEventSource, SystemPowerEventSource>();
@@ -142,6 +143,20 @@ public partial class App : System.Windows.Application
         ApplyLogLevel(settings, provider.GetRequiredService<DailyFileLoggerProvider>());
         ApplicationState state = await provider.GetRequiredService<ApplicationStateStore>()
             .LoadAsync(cancellationToken);
+        if (state.GmailProductionDeliveryStartedAtUtc is null
+            || state.SchemaVersion != ApplicationState.CurrentSchemaVersion)
+        {
+            DateTimeOffset startedAtUtc = provider.GetRequiredService<TimeProvider>().GetUtcNow();
+            state = await provider.GetRequiredService<ApplicationStateStore>().UpdateAsync(
+                current => current with
+                {
+                    SchemaVersion = ApplicationState.CurrentSchemaVersion,
+                    GmailProductionDeliveryStartedAtUtc =
+                        current.GmailProductionDeliveryStartedAtUtc ?? startedAtUtc,
+                },
+                cancellationToken);
+        }
+
         if (!state.InitialSetupCompleted)
         {
             state = await provider.GetRequiredService<ApplicationStateStore>().UpdateAsync(

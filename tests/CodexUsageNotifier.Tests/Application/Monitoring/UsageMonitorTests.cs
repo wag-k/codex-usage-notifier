@@ -1,9 +1,11 @@
 using CodexUsageNotifier.Application.Abstractions;
+using CodexUsageNotifier.Application.Gmail;
 using CodexUsageNotifier.Application.Monitoring;
 using CodexUsageNotifier.Application.State;
 using CodexUsageNotifier.Application.Notifications;
 using CodexUsageNotifier.Domain.Models;
 using Microsoft.Extensions.Logging.Abstractions;
+using CodexUsageNotifier.Tests.TestDoubles;
 
 namespace CodexUsageNotifier.Tests.Application.Monitoring;
 
@@ -29,6 +31,8 @@ public sealed class UsageMonitorTests
         RateLimitNotificationProcessor notificationProcessor = new(
             stateStore,
             new RecordingWindowsNotificationSender(),
+            new StubGmailAuthenticationService(),
+            new StubGmailNotificationSender(),
             TimeProvider.System,
             NullLogger<RateLimitNotificationProcessor>.Instance);
         await using UsageMonitor monitor = new(
@@ -109,6 +113,8 @@ public sealed class UsageMonitorTests
         RateLimitNotificationProcessor notificationProcessor = new(
             stateStore,
             new RecordingWindowsNotificationSender(),
+            new StubGmailAuthenticationService(),
+            new StubGmailNotificationSender(),
             TimeProvider.System,
             NullLogger<RateLimitNotificationProcessor>.Instance);
         await using UsageMonitor monitor = new(
@@ -144,6 +150,8 @@ public sealed class UsageMonitorTests
         RateLimitNotificationProcessor notificationProcessor = new(
             stateStore,
             new RecordingWindowsNotificationSender(),
+            new StubGmailAuthenticationService(),
+            new StubGmailNotificationSender(),
             TimeProvider.System,
             NullLogger<RateLimitNotificationProcessor>.Instance);
         await using UsageMonitor monitor = new(

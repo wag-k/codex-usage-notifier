@@ -153,3 +153,41 @@ internal sealed class StubGmailTestMailSender : IGmailTestMailSender
         return Task.FromResult(Result);
     }
 }
+
+/// <summary>
+/// 本番Gmail通知の送信回数、送信先、および生成済みメッセージを記録します。
+/// </summary>
+internal sealed class StubGmailNotificationSender : IGmailNotificationSender
+{
+    /// <summary>送信回数を取得します。</summary>
+    public int SendCallCount { get; private set; }
+
+    /// <summary>送信先を取得します。</summary>
+    public List<string> Recipients { get; } = [];
+
+    /// <summary>送信されたメッセージを取得します。</summary>
+    public List<GmailNotificationMessage> Messages { get; } = [];
+
+    /// <summary>送信時に発生させる例外を取得または設定します。</summary>
+    public Exception? Exception { get; set; }
+
+    /// <inheritdoc />
+    public Task SendAsync(
+        string recipient,
+        GmailNotificationMessage message,
+        CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(recipient);
+        ArgumentNullException.ThrowIfNull(message);
+        cancellationToken.ThrowIfCancellationRequested();
+        SendCallCount++;
+        Recipients.Add(recipient);
+        Messages.Add(message);
+        if (Exception is not null)
+        {
+            throw Exception;
+        }
+
+        return Task.CompletedTask;
+    }
+}

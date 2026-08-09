@@ -8,7 +8,7 @@ public sealed record ApplicationState
     /// <summary>
     /// 現在の状態スキーマのバージョンです。
     /// </summary>
-    public const int CurrentSchemaVersion = 1;
+    public const int CurrentSchemaVersion = 2;
 
     /// <summary>
     /// 状態スキーマのバージョンを取得または設定します。
@@ -29,6 +29,11 @@ public sealed record ApplicationState
     /// Gmail通知の直近結果を取得または設定します。
     /// </summary>
     public DeliveryResultState? GmailDeliveryResult { get; init; }
+
+    /// <summary>
+    /// Phase 4Cの本番Gmail配送を開始したUTC時刻を取得または設定します。
+    /// </summary>
+    public DateTimeOffset? GmailProductionDeliveryStartedAtUtc { get; init; }
 
     /// <summary>
     /// 保留中の通知を取得または設定します。

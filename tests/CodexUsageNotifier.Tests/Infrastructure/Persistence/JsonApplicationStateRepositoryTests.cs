@@ -22,6 +22,7 @@ public sealed class JsonApplicationStateRepositoryTests
         DateTimeOffset capturedAtUtc = new(2026, 8, 4, 0, 0, 0, TimeSpan.Zero);
         ApplicationState initial = new()
         {
+            GmailProductionDeliveryStartedAtUtc = capturedAtUtc.AddMinutes(-10),
             LastNotifiedRecoveryWindowId = "window-1",
             LastSuccessfulFetchAtUtc = capturedAtUtc,
             LastUsageSnapshot = new UsageSnapshot
@@ -92,6 +93,9 @@ public sealed class JsonApplicationStateRepositoryTests
         ApplicationState actual = await repository.LoadAsync(CancellationToken.None);
 
         Assert.AreEqual(expected.LastNotifiedRecoveryWindowId, actual.LastNotifiedRecoveryWindowId);
+        Assert.AreEqual(
+            expected.GmailProductionDeliveryStartedAtUtc,
+            actual.GmailProductionDeliveryStartedAtUtc);
         Assert.AreEqual(expected.LastSuccessfulFetchAtUtc, actual.LastSuccessfulFetchAtUtc);
         Assert.AreEqual(99, actual.LastUsageSnapshot?.RateLimits.Single().RemainingPercent);
         Assert.AreEqual(2, actual.LastUsageSnapshot?.ResetCredits);

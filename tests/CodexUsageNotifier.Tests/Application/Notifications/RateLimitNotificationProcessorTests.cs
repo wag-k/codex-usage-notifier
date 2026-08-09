@@ -1,8 +1,10 @@
 using CodexUsageNotifier.Application.Abstractions;
+using CodexUsageNotifier.Application.Gmail;
 using CodexUsageNotifier.Application.Notifications;
 using CodexUsageNotifier.Application.State;
 using CodexUsageNotifier.Domain.Models;
 using CodexUsageNotifier.Domain.Services;
+using CodexUsageNotifier.Tests.TestDoubles;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace CodexUsageNotifier.Tests.Application.Notifications;
@@ -470,11 +472,15 @@ public sealed class RateLimitNotificationProcessorTests
     private static RateLimitNotificationProcessor CreateProcessor(
         ApplicationStateStore stateStore,
         RecordingWindowsNotificationSender sender,
-        TimeProvider timeProvider)
+        TimeProvider timeProvider,
+        IGmailAuthenticationStatusProvider? gmailStatusProvider = null,
+        IGmailNotificationSender? gmailNotificationSender = null)
     {
         return new RateLimitNotificationProcessor(
             stateStore,
             sender,
+            gmailStatusProvider ?? new StubGmailAuthenticationService(),
+            gmailNotificationSender ?? new StubGmailNotificationSender(),
             timeProvider,
             NullLogger<RateLimitNotificationProcessor>.Instance);
     }
