@@ -17,7 +17,7 @@ Codex App Serverが返す任意の利用枠をWindows上で観測し、利用枠
 - FiveHourなどの短期枠が回復したときに通知
 - Weeklyなどの長期枠で、リセット前に残量が多いときに段階通知
 - 長期枠のリセット後に再取得し、新しい利用期間の開始を確認して通知
-- Windows通知、およびGmail OAuth認証とGmail APIテスト送信に対応
+- Windows通知、Gmail OAuth認証、Gmail APIテスト送信、およびGmail本番通知に対応
 - PC起動時・スリープ復帰時にも利用枠を確認
 - 同じリセット期間・通知種別・通知段階についての重複通知を防止
 - 深夜の通知を保留し、通知可能時刻に再取得・再判定
@@ -90,7 +90,7 @@ Codex週間枠のリセットが近づいています
 
 ## 現在の実装状況
 
-Phase 1の基盤、Phase 2のCodex App Server連携、Phase 3の監視・Windows通知、Phase 3.1の複数枠通知基盤、Phase 3.2の通知信頼性改善、Phase 4Aの設定画面、およびPhase 4BのGmail認証・テスト送信まで実装しています。
+Phase 1の基盤、Phase 2のCodex App Server連携、Phase 3の監視・Windows通知、Phase 3.1の複数枠通知基盤、Phase 3.2の通知信頼性改善、Phase 4Aの設定画面、Phase 4BのGmail認証・テスト送信、およびPhase 4C-1のGmail本番通知配送まで実装しています。
 
 - `codex app-server`を本アプリ所有の子プロセスとして起動
 - stdin/stdoutのJSONL形式で`initialize`、`initialized`、`account/rateLimits/read`を実行
@@ -123,10 +123,13 @@ Phase 1の基盤、Phase 2のCodex App Server連携、Phase 3の監視・Windows
 - Gmail送信専用権限と最小限のOpenID Connect権限で認証済みアドレスを表示
 - OAuthクライアントJSONの検証・標準配置、DPAPI CurrentUserによるトークン暗号化、トークン自動更新、認証解除
 - Gmail APIの`users.messages.send`を使った、UTF-8日本語対応のテストメール送信
+- 共通通知候補からのWindows／Gmail独立配送と、同一取得のGmail候補を1通へまとめる本番送信
+- Phase 4C導入前の通知を送らない永続境界`GmailProductionDeliveryStartedAtUtc`
+- Gmail本番送信の成功・失敗、初回試行回数、試行時刻を候補ごとに状態保存
 
 2026年8月4日にCodex CLI `0.145.0-alpha.18`で実アカウントを確認したところ、`limitId=codex`の`primary`に10080分・使用率35%の週間枠だけが存在し、`secondary=null`、リセット回数1、300分枠は未観測でした。この場合、画面には「5時間枠：未観測」と表示し、10080分枠の長期通知が有効になります。300分枠は単体テストで対応済みですが、すべての環境で取得できるとは限りません。
 
-実際のCodex利用枠通知メールの配送と再試行はPhase 4Cまで未実装です。Phase 4Bのテストメール送信は本番の通知済み状態、`GmailDeliveryStatus`、試行回数、回復連番、利用枠履歴を変更しません。実際の自動起動登録と履歴グラフも未実装です。通知別設定は`settings.json`へ保存し、観測履歴のJSONL保存も実装済みです。リセット完了の使用率低下による補助判定は、非表示設定`ResetInferenceUsageDropPoints`として保持し、初期値は50ポイントです。
+実際のCodex利用枠通知メールはPhase 4C-1で有効になりました。Gmail送信失敗後の自動再試行はPhase 4C-2まで未実装で、Phase 4C-1は初回送信の成否と状態保存だけを行います。Phase 4Bのテストメール送信は引き続き本番の通知済み状態、`GmailDeliveryStatus`、試行回数、回復連番、利用枠履歴を変更しません。実際の自動起動登録と履歴グラフも未実装です。通知別設定は`settings.json`へ保存し、観測履歴のJSONL保存も実装済みです。リセット完了の使用率低下による補助判定は、非表示設定`ResetInferenceUsageDropPoints`として保持し、初期値は50ポイントです。
 
 タスクトレイの「テスト通知」から、短期枠回復、Early、Standard、Final、リセット完了、監視障害を個別に確認できます。テスト通知は本番の通知済み状態、回復連番、利用枠履歴を更新しません。
 
@@ -145,7 +148,7 @@ Windowsでは、既定値`codex`をPATHとPATHEXTから`codex.exe`、`codex.cmd`
 - Gmail送信先は、入力する場合だけメールアドレス形式を検証
 - OAuth設定がない場合は標準配置先と準備手順を表示
 - 認証状態、認証済みアカウント、最終認証成功時刻、再認証要否、最終テスト送信結果を表示
-- Gmail通知設定は認証済みかつ送信先が有効な場合だけ保存可能。ただし本番配送はPhase 4Cで開始
+- Gmail通知設定は認証済みかつ送信先が有効な場合だけ保存可能。本番配送はPhase 4C-1で実装済み
 
 保存は一時ファイルへの書き込み後に置換します。保存成功後も通知済み状態と回復連番を維持し、新しい設定は次の正常取得から通知判定へ使用します。補助確認間隔とリセット確認タイマーは再起動なしで再設定します。保存直後の利用枠取得は行いません。
 
@@ -216,7 +219,8 @@ CodexUsageNotifier.sln
    └─ 条件成立かつ通知可能
           ├─ Windows候補を1件のバルーンへ集約
           ├─ 失敗時は5分間隔・最大3回再試行
-          ├─ Gmail候補は未送信状態を独立保持（本番送信はPhase 4C）
+          ├─ Phase 4C開始境界以降のGmail未送信候補を1通へ集約
+          ├─ Gmailは初回送信の成否だけ保存（自動再試行はPhase 4C-2）
           └─ チャネル別の通知結果を状態保存
 ```
 
@@ -296,7 +300,7 @@ CodexUsageNotifier.sln
 テストメールはUTF-8のMIMEメッセージを生成し、Base64URL化してGmail APIの`users.messages.send`へ`userId=me`で送信します。SMTPは使用しません。テスト送信はPhase 3までの本番通知状態や履歴から完全に分離されています。
 
 > [!IMPORTANT]
-> Phase 4Bで利用できるのはGoogle認証と設定画面からのテストメール送信だけです。Codex利用枠通知のGmail配送、Gmailチャネルの再試行、通知禁止時間中のGmail保留はPhase 4Cで実装します。
+> Phase 4Bのテストメールは本番状態から独立しています。Codex利用枠通知のGmail配送と通知禁止時間の適用はPhase 4C-1で実装済みですが、Gmailチャネルの自動再試行はPhase 4C-2で実装します。
 
 ### トラブルシューティング
 
@@ -330,6 +334,53 @@ Google側のOAuth同意画面、実際のメール到着、および端末通知
 15. 再認証後にテストメールを再送できることを確認します。
 16. 「認証解除」を実行し、結果表示、Gmail通知設定の無効化、テスト送信不可を確認します。
 
+## Gmail本番通知（Phase 4C-1）
+
+`RateLimitNotificationPolicy`が生成した同じ通知候補をWindowsとGmailで共有し、配送状態だけをチャネル別に評価します。Windowsが成功済みでGmailが未送信ならGmailだけを送り、その逆ならWindowsだけを送ります。一方の失敗によって、もう一方の成功済みチャネルへ重複送信しません。
+
+初回のPhase 4C起動時に、`state.json`へ`GmailProductionDeliveryStartedAtUtc`をUTCで保存します。本番Gmail配送は、保存済み通知状態の`ConditionMetAtUtc`がこの開始時刻以上の候補だけを対象にします。これにより、Phase 4B以前から残る`GmailDeliveryStatus=NotAttempted`を導入直後に遡って一括送信しません。開始時刻は再起動後も維持され、Windows配送状態には影響しません。
+
+本番Gmail配送には、Gmail通知が有効、認証情報が利用可能、送信先が有効、開始境界以降、Gmail未試行、共通通知禁止時間外という条件をすべて適用します。同じ取得で複数候補が成立した場合は、次のように1通へ集約します。
+
+```text
+件名（1件）: Codex Usage Notifier: 週間枠のリセットが近づいています
+件名（複数）: Codex Usage Notifier: 3件のお知らせ
+
+[1] 短期枠が回復しました
+通知種別: ShortWindowRecovered
+LimitId: codex
+位置: Primary
+分類: FiveHour
+期間: 300分
+残量: 99%
+
+[2] 週間枠のリセットが近づいています
+通知段階: Standard
+LimitId: codex
+位置: Secondary
+分類: Weekly
+期間: 10080分
+残量: 42%
+```
+
+候補を1通へまとめても、`GmailDeliveryStatus`、`GmailAttemptCount`、`GmailLastAttemptedAtUtc`は候補ごとに保存します。成功時は含まれる全候補を`Succeeded`、失敗時は全候補を`Failed`かつ試行回数1とし、`WindowsDeliveryStatus`は変更しません。`ResetTimeAdvanced`は確定理由として、`UsageDropInference`は使用率低下からの推定であることが分かる文面にします。未使用分が次の期間へ繰り越されるか、または消滅するかは確認できていないため、本文で断定しません。
+
+通知禁止時間中はGmailも送らず、終了後の再取得で現在も有効な候補だけを送ります。時間帯を過ぎたEarly／Standard／Finalの未送信チャネルは`Expired`にします。Phase 4C-1は失敗後の自動再試行を行わず、`GmailNextRetryAtUtc`はPhase 4C-2で使用します。
+
+### Gmail本番通知の手動確認
+
+実際の利用枠を無理に消費せず、自然に成立した候補または単体テスト用候補で確認します。
+
+1. Phase 4Bの手順でGoogle認証とテストメール送信を完了します。
+2. 設定画面で有効な送信先を指定し、Gmail通知を有効にして保存します。
+3. `state.json`に`GmailProductionDeliveryStartedAtUtc`が保存され、再起動後も同じ値であることを確認します。
+4. 境界後に自然に成立した通知候補でGmailが1通届くことを確認します。
+5. WindowsとGmailを両方有効にし、同じ候補が両方のチャネルへ1回ずつ届くことを確認します。
+6. Windowsだけを無効にし、Gmailだけが届くことを確認します。
+7. 複数候補の安全な再現は単体テストで行い、1通へ集約されることを確認します。
+8. 次回取得で成功済み候補が再送されないことを確認します。
+9. 通知禁止時間中は送信されず、終了後の再取得時に有効条件を再評価することを確認します。
+
 ## エラー処理
 
 Codex App Serverとの通信に失敗した場合は、自動的に再接続します。
@@ -350,6 +401,8 @@ Codex App Serverとの通信に失敗した場合は、自動的に再接続し�
 - 利用枠・リセット期間・通知種別・通知段階による重複通知防止
 - 本番状態を変更しないWindowsテスト通知
 - 本番状態を変更しないGmail APIテストメール
+- 共通候補を使用するWindows／Gmail独立配送
+- 同一取得の複数Gmail候補を1通へ集約する本番通知
 
 ## 初版に含めない機能
 
@@ -361,7 +414,7 @@ Codex App Serverとの通信に失敗した場合は、自動的に再接続し�
 - 利用履歴グラフ
 - Windowsサービス化
 
-短期枠回復通知、長期枠のリセット前通知・リセット完了通知は初版とPhase 3の実装対象であり、複数枠・回復連番・Windowsテスト通知はPhase 3.1、設定画面はPhase 4A、Google OAuthとGmail APIテストメールはPhase 4Bで実装しています。本番の利用枠通知メールはPhase 4Cへ残しています。
+短期枠回復通知、長期枠のリセット前通知・リセット完了通知は初版とPhase 3の実装対象であり、複数枠・回復連番・Windowsテスト通知はPhase 3.1、設定画面はPhase 4A、Google OAuthとGmail APIテストメールはPhase 4B、本番の利用枠通知メールはPhase 4C-1で実装しています。Gmail失敗後の自動再試行はPhase 4C-2へ残しています。
 
 ## 将来構想
 
@@ -406,10 +459,11 @@ Codexへ作業を投入
 5. Windows通知
 6. スリープ復帰と自動再接続
 7. Gmail API・OAuth認証・テスト送信（Phase 4B、実装済み）
-8. Gmail本番通知配送とチャネル別再試行（Phase 4C）
-9. 自動起動と初回設定
-10. 履歴保存と保守処理
-11. 配布用ビルド
+8. Gmail本番通知配送とチャネル別状態保存（Phase 4C-1、実装済み）
+9. Gmail本番通知の自動再試行（Phase 4C-2）
+10. 自動起動と初回設定
+11. 履歴保存と保守処理
+12. 配布用ビルド
 
 ## 公式資料
 

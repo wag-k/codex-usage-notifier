@@ -167,7 +167,7 @@ Phase 4Bの認証とテストメール、およびPhase 4Cの本番通知にはG
 
 `gmail.send`はメール送信、`openid`と`email`は認証アカウントの識別とメールアドレス表示にだけ使用する。Gmail本文・一覧の読み取り、削除、設定変更、Google Drive、Google Contactsの権限は要求しない。
 
-Phase 4BはGoogle認証と設定画面からのテストメール送信だけを提供する。通知候補をGmailへ本番配送する処理、Gmail配送再試行、および通知禁止時間中の本番Gmail保留はPhase 4Cの対象とする。
+Phase 4BはGoogle認証と設定画面からのテストメール送信を提供する。Phase 4C-1は共通通知候補のGmail本番配送、同一取得候補の1通集約、チャネル別状態保存、Phase 4C導入前の通知を除外する開始境界、および共通通知禁止時間を実装する。失敗後のGmail自動再試行はPhase 4C-2の対象とする。
 
 ## 5. 対象範囲
 
@@ -328,7 +328,7 @@ Phase 4BはGoogle認証と設定画面からのテストメール送信だけを
 
 通知種別には少なくとも`ShortWindowRecovered`、`LongWindowEarlyWarning`、`LongWindowStandardWarning`、`LongWindowFinalWarning`、`LongWindowResetCompleted`、`NewRateLimitDetected`、`MonitoringFailure`を表現できるようにする。同じリセット期間において、同じ通知種別と通知段階をWindowsとGmailへそれぞれ最大1回送る。
 
-送信失敗した通知先については、チャネルごとの`AttemptCount`、`LastAttemptedAtUtc`、`NextRetryAtUtc`に従って再送できる。Windows通知は5分間隔・最大3回とする。送信前に保存した`InProgress`が5分以上残っている場合は、中断された試行として次の正常取得時に再試行可能な状態へ戻す。WindowsとGmailは候補を共有するが配送状態を独立して評価し、一方が未送信でも成功済みの他方へ再送しない。
+送信失敗した通知先は、チャネルごとの`AttemptCount`、`LastAttemptedAtUtc`、`NextRetryAtUtc`を保持する。Windows通知は5分間隔・最大3回で再送し、送信前に保存した`InProgress`が5分以上残っている場合は中断された試行として次の正常取得時に再試行可能な状態へ戻す。GmailはPhase 4C-1で初回試行状態だけを保存し、Phase 4C-2で再試行条件を追加する。WindowsとGmailは候補を共有するが配送状態を独立して評価し、一方が未送信でも成功済みの他方へ再送しない。
 
 ### FR-008 PC起動時の通知
 
@@ -401,22 +401,32 @@ Windows通知が利用できない場合でも、Gmail通知と監視処理は�
 1. Gmail通知の有効・無効を設定できる。
 2. 送信先の初期値は、認証したGmailアドレスと同じアドレスとする。
 3. 送信先は設定画面で変更できる。
-4. Phase 4Cの本番通知件名は通知種別に応じて、短期枠回復、長期枠リセット前、長期枠リセット完了を判別できる内容とする。
+4. Phase 4C-1の本番通知件名は、1候補なら通知種別を判別できる内容、複数候補なら件数を示す内容とする。
 
-5. Phase 4Cの本番通知本文に次を含める。
+5. Phase 4C-1の本番通知本文に次を含める。
    - 通知種別と通知段階
    - 通知対象のLimitId、Position、Classification、ウィンドウ長、残量
    - 次回リセット時刻
    - リセットまでの残り時間
    - 条件成立時刻
-   - 送信時刻
+   - 確認時刻
 6. MIMEメールをBase64URL形式でエンコードし、Gmail APIで送信する。
 7. Phase 4Bでは設定画面からUTF-8日本語の件名・本文を持つテストメールを個別送信できる。SMTPは使用しない。
 8. 自分宛てメールで端末通知が届くか、初期設定時に確認を促す。
 9. Phase 4Bのテスト送信結果は画面と安全なログだけへ記録し、本番の`RateLimitNotificationState`、`GmailDeliveryStatus`、試行回数、回復連番、利用枠履歴を作成・変更しない。
 10. テスト送信は同時に最大1件とし、認証済みかつ送信先が有効な場合だけ実行できる。
 11. Gmail APIの401、403、API未有効化、一時的なネットワーク・サーバー障害を区別し、安全で操作可能な概要を表示する。
-12. Phase 4Cの本番送信失敗はログとWindows通知で知らせ、同じリセット期間・通知種別・通知段階についてチャネル別の再試行方針を適用する。
+12. 通知候補は`RateLimitNotificationPolicy`で一度だけ生成し、WindowsとGmailで共有する。Gmail固有の通知条件判定を複製しない。
+13. WindowsとGmailの配送状態は独立させ、成功済みチャネルへ他方の成否を理由として再送しない。
+14. 初回Phase 4C起動時に`GmailProductionDeliveryStartedAtUtc`をUTCで永続化し、原則として保存済み状態の`ConditionMetAtUtc`が開始時刻以上の通知だけをGmail本番配送対象とする。
+15. Gmail本番配送は、Gmail通知有効、認証情報が利用可能、送信先有効、開始境界以降、Gmail未試行、通知禁止時間外をすべて満たす場合だけ実行する。
+16. 同じ利用枠取得で複数のGmail対象候補が成立した場合は1通へ集約する。候補が異なるlimitIdに属する場合も同じ取得単位で集約する。
+17. 集約しても`GmailDeliveryStatus`と試行情報は候補ごとに保持し、成功時は全候補を`Succeeded`、失敗時は全候補を`Failed`とする。Windows配送状態は変更しない。
+18. 本番通知のMIME生成とBase64URL変換、およびGmail APIクライアントはPhase 4Bの共通サービスを再利用する。テストメール送信と本番通知配送の上位責務は分離する。
+19. `UsageDropInference`によるリセット完了は使用率低下からの推定であることを本文へ明記し、`ResetTimeAdvanced`と区別する。
+20. 未使用分が次の利用期間へ繰り越されるか、または消滅するかは本文で断定しない。
+21. Phase 4C-1はGmailの初回送信だけを実行する。失敗時は`GmailDeliveryStatus=Failed`、`GmailAttemptCount=1`、`GmailLastAttemptedAtUtc=現在時刻`、`GmailNextRetryAtUtc=null`を保存し、自動再試行しない。
+22. `invalid_grant`、401、権限取消、リフレッシュトークン失効ではPhase 4Bの認証サービスを再認証必要状態へ移行する。一時通信障害では資格情報を削除しない。
 
 ### FR-013 長期枠のリセット前通知
 
@@ -512,7 +522,7 @@ LimitId：codex
 
 Phase 4Bでは、OAuthクライアント設定の状態と標準配置先、認証状態、認証済みGoogleアカウント、最終認証成功時刻、再認証要否、最終テスト送信結果を表示する。「OAuthクライアント設定ファイルを選択」「Googleアカウントで認証」「再認証」「認証解除」「テストメール送信」を提供する。OAuth設定がない場合は認証、未認証または送信先不正の場合はテスト送信を無効化し、認証中・送信中の同じ操作を重複実行しない。
 
-認証成功後に`GmailRecipient`が空なら認証済みアドレスを初期入力する。Gmail通知は初期値を無効とし、認証済みかつ送信先が有効な場合だけtrueとして保存できる。画面には、Phase 4Bは認証とテスト送信だけであり、本番の利用枠通知メールはPhase 4Cで実装することを明記する。自動起動は設定値だけを保存し、Windowsへの登録は後続フェーズで実装する。
+認証成功後に`GmailRecipient`が空なら認証済みアドレスを初期入力する。Gmail通知は初期値を無効とし、認証済みかつ送信先が有効な場合だけtrueとして保存できる。画面には、Google認証、テスト送信、Phase 4C-1の本番利用枠通知を利用でき、失敗後の自動再試行はPhase 4C-2で実装することを明記する。自動起動は設定値だけを保存し、Windowsへの登録は後続フェーズで実装する。
 
 取得済みの各利用枠について、LimitId、Position、WindowDurationMinutes、Classification、適用される通知設定、通知有効状態を表示する。FiveHourとWeeklyには編集した分類別既定値を適用する。Unknownは表示するが設定画面から有効化せず、「利用期間の意味を識別できないため、通知対象外です」と表示する。LimitId、Position、WindowDurationMinutesが一致する既存の利用枠別上書き設定は保持する。
 
@@ -568,6 +578,7 @@ Phase 4Bでは、OAuthクライアント設定の状態と標準配置先、認�
 - 利用枠ごとの閾値未満状態、直近残量、回復連番
 - 長期枠リセット完了の判定理由
 - Windows通知とGmail通知それぞれの送信結果
+- Phase 4Cの本番Gmail配送開始時刻`GmailProductionDeliveryStartedAtUtc`
 - 条件成立時刻と送信時刻
 - 保留通知と保留終了時刻
 - 最終取得成功時刻
@@ -578,7 +589,7 @@ Phase 4Bでは、OAuthクライアント設定の状態と標準配置先、認�
 
 状態ファイルは一時ファイルへ書き込んだ後に置換し、書き込み途中の破損を防止する。
 
-OAuthトークンと認証メタデータは`state.json`や`settings.json`へ混在させず、FR-011のDPAPI保護ストアへ分離する。Phase 4Bのテストメールは`state.json`を更新しない。
+OAuthトークンと認証メタデータは`state.json`や`settings.json`へ混在させず、FR-011のDPAPI保護ストアへ分離する。Phase 4Bのテストメールは`state.json`を更新しない。`GmailProductionDeliveryStartedAtUtc`は機密情報を含まない本番配送境界として`state.json`へ保存し、再起動後も変更しない。
 
 ### FR-020 ログ
 
@@ -718,6 +729,8 @@ Weeklyなどの長期枠について、新しい利用期間の開始を`LongWin
 
 永続化キーはLimitId、Position、WindowDurationMinutes、RecoveryWindowId、NotificationType、NotificationStageの組み合わせとする。送信先ごとの成功・失敗を別々に保持し、一方の失敗によって成功済みの送信先へ重複送信しない。
 
+`ApplicationState`はこれらの候補別状態とは別に、`GmailProductionDeliveryStartedAtUtc: DateTimeOffset?`を保持する。初回Phase 4C起動時だけ現在UTC時刻を設定し、以後の再起動では保存値を再利用する。Phase 4B以前から存在する`GmailDeliveryStatus=NotAttempted`は、保存済み`ConditionMetAtUtc`がこの境界より前なら本番配送しない。
+
 ### 8.4 RateLimitRecoveryState
 
 `resetsAt`がない短期枠の閾値遷移を再起動後も継続するため、次を利用枠ごとに保存する。
@@ -771,7 +784,7 @@ Weeklyなどの長期枠について、新しい利用期間の開始を`LongWin
 | LongWindowResetCompletedEnabled | true |
 | ResetInferenceUsageDropPoints | 50。画面には表示せず1～100の範囲で保持 |
 | WindowsNotificationEnabled | true |
-| GmailNotificationEnabled | false。認証済みかつGmailRecipientが有効な場合だけtrueを保存可能。本番配送はPhase 4C |
+| GmailNotificationEnabled | false。認証済みかつGmailRecipientが有効な場合だけtrueを保存可能。本番配送はPhase 4C-1で実装済み |
 | GmailRecipient | null。入力時はメールアドレス形式 |
 | QuietHoursEnabled | true |
 | QuietHoursStart | 00:00 |
@@ -832,22 +845,23 @@ Weeklyなどの長期枠について、新しい利用期間の開始を`LongWin
    │             └─ リセット完了候補と判定理由を生成
    │
    ├─ 同じ利用枠・リセット期間・通知種別・段階で送信済み
-   │      └─ 重複通知なし
+   │      └─ チャネルごとに重複通知なし
    │
    ├─ 通知禁止時間内
    │      └─ 保留状態を保存
    │
    └─ 通知可能
-          ├─ Windows通知
-          ├─ Gmail通知候補と未送信状態を保持（本番配送はPhase 4C）
-          └─ 結果を状態保存
+          ├─ Windows未送信・再試行可能候補を1件のバルーンへ集約
+          ├─ Gmail開始境界以降の未試行候補を1通のメールへ集約
+          ├─ WindowsとGmailを独立して配送
+          └─ 候補ごとのチャネル別結果を状態保存
 
 通知禁止時間終了
    │
    ├─ 利用枠を再取得
    ├─ リセット前通知は段階の期限と残量を再判定
-   ├─ 期限切れのリセット前通知は破棄
-   └─ リセット完了通知は新しい期間を確認してから送信
+   ├─ 期限切れのリセット前通知は未送信チャネルをExpiredへ変更
+   └─ リセット完了通知は新しい期間を確認してからWindows／Gmailへ配送
 ```
 
 ## 10. 受け入れ条件
@@ -915,7 +929,7 @@ Weeklyなどの長期枠について、新しい利用期間の開始を`LongWin
 - 認証情報ファイルが平文JSONでなく、同じWindowsユーザーのDPAPI CurrentUserでのみ復号できる。
 - テスト送信の成功・失敗によって本番通知状態、Windows/Gmail配送状態、試行回数、回復連番、利用枠履歴が変化しない。
 - ログとGit追跡対象へOAuthトークン、認証コード、クライアントシークレット、MIME全文が含まれない。
-- Phase 4Bでは本番の利用枠通知メールを送信しない。
+- Phase 4Bのテストメール送信経路からは本番の利用枠通知メールを送信しない。
 
 ### AC-008 再接続
 
@@ -995,14 +1009,30 @@ Weeklyなどの長期枠について、新しい利用期間の開始を`LongWin
 - Final時間帯でFinalが無効な場合はStandardを、Standard時間帯でStandardが無効な場合はEarlyを送らない。
 - 保留終了前、24時間超過、現在期間と不一致の保留を送らない。
 - 短時間に連続した更新通知を最後の1回へデバウンスできる。
-- Windows無効・Gmail有効でも候補とGmail未送信状態を保持でき、Windows成功済み・Gmail未送信の状態でWindowsを重複送信しない。
+- Windows無効・Gmail有効でもGmail本番通知を送信でき、Windows成功済み・Gmail未送信ならGmailだけを送信できる。
 
-### AC-018 Phase 4B境界
+### AC-018 Phase 4Bテストメール境界
 
 - Gmailテスト送信サービスが`RateLimitNotificationProcessor`から参照されず、本番通知候補の配送へ組み込まれていない。
 - `GmailDeliveryStatus`、`GmailAttemptCount`、`GmailLastAttemptedAtUtc`、`GmailNextRetryAtUtc`を維持するが、Phase 4Bのテスト送信では更新しない。
-- Gmail通知設定を保存しても、Phase 4BではGmail候補を未送信状態として保持するだけで、Gmail APIへ本番送信しない。
-- Phase 4Cで、Windowsと独立したGmail本番配送、再試行、通知禁止時間中の扱いを追加できる責務分離になっている。
+- GmailテストメールはPhase 4C-1の本番Gmail通知送信サービスを呼び出さない。
+- Gmail本番通知はPhase 4Bのテスト送信結果表示を変更しない。
+
+### AC-019 Phase 4C-1 Gmail本番配送
+
+- Gmail通知が有効、認証情報が利用可能、送信先が有効な場合だけ、共通通知候補をGmail APIへ本番配送できる。
+- Windows無効・Gmail有効でもGmailを送信できる。
+- Windows成功済み・Gmail未送信ならGmailだけを送り、Gmail成功済み・Windows未送信ならWindowsだけを送る。
+- 同じ取得の複数候補と複数limitIdを1通へ集約できる。
+- 集約成功時は各候補のGmail状態が`Succeeded`、失敗時は各候補が`Failed`かつ`GmailAttemptCount=1`になり、Windows状態を変更しない。
+- 初回Phase 4C起動時に`GmailProductionDeliveryStartedAtUtc`を保存し、再起動後も同じ境界を維持できる。
+- 保存済み`ConditionMetAtUtc`がGmail配送開始時刻より前の`NotAttempted`状態を遡って送信しない。
+- 通知禁止時間中はGmailを送らず、終了後に現在も有効な候補だけを送る。
+- 時間帯または残量条件を過ぎたEarly／Standard／Finalの未送信Gmail状態を`Expired`にし、古い段階を送らない。
+- `ResetTimeAdvanced`と`UsageDropInference`を本文で区別し、後者が推定であることを明示できる。
+- Gmail成功後は同じ候補を再送しない。
+- Gmail初回失敗後はPhase 4C-1で自動再試行せず、Phase 4C-2へ状態を引き継げる。
+- 401または`invalid_grant`で再認証必要状態へ移行し、一時通信障害では認証情報を削除しない。
 
 ## 11. 単体テスト対象
 
@@ -1082,6 +1112,31 @@ Weeklyなどの長期枠について、新しい利用期間の開始を`LongWin
 72. テスト送信成功・失敗時の本番通知状態、回復連番、履歴非変更
 73. Gmailテスト送信によるWindows配送状態非変更
 74. トークンとクライアントシークレット相当値がログへ出ないこと
+75. Gmail有効・認証情報利用可能・有効送信先での本番通知送信
+76. Gmail無効または未認証時の本番送信抑止
+77. Windows無効・Gmail有効時のGmail単独配送
+78. Windows成功済み・Gmail未送信時のGmail単独配送
+79. Gmail成功済み・Windows未送信時のGmail再送抑止
+80. 同一取得の複数候補と複数limitIdの1通集約
+81. 集約成功時の候補別Gmail成功状態
+82. 集約失敗時の候補別Gmail失敗状態とWindows状態維持
+83. Gmail送信失敗時の試行回数1、最終試行時刻、および次回再試行時刻null
+84. Phase 4C開始時刻より前の保存済みNotAttempted状態の送信抑止
+85. Phase 4C開始時刻以降の候補の送信
+86. `GmailProductionDeliveryStartedAtUtc`のJSON永続化と再起動後維持
+87. 通知禁止時間中のGmail送信抑止
+88. 禁止時間終了後に有効な保留候補をGmail送信
+89. 時間帯を過ぎたEarly／Standard／FinalのGmail期限切れ
+90. `ResetTimeAdvanced`の本文表現
+91. `UsageDropInference`の推定表現
+92. Gmail成功後の同一候補再送抑止
+93. Gmail初回失敗後にPhase 4C-1では自動再試行しないこと
+94. Gmail本番本文にOAuthトークン名や認証ヘッダーが含まれないこと
+95. Gmail本番本文で未使用分の消滅・繰り越しを断定しないこと
+96. Phase 4BのMIME生成とGmail APIクライアントを本番送信でも共有すること
+97. テストメール成功・失敗による本番Gmail配送状態非変更
+98. 401または`invalid_grant`の再認証必要状態
+99. 一時通信障害時の認証情報維持
 
 ## 12. 実装上の設計方針
 
@@ -1315,12 +1370,24 @@ Phase 4AではGoogle OAuth、Gmail API、Gmail送信、テストメール送信�
 
 Phase 4Bでは短期枠回復、長期枠リセット前、長期枠リセット完了の本番通知メールを送らない。テスト送信は本番通知状態と履歴を変更しない。
 
-### Phase 4C：Gmail本番配送
+### Phase 4C-1：Gmail本番配送
 
-- 既存の通知候補からチャネル別にGmail未送信分を配送
-- Gmail配送の再試行と`GmailDeliveryStatus`・試行情報更新
-- 通知禁止時間中の本番Gmail保留
+- 既存の共通通知候補からチャネル別にGmail未送信分を配送
 - Windows無効・Gmail有効を含むチャネル独立動作
+- Phase 4C導入前の通知を除外する`GmailProductionDeliveryStartedAtUtc`
+- 同じ取得の複数候補と複数limitIdを1通へ集約
+- 通知禁止時間中の本番Gmail保留と終了後の再評価
+- `GmailDeliveryStatus`・試行情報の候補別更新
+- Phase 4BのMIME生成、Base64URL変換、Gmail APIクライアントの共有
+
+Phase 4C-1ではGmailの初回送信だけを実行し、失敗後の自動再試行タイマーは追加しない。
+
+### Phase 4C-2：Gmail配送再試行
+
+- `GmailDeliveryStatus=Failed`の再試行条件
+- Gmail用の再試行間隔、最大回数、および`GmailNextRetryAtUtc`
+- 古いGmail`InProgress`の回復
+- 再認証後に再試行対象へ戻す条件
 
 ### Phase 5：運用機能
 
@@ -1336,8 +1403,8 @@ Phase 4Bでは短期枠回復、長期枠リセット前、長期枠リセット
 1. Google OAuth同意画面がテスト公開・本番公開の各構成で期待どおり表示されるか
 2. アクセストークン自動更新、Google側権限取消、再認証を実アカウントで一巡確認できるか
 3. 自分宛てGmailのPC・スマートフォン・タブレット通知の実機挙動
-4. Phase 4CのGmail本番配送で、Windows通知と異なる再試行間隔・最大回数を採用するか
-5. Phase 4Cで複数候補を1通へ集約するか、通知候補ごとに個別メールとするか
+4. Phase 4C-2のGmail再試行で、Windows通知と異なる再試行間隔・最大回数を採用するか
+5. Phase 4C-2で古い`InProgress`を再試行可能へ戻す経過時間
 6. 配布形式
 7. アプリ名・アイコン
 8. 300分枠を返す実アカウントで、5時間枠候補と閾値遷移の実挙動を確認できるか
