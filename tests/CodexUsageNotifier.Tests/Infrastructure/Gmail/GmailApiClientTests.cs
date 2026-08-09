@@ -76,6 +76,34 @@ public sealed class GmailApiClientTests
         Assert.IsFalse(authentication.MarkedReauthenticationRequired);
     }
 
+    /// <summary>429応答を再試行可能な一時障害として分類することを検証します。</summary>
+    [TestMethod]
+    public async Task SendRawMessageAsync_TooManyRequests_IsTransient()
+    {
+        GmailApiClient client = new(
+            new StubAuthenticationService(),
+            new ThrowingGateway(CreateApiException(HttpStatusCode.TooManyRequests)));
+
+        GmailApiOperationException exception = await Assert.ThrowsExceptionAsync<GmailApiOperationException>(
+            () => client.SendRawMessageAsync("dGVzdA", CancellationToken.None));
+
+        Assert.AreEqual(GmailApiErrorKind.Transient, exception.Kind);
+    }
+
+    /// <summary>5xx応答を再試行可能な一時障害として分類することを検証します。</summary>
+    [TestMethod]
+    public async Task SendRawMessageAsync_ServerError_IsTransient()
+    {
+        GmailApiClient client = new(
+            new StubAuthenticationService(),
+            new ThrowingGateway(CreateApiException(HttpStatusCode.ServiceUnavailable)));
+
+        GmailApiOperationException exception = await Assert.ThrowsExceptionAsync<GmailApiOperationException>(
+            () => client.SendRawMessageAsync("dGVzdA", CancellationToken.None));
+
+        Assert.AreEqual(GmailApiErrorKind.Transient, exception.Kind);
+    }
+
     /// <summary>指定HTTP状態を持つGoogle API例外を生成します。</summary>
     private static GoogleApiException CreateApiException(HttpStatusCode statusCode)
     {

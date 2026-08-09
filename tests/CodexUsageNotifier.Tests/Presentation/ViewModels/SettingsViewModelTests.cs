@@ -252,13 +252,43 @@ public sealed class SettingsViewModelTests
         Assert.IsTrue(context.ViewModel.IsTestEmailAvailable);
     }
 
+    /// <summary>再認証成功時に現在のGmail配送有効期間を更新することを検証します。</summary>
+    [TestMethod]
+    public async Task AuthenticateGmailAsync_Reauthentication_UpdatesDeliveryBoundary()
+    {
+        DateTimeOffset enabledSinceUtc = new(2026, 8, 9, 11, 0, 0, TimeSpan.Zero);
+        AppSettings settings = AppSettings.CreateDefault() with
+        {
+            GmailNotificationEnabled = true,
+            GmailRecipient = "target@example.com",
+        };
+        TestContext context = CreateContext(
+            settings,
+            timeProvider: new FixedTimeProvider(enabledSinceUtc));
+        context.AuthenticationService.Status = new GmailAuthenticationStatus
+        {
+            State = GmailAuthenticationState.ReauthenticationRequired,
+            HasClientConfiguration = true,
+        };
+        await context.ViewModel.LoadAsync(CancellationToken.None);
+
+        await context.ViewModel.AuthenticateGmailAsync(true, CancellationToken.None);
+
+        ApplicationState state = await context.StateStore.LoadAsync(CancellationToken.None);
+        Assert.AreEqual(enabledSinceUtc, state.GmailDeliveryEnabledSinceUtc);
+        Assert.IsTrue(state.GmailDeliveryEnabledLastObserved);
+    }
+
     /// <summary>
     /// 認証済みかつ送信先が有効な場合にGmail通知をtrueとして保存できることを検証します。
     /// </summary>
     [TestMethod]
     public async Task SaveAsync_AuthenticatedGmail_AllowsGmailNotification()
     {
-        TestContext context = CreateContext(AppSettings.CreateDefault());
+        DateTimeOffset enabledSinceUtc = new(2026, 8, 9, 10, 0, 0, TimeSpan.Zero);
+        TestContext context = CreateContext(
+            AppSettings.CreateDefault(),
+            timeProvider: new FixedTimeProvider(enabledSinceUtc));
         await context.ViewModel.LoadAsync(CancellationToken.None);
         await context.ViewModel.AuthenticateGmailAsync(false, CancellationToken.None);
         context.ViewModel.GmailNotificationEnabled = true;
@@ -268,6 +298,9 @@ public sealed class SettingsViewModelTests
         Assert.IsTrue(result);
         Assert.IsTrue(context.SettingsRepository.Settings.GmailNotificationEnabled);
         Assert.AreEqual("user@example.com", context.SettingsRepository.Settings.GmailRecipient);
+        ApplicationState state = await context.StateStore.LoadAsync(CancellationToken.None);
+        Assert.AreEqual(enabledSinceUtc, state.GmailDeliveryEnabledSinceUtc);
+        Assert.IsTrue(state.GmailDeliveryEnabledLastObserved);
     }
 
     /// <summary>
@@ -327,7 +360,10 @@ public sealed class SettingsViewModelTests
     /// <param name="settings">初期設定です。</param>
     /// <param name="state">初期状態です。</param>
     /// <returns>テスト操作に必要な依存関係です。</returns>
-    private static TestContext CreateContext(AppSettings settings, ApplicationState? state = null)
+    private static TestContext CreateContext(
+        AppSettings settings,
+        ApplicationState? state = null,
+        TimeProvider? timeProvider = null)
     {
         InMemorySettingsRepository settingsRepository = new(settings);
         InMemoryStateRepository stateRepository = new(state ?? ApplicationState.CreateDefault());
@@ -343,6 +379,7 @@ public sealed class SettingsViewModelTests
             configurationService,
             authenticationService,
             testMailSender,
+            timeProvider ?? TimeProvider.System,
             NullLogger<SettingsViewModel>.Instance);
         return new TestContext(
             viewModel,
@@ -351,6 +388,18 @@ public sealed class SettingsViewModelTests
             settingsSink,
             authenticationService,
             testMailSender);
+    }
+
+    /// <summary>固定UTC時刻を返すテスト用時刻提供元です。</summary>
+    private sealed class FixedTimeProvider : TimeProvider
+    {
+        private readonly DateTimeOffset utcNow;
+
+        /// <summary>固定して返すUTC時刻を受け取ります。</summary>
+        public FixedTimeProvider(DateTimeOffset utcNow) => this.utcNow = utcNow;
+
+        /// <inheritdoc />
+        public override DateTimeOffset GetUtcNow() => utcNow;
     }
 
     /// <summary>

@@ -119,11 +119,17 @@ public sealed partial class SettingsViewModel
         IsBusy = true;
         try
         {
+            bool wasReauthenticationRequired = gmailStatus.State == GmailAuthenticationState.ReauthenticationRequired;
             GmailOperationResult result = await Task.Run(
                 () => gmailAuthenticationService.AuthenticateAsync(forceReauthentication, cancellationToken),
                 cancellationToken);
             OperationMessage = result.Message;
             await RefreshGmailStatusAsync(cancellationToken);
+            if (result.Succeeded && wasReauthenticationRequired && baselineSettings.GmailNotificationEnabled)
+            {
+                await UpdateGmailDeliveryEnabledBoundaryAsync(cancellationToken);
+            }
+
             if (result.Succeeded && string.IsNullOrWhiteSpace(GmailRecipient)
                 && !string.IsNullOrWhiteSpace(gmailStatus.AuthenticatedEmailAddress))
             {

@@ -14,6 +14,8 @@ public sealed partial class RateLimitNotificationProcessor
 {
     private static readonly TimeSpan WindowsRetryDelay = TimeSpan.FromMinutes(5);
     private static readonly TimeSpan WindowsInProgressTimeout = TimeSpan.FromMinutes(5);
+    private static readonly TimeSpan GmailRetryDelay = TimeSpan.FromMinutes(60);
+    private static readonly TimeSpan GmailInProgressTimeout = TimeSpan.FromMinutes(60);
     private readonly ApplicationStateStore stateStore;
     private readonly IWindowsNotificationSender windowsNotificationSender;
     private readonly IGmailAuthenticationStatusProvider gmailAuthenticationStatusProvider;
@@ -68,11 +70,25 @@ public sealed partial class RateLimitNotificationProcessor
         ArgumentNullException.ThrowIfNull(settings);
         ApplicationState previousState = await stateStore.LoadAsync(cancellationToken);
         previousState = await EnsureGmailProductionDeliveryStartAsync(previousState, cancellationToken);
+        (previousState, GmailAuthenticationStatus? gmailAuthenticationStatus) =
+            await SynchronizeGmailDeliveryBoundaryAsync(
+                previousState,
+                settings,
+                cancellationToken);
         previousState = await RecoverInterruptedWindowsAttemptsAsync(
             previousState,
             snapshot.CapturedAtUtc,
             cancellationToken);
+        previousState = await RecoverInterruptedGmailAttemptsAsync(
+            previousState,
+            snapshot.CapturedAtUtc,
+            cancellationToken);
         previousState = await ExpireInvalidDeferredNotificationsAsync(
+            previousState,
+            snapshot,
+            settings,
+            cancellationToken);
+        previousState = await ExpireInvalidGmailRetriesAsync(
             previousState,
             snapshot,
             settings,
@@ -126,6 +142,7 @@ public sealed partial class RateLimitNotificationProcessor
                     GmailAttemptCount = existing?.GmailAttemptCount ?? 0,
                     GmailLastAttemptedAtUtc = existing?.GmailLastAttemptedAtUtc,
                     GmailNextRetryAtUtc = existing?.GmailNextRetryAtUtc,
+                    GmailFailureKind = existing?.GmailFailureKind ?? GmailDeliveryFailureKind.None,
                 };
                 currentState = await SaveNotificationStateAsync(deferred, cancellationToken);
                 LogNotificationDeferred(
@@ -133,6 +150,15 @@ public sealed partial class RateLimitNotificationProcessor
                     candidate.NotificationType,
                     candidate.NotificationStage,
                     quietHoursEnd.Value);
+                if (existing is not null
+                    && existing.GmailDeliveryStatus == DeliveryStatus.Failed)
+                {
+                    LogGmailRetryDeferredByQuietHours(
+                        logger,
+                        candidate.NotificationType,
+                        candidate.NotificationStage,
+                        quietHoursEnd.Value);
+                }
             }
 
             return new NotificationProcessingResult
@@ -170,6 +196,7 @@ public sealed partial class RateLimitNotificationProcessor
             currentState,
             snapshot,
             settings,
+            gmailAuthenticationStatus,
             cancellationToken);
 
         return new NotificationProcessingResult { State = currentState };
@@ -203,6 +230,76 @@ public sealed partial class RateLimitNotificationProcessor
             cancellationToken);
         LogGmailProductionDeliveryStarted(logger, updated.GmailProductionDeliveryStartedAtUtc!.Value);
         return updated;
+    }
+
+    /// <summary>
+    /// Gmail設定と認証状態の変化を配送有効期間の境界へ反映します。
+    /// </summary>
+    /// <param name="state">現在の永続状態です。</param>
+    /// <param name="settings">現在適用中の設定です。</param>
+    /// <param name="cancellationToken">状態確認と保存のキャンセル通知です。</param>
+    /// <returns>境界を同期した状態と、取得できた認証状態です。</returns>
+    private async Task<(ApplicationState State, GmailAuthenticationStatus? AuthenticationStatus)>
+        SynchronizeGmailDeliveryBoundaryAsync(
+            ApplicationState state,
+            AppSettings settings,
+            CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(state);
+        ArgumentNullException.ThrowIfNull(settings);
+        GmailAuthenticationStatus? authenticationStatus = null;
+        if (settings.GmailNotificationEnabled)
+        {
+            try
+            {
+                authenticationStatus = await gmailAuthenticationStatusProvider
+                    .GetStatusAsync(cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            catch (Exception) when (!cancellationToken.IsCancellationRequested)
+            {
+                LogGmailDeliveryUnavailable(logger, "Gmail認証状態を確認できませんでした。");
+            }
+        }
+
+        bool becameEnabled = settings.GmailNotificationEnabled
+            && !state.GmailDeliveryEnabledLastObserved;
+        bool reauthenticationCompleted = settings.GmailNotificationEnabled
+            && authenticationStatus?.CanSendMail == true
+            && !state.GmailAuthenticationWasUsable;
+        bool authenticationWasUsable = settings.GmailNotificationEnabled
+            && authenticationStatus?.CanSendMail == true;
+        if (!becameEnabled
+            && !reauthenticationCompleted
+            && state.GmailDeliveryEnabledLastObserved == settings.GmailNotificationEnabled
+            && (authenticationStatus is null
+                || state.GmailAuthenticationWasUsable == authenticationWasUsable))
+        {
+            return (state, authenticationStatus);
+        }
+
+        DateTimeOffset nowUtc = timeProvider.GetUtcNow();
+        ApplicationState updated = await stateStore.UpdateAsync(
+            current => current with
+            {
+                GmailDeliveryEnabledSinceUtc = becameEnabled || reauthenticationCompleted
+                    ? nowUtc
+                    : current.GmailDeliveryEnabledSinceUtc,
+                GmailDeliveryEnabledLastObserved = settings.GmailNotificationEnabled,
+                GmailAuthenticationWasUsable = authenticationStatus is null
+                    ? current.GmailAuthenticationWasUsable
+                    : authenticationWasUsable,
+            },
+            cancellationToken);
+        if (becameEnabled || reauthenticationCompleted)
+        {
+            LogGmailDeliveryBoundaryStarted(
+                logger,
+                updated.GmailDeliveryEnabledSinceUtc!.Value,
+                reauthenticationCompleted ? "Reauthenticated" : "Enabled");
+        }
+
+        return (updated, authenticationStatus);
     }
 
     /// <summary>
@@ -317,6 +414,7 @@ public sealed partial class RateLimitNotificationProcessor
         ApplicationState currentState,
         UsageSnapshot snapshot,
         AppSettings settings,
+        GmailAuthenticationStatus? authenticationStatus,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(candidates);
@@ -330,19 +428,7 @@ public sealed partial class RateLimitNotificationProcessor
             return currentState;
         }
 
-        GmailAuthenticationStatus authenticationStatus;
-        try
-        {
-            authenticationStatus = await gmailAuthenticationStatusProvider.GetStatusAsync(cancellationToken)
-                .ConfigureAwait(false);
-        }
-        catch (Exception) when (!cancellationToken.IsCancellationRequested)
-        {
-            LogGmailDeliveryUnavailable(logger, "Gmail認証状態を確認できませんでした。");
-            return currentState;
-        }
-
-        if (!authenticationStatus.CanSendMail)
+        if (authenticationStatus?.CanSendMail != true)
         {
             LogGmailDeliveryUnavailable(logger, "Gmailが未認証または再認証待ちです。");
             return currentState;
@@ -350,6 +436,8 @@ public sealed partial class RateLimitNotificationProcessor
 
         DateTimeOffset startedAtUtc = currentState.GmailProductionDeliveryStartedAtUtc
             ?? throw new InvalidOperationException("Gmail本番配送開始時刻が保存されていません。");
+        DateTimeOffset enabledSinceUtc = currentState.GmailDeliveryEnabledSinceUtc
+            ?? throw new InvalidOperationException("Gmail配送有効期間の開始時刻が保存されていません。");
         List<RateLimitNotificationCandidate> gmailCandidates = candidates
             .Where(candidate =>
             {
@@ -358,7 +446,8 @@ public sealed partial class RateLimitNotificationProcessor
                     candidate);
                 return existing is not null
                     && RateLimitNotificationPolicy.CanAttemptGmail(existing, snapshot.CapturedAtUtc)
-                    && existing.ConditionMetAtUtc >= startedAtUtc;
+                    && existing.ConditionMetAtUtc >= startedAtUtc
+                    && existing.ConditionMetAtUtc >= enabledSinceUtc;
             })
             .ToList();
         if (gmailCandidates.Count == 0)
@@ -379,10 +468,17 @@ public sealed partial class RateLimitNotificationProcessor
                 GmailAttemptCount = existing.GmailAttemptCount + 1,
                 GmailLastAttemptedAtUtc = attemptedAtUtc,
                 GmailNextRetryAtUtc = null,
+                GmailFailureKind = GmailDeliveryFailureKind.None,
                 DeferredUntilUtc = null,
             };
             currentState = await SaveNotificationStateAsync(inProgress, cancellationToken);
             inProgressStates.Add(inProgress);
+            LogGmailDeliveryAttemptStarted(
+                logger,
+                candidate.NotificationType,
+                candidate.NotificationStage,
+                inProgress.GmailAttemptCount,
+                inProgress.GmailAttemptCount == 1 ? "Initial" : "Retry");
         }
 
         GmailNotificationMessage message = GmailNotificationMessageFactory.CreateAggregate(
@@ -402,10 +498,19 @@ public sealed partial class RateLimitNotificationProcessor
                 RateLimitNotificationState succeeded = inProgress with
                 {
                     GmailDeliveryStatus = DeliveryStatus.Succeeded,
+                    GmailNextRetryAtUtc = null,
+                    GmailFailureKind = GmailDeliveryFailureKind.None,
                     DeliveredAtUtc = inProgress.DeliveredAtUtc ?? deliveredAtUtc,
                 };
                 currentState = await SaveNotificationStateAsync(succeeded, cancellationToken);
                 LogGmailNotificationSucceeded(logger, candidate.NotificationType, candidate.NotificationStage);
+                if (inProgress.GmailAttemptCount == RateLimitNotificationPolicy.MaxGmailAttemptCount)
+                {
+                    LogGmailRetrySucceeded(
+                        logger,
+                        candidate.NotificationType,
+                        candidate.NotificationStage);
+                }
             }
 
             return await stateStore.UpdateAsync(
@@ -420,35 +525,24 @@ public sealed partial class RateLimitNotificationProcessor
                 },
                 cancellationToken);
         }
+        catch (OperationCanceledException exception) when (!cancellationToken.IsCancellationRequested)
+        {
+            return await HandleGmailDeliveryFailureAsync(
+                gmailCandidates,
+                inProgressStates,
+                currentState,
+                attemptedAtUtc,
+                exception,
+                cancellationToken);
+        }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            string safeSummary = CreateSafeGmailFailureSummary(exception);
-            foreach ((RateLimitNotificationCandidate candidate, RateLimitNotificationState inProgress) in
-                     gmailCandidates.Zip(inProgressStates))
-            {
-                RateLimitNotificationState failed = inProgress with
-                {
-                    GmailDeliveryStatus = DeliveryStatus.Failed,
-                    GmailNextRetryAtUtc = null,
-                };
-                currentState = await SaveNotificationStateAsync(failed, cancellationToken);
-                LogGmailNotificationFailed(
-                    logger,
-                    candidate.NotificationType,
-                    candidate.NotificationStage,
-                    safeSummary);
-            }
-
-            return await stateStore.UpdateAsync(
-                state => state with
-                {
-                    GmailDeliveryResult = new DeliveryResultState
-                    {
-                        Status = DeliveryStatus.Failed,
-                        AttemptedAtUtc = attemptedAtUtc,
-                        Summary = safeSummary,
-                    },
-                },
+            return await HandleGmailDeliveryFailureAsync(
+                gmailCandidates,
+                inProgressStates,
+                currentState,
+                attemptedAtUtc,
+                exception,
                 cancellationToken);
         }
     }
@@ -463,6 +557,90 @@ public sealed partial class RateLimitNotificationProcessor
             InvalidOperationException => "Gmailの認証を確認できないため通知メールを送信できませんでした。",
             _ => "Gmail通知メールを送信できませんでした。",
         };
+    }
+
+    /// <summary>
+    /// Gmail集約送信の失敗を候補ごとに保存し、一時障害だけを60分後へ予約します。
+    /// </summary>
+    /// <param name="candidates">今回集約した通知候補です。</param>
+    /// <param name="inProgressStates">送信前に保存した候補別状態です。</param>
+    /// <param name="currentState">送信直前のアプリケーション状態です。</param>
+    /// <param name="attemptedAtUtc">今回の試行開始UTC時刻です。</param>
+    /// <param name="exception">送信中に発生した例外です。</param>
+    /// <param name="cancellationToken">状態保存のキャンセル通知です。</param>
+    /// <returns>失敗結果と再試行時刻を保存した状態です。</returns>
+    private async Task<ApplicationState> HandleGmailDeliveryFailureAsync(
+        IReadOnlyList<RateLimitNotificationCandidate> candidates,
+        IReadOnlyList<RateLimitNotificationState> inProgressStates,
+        ApplicationState currentState,
+        DateTimeOffset attemptedAtUtc,
+        Exception exception,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(candidates);
+        ArgumentNullException.ThrowIfNull(inProgressStates);
+        ArgumentNullException.ThrowIfNull(currentState);
+        ArgumentNullException.ThrowIfNull(exception);
+        GmailDeliveryFailureKind failureKind = GmailDeliveryFailureClassifier.Classify(exception);
+        string safeSummary = CreateSafeGmailFailureSummary(exception);
+        foreach ((RateLimitNotificationCandidate candidate, RateLimitNotificationState inProgress) in
+                 candidates.Zip(inProgressStates))
+        {
+            bool canRetry = failureKind == GmailDeliveryFailureKind.Transient
+                && inProgress.GmailAttemptCount < RateLimitNotificationPolicy.MaxGmailAttemptCount;
+            DateTimeOffset? nextRetryAtUtc = canRetry
+                ? inProgress.GmailLastAttemptedAtUtc!.Value.Add(GmailRetryDelay)
+                : null;
+            RateLimitNotificationState failed = inProgress with
+            {
+                GmailDeliveryStatus = DeliveryStatus.Failed,
+                GmailNextRetryAtUtc = nextRetryAtUtc,
+                GmailFailureKind = failureKind,
+            };
+            currentState = await SaveNotificationStateAsync(failed, cancellationToken);
+            LogGmailNotificationFailed(
+                logger,
+                candidate.NotificationType,
+                candidate.NotificationStage,
+                safeSummary);
+            if (nextRetryAtUtc is not null)
+            {
+                LogGmailRetryScheduled(
+                    logger,
+                    candidate.NotificationType,
+                    candidate.NotificationStage,
+                    nextRetryAtUtc.Value);
+            }
+            else if (inProgress.GmailAttemptCount >= RateLimitNotificationPolicy.MaxGmailAttemptCount)
+            {
+                LogGmailMaximumAttemptsReached(
+                    logger,
+                    candidate.NotificationType,
+                    candidate.NotificationStage);
+            }
+            else if (failureKind == GmailDeliveryFailureKind.Authentication)
+            {
+                LogGmailReauthenticationRequired(
+                    logger,
+                    candidate.NotificationType,
+                    candidate.NotificationStage);
+            }
+        }
+
+        return await stateStore.UpdateAsync(
+            state => state with
+            {
+                GmailAuthenticationWasUsable = failureKind == GmailDeliveryFailureKind.Authentication
+                    ? false
+                    : state.GmailAuthenticationWasUsable,
+                GmailDeliveryResult = new DeliveryResultState
+                {
+                    Status = DeliveryStatus.Failed,
+                    AttemptedAtUtc = attemptedAtUtc,
+                    Summary = safeSummary,
+                },
+            },
+            cancellationToken);
     }
 
     /// <summary>
@@ -575,6 +753,7 @@ public sealed partial class RateLimitNotificationProcessor
             GmailAttemptCount = existing?.GmailAttemptCount ?? 0,
             GmailLastAttemptedAtUtc = existing?.GmailLastAttemptedAtUtc,
             GmailNextRetryAtUtc = existing?.GmailNextRetryAtUtc,
+            GmailFailureKind = existing?.GmailFailureKind ?? GmailDeliveryFailureKind.None,
         };
     }
 
@@ -618,6 +797,207 @@ public sealed partial class RateLimitNotificationProcessor
             cancellationToken);
         LogInterruptedWindowsAttemptsRecovered(logger);
         return recovered;
+    }
+
+    /// <summary>
+    /// 60分以上残ったGmail送信中状態を、試行回数を維持したまま再試行可能状態へ戻します。
+    /// </summary>
+    /// <param name="state">読み込んだアプリケーション状態です。</param>
+    /// <param name="nowUtc">今回の正常取得UTC時刻です。</param>
+    /// <param name="cancellationToken">状態保存のキャンセル通知です。</param>
+    /// <returns>中断試行を回復済みの状態です。</returns>
+    private async Task<ApplicationState> RecoverInterruptedGmailAttemptsAsync(
+        ApplicationState state,
+        DateTimeOffset nowUtc,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(state);
+        DateTimeOffset staleBeforeUtc = nowUtc.Subtract(GmailInProgressTimeout);
+        bool hasInterrupted = state.RateLimitNotificationStates.Any(notification =>
+            notification.GmailDeliveryStatus == DeliveryStatus.InProgress
+            && (notification.GmailLastAttemptedAtUtc ?? notification.ConditionMetAtUtc) <= staleBeforeUtc);
+        if (!hasInterrupted)
+        {
+            return state;
+        }
+
+        ApplicationState recovered = await stateStore.UpdateAsync(
+            current => current with
+            {
+                RateLimitNotificationStates = current.RateLimitNotificationStates
+                    .Select(notification =>
+                    {
+                        DateTimeOffset lastAttemptedAtUtc = notification.GmailLastAttemptedAtUtc
+                            ?? notification.ConditionMetAtUtc;
+                        if (notification.GmailDeliveryStatus != DeliveryStatus.InProgress
+                            || lastAttemptedAtUtc > staleBeforeUtc)
+                        {
+                            return notification;
+                        }
+
+                        bool canRetry = notification.GmailAttemptCount
+                            < RateLimitNotificationPolicy.MaxGmailAttemptCount;
+                        return notification with
+                        {
+                            GmailDeliveryStatus = DeliveryStatus.Failed,
+                            GmailFailureKind = GmailDeliveryFailureKind.Interrupted,
+                            GmailNextRetryAtUtc = canRetry
+                                ? lastAttemptedAtUtc.Add(GmailRetryDelay)
+                                : null,
+                        };
+                    })
+                    .ToArray(),
+            },
+            cancellationToken);
+        LogInterruptedGmailAttemptsRecovered(logger);
+        return recovered;
+    }
+
+    /// <summary>
+    /// 現在は意味を持たないGmail再試行を期限切れへ変更します。
+    /// </summary>
+    /// <param name="state">読み込んだアプリケーション状態です。</param>
+    /// <param name="snapshot">今回の正常取得結果です。</param>
+    /// <param name="settings">現在適用中の通知設定です。</param>
+    /// <param name="cancellationToken">状態保存のキャンセル通知です。</param>
+    /// <returns>無効な再試行を期限切れへ変更した状態です。</returns>
+    private async Task<ApplicationState> ExpireInvalidGmailRetriesAsync(
+        ApplicationState state,
+        UsageSnapshot snapshot,
+        AppSettings settings,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(state);
+        ArgumentNullException.ThrowIfNull(snapshot);
+        ArgumentNullException.ThrowIfNull(settings);
+        RateLimitNotificationState[] expired = state.RateLimitNotificationStates
+            .Where(notification => IsInvalidGmailRetry(notification, state, snapshot, settings))
+            .ToArray();
+        if (expired.Length == 0)
+        {
+            return state;
+        }
+
+        ApplicationState updated = await stateStore.UpdateAsync(
+            current => current with
+            {
+                RateLimitNotificationStates = current.RateLimitNotificationStates
+                    .Select(notification => expired.Any(item => HasSameIdentity(item, notification))
+                        ? notification with
+                        {
+                            GmailDeliveryStatus = DeliveryStatus.Expired,
+                            GmailNextRetryAtUtc = null,
+                        }
+                        : notification)
+                    .ToArray(),
+            },
+            cancellationToken);
+        foreach (RateLimitNotificationState notification in expired)
+        {
+            LogGmailRetryExpired(
+                logger,
+                notification.NotificationType,
+                notification.NotificationStage);
+        }
+
+        return updated;
+    }
+
+    /// <summary>
+    /// Gmailの失敗候補が現在の残量、警告段階、または利用期間と一致しないか判定します。
+    /// </summary>
+    private static bool IsInvalidGmailRetry(
+        RateLimitNotificationState notification,
+        ApplicationState state,
+        UsageSnapshot snapshot,
+        AppSettings settings)
+    {
+        ArgumentNullException.ThrowIfNull(notification);
+        ArgumentNullException.ThrowIfNull(state);
+        ArgumentNullException.ThrowIfNull(snapshot);
+        ArgumentNullException.ThrowIfNull(settings);
+        if (notification.GmailDeliveryStatus != DeliveryStatus.Failed
+            || notification.GmailFailureKind is not (GmailDeliveryFailureKind.Transient
+                or GmailDeliveryFailureKind.Interrupted))
+        {
+            return false;
+        }
+
+        RateLimitWindow? window = snapshot.RateLimits.FirstOrDefault(candidate =>
+            string.Equals(candidate.LimitId, notification.LimitId, StringComparison.Ordinal)
+            && candidate.Position == notification.Position
+            && candidate.WindowDurationMinutes == notification.WindowDurationMinutes);
+        if (window is null)
+        {
+            return true;
+        }
+
+        RateLimitNotificationSetting windowSetting = RateLimitNotificationSettingsResolver.Resolve(
+            window,
+            settings);
+        if (notification.NotificationType == RateLimitNotificationType.ShortWindowRecovered)
+        {
+            string? currentRecoveryWindowId = window.ResetsAtUtc is not null
+                ? RateLimitNotificationPolicy.CreateRecoveryWindowId(window, snapshot.CapturedAtUtc)
+                : CreateNoResetCurrentRecoveryWindowId(window, state.RateLimitRecoveryStates);
+            return !windowSetting.ShortWindowRecoveryEnabled
+                || window.RemainingPercent < settings.ShortWindowRecoveryThresholdPercent
+                || !string.Equals(
+                    notification.RecoveryWindowId,
+                    currentRecoveryWindowId,
+                    StringComparison.Ordinal);
+        }
+
+        if (IsLongWindowWarning(notification.NotificationType))
+        {
+            return !IsCurrentWarningCondition(notification, window, snapshot.CapturedAtUtc, settings)
+                || !IsWarningEnabled(notification.NotificationStage, windowSetting);
+        }
+
+        if (notification.NotificationType == RateLimitNotificationType.LongWindowResetCompleted)
+        {
+            if (!windowSetting.LongWindowResetCompletedEnabled)
+            {
+                return true;
+            }
+
+            if (window.ResetsAtUtc is not null)
+            {
+                string currentRecoveryWindowId = RateLimitNotificationPolicy.CreateRecoveryWindowId(
+                    window,
+                    snapshot.CapturedAtUtc);
+                return !string.Equals(
+                    notification.RecoveryWindowId,
+                    currentRecoveryWindowId,
+                    StringComparison.Ordinal);
+            }
+
+            return notification.ResetCompletionReason != RateLimitResetCompletionReason.UsageDropInference
+                || notification.ConditionMetAtUtc < snapshot.CapturedAtUtc.Subtract(TimeSpan.FromHours(24))
+                || state.RateLimitNotificationStates.Any(candidate =>
+                    candidate.NotificationType == RateLimitNotificationType.LongWindowResetCompleted
+                    && string.Equals(candidate.LimitId, notification.LimitId, StringComparison.Ordinal)
+                    && candidate.Position == notification.Position
+                    && candidate.WindowDurationMinutes == notification.WindowDurationMinutes
+                    && candidate.ConditionMetAtUtc > notification.ConditionMetAtUtc);
+        }
+
+        return true;
+    }
+
+    /// <summary>保存済み段階に対応する長期枠通知設定が有効か判定します。</summary>
+    private static bool IsWarningEnabled(
+        RateLimitNotificationStage stage,
+        RateLimitNotificationSetting setting)
+    {
+        ArgumentNullException.ThrowIfNull(setting);
+        return stage switch
+        {
+            RateLimitNotificationStage.Early => setting.LongWindowEarlyWarningEnabled,
+            RateLimitNotificationStage.Standard => setting.LongWindowStandardWarningEnabled,
+            RateLimitNotificationStage.Final => setting.LongWindowFinalWarningEnabled,
+            _ => false,
+        };
     }
 
     /// <summary>
@@ -943,4 +1323,59 @@ public sealed partial class RateLimitNotificationProcessor
         RateLimitNotificationType notificationType,
         RateLimitNotificationStage notificationStage,
         string reason);
+
+    [LoggerMessage(2314, LogLevel.Information, "Gmail配送有効期間の開始境界を保存しました。EnabledSinceUtc={EnabledSinceUtc}, Reason={Reason}")]
+    private static partial void LogGmailDeliveryBoundaryStarted(
+        ILogger logger,
+        DateTimeOffset enabledSinceUtc,
+        string reason);
+
+    [LoggerMessage(2315, LogLevel.Information, "Gmail通知の送信を開始しました。NotificationType={NotificationType}, NotificationStage={NotificationStage}, AttemptCount={AttemptCount}, AttemptKind={AttemptKind}")]
+    private static partial void LogGmailDeliveryAttemptStarted(
+        ILogger logger,
+        RateLimitNotificationType notificationType,
+        RateLimitNotificationStage notificationStage,
+        int attemptCount,
+        string attemptKind);
+
+    [LoggerMessage(2316, LogLevel.Information, "Gmail通知の再試行を予約しました。NotificationType={NotificationType}, NotificationStage={NotificationStage}, NextRetryAtUtc={NextRetryAtUtc}")]
+    private static partial void LogGmailRetryScheduled(
+        ILogger logger,
+        RateLimitNotificationType notificationType,
+        RateLimitNotificationStage notificationStage,
+        DateTimeOffset nextRetryAtUtc);
+
+    [LoggerMessage(2317, LogLevel.Information, "Gmail通知の再試行に成功しました。NotificationType={NotificationType}, NotificationStage={NotificationStage}")]
+    private static partial void LogGmailRetrySucceeded(
+        ILogger logger,
+        RateLimitNotificationType notificationType,
+        RateLimitNotificationStage notificationStage);
+
+    [LoggerMessage(2318, LogLevel.Warning, "Gmail通知が最大試行回数へ到達しました。NotificationType={NotificationType}, NotificationStage={NotificationStage}")]
+    private static partial void LogGmailMaximumAttemptsReached(
+        ILogger logger,
+        RateLimitNotificationType notificationType,
+        RateLimitNotificationStage notificationStage);
+
+    [LoggerMessage(2319, LogLevel.Information, "Gmail通知の再試行を期限切れにしました。NotificationType={NotificationType}, NotificationStage={NotificationStage}")]
+    private static partial void LogGmailRetryExpired(
+        ILogger logger,
+        RateLimitNotificationType notificationType,
+        RateLimitNotificationStage notificationStage);
+
+    [LoggerMessage(2320, LogLevel.Warning, "古いGmail通知送信中状態を再試行可能な状態へ戻しました。")]
+    private static partial void LogInterruptedGmailAttemptsRecovered(ILogger logger);
+
+    [LoggerMessage(2321, LogLevel.Warning, "Gmail通知には再認証が必要です。NotificationType={NotificationType}, NotificationStage={NotificationStage}")]
+    private static partial void LogGmailReauthenticationRequired(
+        ILogger logger,
+        RateLimitNotificationType notificationType,
+        RateLimitNotificationStage notificationStage);
+
+    [LoggerMessage(2322, LogLevel.Information, "通知禁止時間のためGmail再試行を保留しました。NotificationType={NotificationType}, NotificationStage={NotificationStage}, DeferredUntilUtc={DeferredUntilUtc}")]
+    private static partial void LogGmailRetryDeferredByQuietHours(
+        ILogger logger,
+        RateLimitNotificationType notificationType,
+        RateLimitNotificationStage notificationStage,
+        DateTimeOffset deferredUntilUtc);
 }

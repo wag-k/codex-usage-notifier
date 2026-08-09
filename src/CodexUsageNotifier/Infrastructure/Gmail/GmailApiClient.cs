@@ -51,6 +51,13 @@ public sealed class GmailApiClient : IGmailApiClient
                     : "Gmail APIから送信を拒否されました。gmail.send権限を許可して再認証してください。",
                 exception);
         }
+        catch (GoogleApiException exception) when (exception.HttpStatusCode == HttpStatusCode.TooManyRequests)
+        {
+            throw new GmailApiOperationException(
+                GmailApiErrorKind.Transient,
+                "Gmail APIの送信回数制限に達しました。時間を置いて再試行してください。",
+                exception);
+        }
         catch (GoogleApiException exception) when ((int)exception.HttpStatusCode >= 500)
         {
             throw new GmailApiOperationException(

@@ -31,6 +31,7 @@ public sealed partial class SettingsViewModel : INotifyPropertyChanged
     private readonly IGoogleOAuthClientConfigurationService googleOAuthConfigurationService;
     private readonly IGmailAuthenticationService gmailAuthenticationService;
     private readonly IGmailTestMailSender gmailTestMailSender;
+    private readonly TimeProvider timeProvider;
     private readonly ILogger<SettingsViewModel> logger;
     private AppSettings baselineSettings = AppSettings.CreateDefault();
     private UsageSnapshot? observedSnapshot;
@@ -92,6 +93,7 @@ public sealed partial class SettingsViewModel : INotifyPropertyChanged
         IGoogleOAuthClientConfigurationService googleOAuthConfigurationService,
         IGmailAuthenticationService gmailAuthenticationService,
         IGmailTestMailSender gmailTestMailSender,
+        TimeProvider timeProvider,
         ILogger<SettingsViewModel> logger)
     {
         ArgumentNullException.ThrowIfNull(settingsRepository);
@@ -100,6 +102,7 @@ public sealed partial class SettingsViewModel : INotifyPropertyChanged
         ArgumentNullException.ThrowIfNull(googleOAuthConfigurationService);
         ArgumentNullException.ThrowIfNull(gmailAuthenticationService);
         ArgumentNullException.ThrowIfNull(gmailTestMailSender);
+        ArgumentNullException.ThrowIfNull(timeProvider);
         ArgumentNullException.ThrowIfNull(logger);
         this.settingsRepository = settingsRepository;
         this.stateStore = stateStore;
@@ -107,6 +110,7 @@ public sealed partial class SettingsViewModel : INotifyPropertyChanged
         this.googleOAuthConfigurationService = googleOAuthConfigurationService;
         this.gmailAuthenticationService = gmailAuthenticationService;
         this.gmailTestMailSender = gmailTestMailSender;
+        this.timeProvider = timeProvider;
         this.logger = logger;
     }
 
@@ -462,6 +466,7 @@ public sealed partial class SettingsViewModel : INotifyPropertyChanged
 
         IsBusy = true;
         OperationMessage = string.Empty;
+        AppSettings previousSettings = baselineSettings;
         try
         {
             await Task.Run(
@@ -482,6 +487,11 @@ public sealed partial class SettingsViewModel : INotifyPropertyChanged
         LogSettingsSaved(logger, null);
         try
         {
+            if (!previousSettings.GmailNotificationEnabled && settings.GmailNotificationEnabled)
+            {
+                await UpdateGmailDeliveryEnabledBoundaryAsync(cancellationToken);
+            }
+
             await settingsChangeSink.ApplyAsync(settings, cancellationToken);
             OperationMessage = "設定を保存しました。次の正常取得から通知判定へ適用します。";
             return true;
@@ -496,6 +506,23 @@ public sealed partial class SettingsViewModel : INotifyPropertyChanged
         {
             IsBusy = false;
         }
+    }
+
+    /// <summary>
+    /// Gmailを再有効化した時刻を、過去通知の後送防止境界として永続化します。
+    /// </summary>
+    /// <param name="cancellationToken">状態保存のキャンセル通知です。</param>
+    /// <returns>境界保存の完了を表す非同期処理です。</returns>
+    private Task<ApplicationState> UpdateGmailDeliveryEnabledBoundaryAsync(CancellationToken cancellationToken)
+    {
+        DateTimeOffset enabledSinceUtc = timeProvider.GetUtcNow();
+        return stateStore.UpdateAsync(
+            state => state with
+            {
+                GmailDeliveryEnabledSinceUtc = enabledSinceUtc,
+                GmailDeliveryEnabledLastObserved = true,
+            },
+            cancellationToken);
     }
 
     /// <summary>

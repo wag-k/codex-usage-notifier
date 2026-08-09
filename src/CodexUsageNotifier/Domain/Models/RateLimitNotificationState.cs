@@ -86,6 +86,11 @@ public sealed record RateLimitNotificationState
     public DateTimeOffset? GmailNextRetryAtUtc { get; init; }
 
     /// <summary>
+    /// Gmailの直近失敗が再試行可能かを判断する安全な分類を取得または設定します。
+    /// </summary>
+    public GmailDeliveryFailureKind GmailFailureKind { get; init; }
+
+    /// <summary>
     /// 通知禁止時間による保留終了UTC時刻を取得または設定します。
     /// </summary>
     public DateTimeOffset? DeferredUntilUtc { get; init; }
@@ -94,6 +99,27 @@ public sealed record RateLimitNotificationState
     /// リセット完了通知を判定した理由を取得または設定します。
     /// </summary>
     public RateLimitResetCompletionReason? ResetCompletionReason { get; init; }
+}
+
+/// <summary>
+/// Gmail配送失敗の再試行可否を表す安全な分類です。
+/// </summary>
+public enum GmailDeliveryFailureKind
+{
+    /// <summary>失敗が記録されていないことを表します。</summary>
+    None,
+
+    /// <summary>ネットワーク、タイムアウト、429、または5xxの一時障害を表します。</summary>
+    Transient,
+
+    /// <summary>認証失効または再認証が必要な失敗を表します。</summary>
+    Authentication,
+
+    /// <summary>設定不備や恒久的なAPI拒否など自動再試行しない失敗を表します。</summary>
+    Permanent,
+
+    /// <summary>アプリ終了などで送信結果を確認できなかった試行を表します。</summary>
+    Interrupted,
 }
 
 /// <summary>

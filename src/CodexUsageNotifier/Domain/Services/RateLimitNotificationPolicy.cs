@@ -16,9 +16,9 @@ public static class RateLimitNotificationPolicy
     internal const int MaxWindowsAttemptCount = 3;
 
     /// <summary>
-    /// Phase 4C-1で1つのGmail通知に許可する送信試行回数です。
+    /// 1つのGmail通知に許可する最大送信試行回数です。
     /// </summary>
-    internal const int MaxGmailAttemptCount = 1;
+    internal const int MaxGmailAttemptCount = 2;
 
     /// <summary>
     /// 取得できた全利用枠を独立に評価し、複数の通知候補と回復状態を返します。
@@ -409,8 +409,11 @@ public static class RateLimitNotificationPolicy
                 IsAnyEnabledChannelPending(state, settings, nowUtc)
                 && state.NotificationType == notificationType
                 && HasSameIdentity(state, window)
-                && state.DeferredUntilUtc is not null
-                && state.DeferredUntilUtc <= nowUtc
+                && ((state.DeferredUntilUtc is not null
+                        && state.DeferredUntilUtc <= nowUtc)
+                    || (settings.GmailNotificationEnabled
+                        && state.GmailDeliveryStatus == DeliveryStatus.Failed
+                        && CanAttemptGmail(state, nowUtc)))
                 && state.ConditionMetAtUtc >= nowUtc.Subtract(DeferredNotificationMaxAge)
                 && (expectedRecoveryWindowId is null
                     || string.Equals(
@@ -488,7 +491,7 @@ public static class RateLimitNotificationPolicy
     }
 
     /// <summary>
-    /// 保存済みGmail配送状態から、Phase 4C-1の初回送信が可能か判定します。
+    /// 保存済みGmail配送状態から、初回送信または60分後の1回再試行が可能か判定します。
     /// </summary>
     /// <param name="existing">同じ通知を表す保存済み状態です。</param>
     /// <param name="nowUtc">今回の正常取得UTC時刻です。</param>
@@ -508,7 +511,13 @@ public static class RateLimitNotificationPolicy
                 && (existing.DeferredUntilUtc is null || existing.DeferredUntilUtc <= nowUtc);
         }
 
-        return false;
+        return existing.GmailDeliveryStatus == DeliveryStatus.Failed
+            && existing.GmailAttemptCount == 1
+            && existing.GmailFailureKind is GmailDeliveryFailureKind.Transient
+                or GmailDeliveryFailureKind.Interrupted
+            && existing.GmailNextRetryAtUtc is not null
+            && existing.GmailNextRetryAtUtc <= nowUtc
+            && (existing.DeferredUntilUtc is null || existing.DeferredUntilUtc <= nowUtc);
     }
 
     /// <summary>

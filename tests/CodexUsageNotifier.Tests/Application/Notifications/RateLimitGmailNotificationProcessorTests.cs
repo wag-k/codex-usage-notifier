@@ -10,7 +10,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 namespace CodexUsageNotifier.Tests.Application.Notifications;
 
 /// <summary>
-/// Phase 4C-1のGmail本番配送境界、チャネル独立性、集約、および初回試行状態を検証します。
+/// Phase 4CのGmail本番配送境界、チャネル独立性、集約、および配送状態を検証します。
 /// </summary>
 [TestClass]
 public sealed class RateLimitGmailNotificationProcessorTests
@@ -166,7 +166,8 @@ public sealed class RateLimitGmailNotificationProcessorTests
         Assert.IsTrue(result.State.RateLimitNotificationStates.All(state => state.GmailAttemptCount == 1));
         Assert.IsTrue(result.State.RateLimitNotificationStates.All(
             state => state.WindowsDeliveryStatus == DeliveryStatus.NotAttempted));
-        Assert.IsTrue(result.State.RateLimitNotificationStates.All(state => state.GmailNextRetryAtUtc is null));
+        Assert.IsTrue(result.State.RateLimitNotificationStates.All(
+            state => state.GmailNextRetryAtUtc == NowUtc.AddMinutes(60)));
     }
 
     /// <summary>Phase 4C開始以前に成立したNotAttempted状態を遡って送らないことを検証します。</summary>
@@ -267,6 +268,9 @@ public sealed class RateLimitGmailNotificationProcessorTests
             NowUtc.AddHours(-8)) with
         {
             GmailProductionDeliveryStartedAtUtc = NowUtc.AddHours(-9),
+            GmailDeliveryEnabledSinceUtc = NowUtc.AddHours(-9),
+            GmailDeliveryEnabledLastObserved = true,
+            GmailAuthenticationWasUsable = true,
             RateLimitNotificationStates =
             [
                 CreateStateWithNotification(
@@ -329,9 +333,9 @@ public sealed class RateLimitGmailNotificationProcessorTests
         Assert.IsFalse(context.GmailSender.Messages.Single().Body.Contains("通知段階: Early", StringComparison.Ordinal));
     }
 
-    /// <summary>Gmail初回失敗後の次回取得ではPhase 4C-1として自動再試行しないことを検証します。</summary>
+    /// <summary>恒久的なGmail初回失敗を次回取得で自動再試行しないことを検証します。</summary>
     [TestMethod]
-    public async Task ProcessAsync_GmailFailed_DoesNotRetryInPhase4C1()
+    public async Task ProcessAsync_PermanentGmailFailure_DoesNotRetry()
     {
         StubGmailNotificationSender gmailSender = new() { Exception = new InvalidOperationException("失敗") };
         TestContext context = CreateContext(gmailSender: gmailSender);

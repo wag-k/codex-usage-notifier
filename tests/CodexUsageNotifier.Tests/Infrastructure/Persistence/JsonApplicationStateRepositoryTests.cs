@@ -23,6 +23,9 @@ public sealed class JsonApplicationStateRepositoryTests
         ApplicationState initial = new()
         {
             GmailProductionDeliveryStartedAtUtc = capturedAtUtc.AddMinutes(-10),
+            GmailDeliveryEnabledSinceUtc = capturedAtUtc.AddMinutes(-5),
+            GmailDeliveryEnabledLastObserved = true,
+            GmailAuthenticationWasUsable = true,
             LastNotifiedRecoveryWindowId = "window-1",
             LastSuccessfulFetchAtUtc = capturedAtUtc,
             LastUsageSnapshot = new UsageSnapshot
@@ -66,6 +69,7 @@ public sealed class JsonApplicationStateRepositoryTests
                     GmailAttemptCount = 1,
                     GmailLastAttemptedAtUtc = capturedAtUtc.AddMinutes(-2),
                     GmailNextRetryAtUtc = capturedAtUtc.AddMinutes(3),
+                    GmailFailureKind = GmailDeliveryFailureKind.Transient,
                 },
             ],
             RateLimitRecoveryStates =
@@ -96,6 +100,9 @@ public sealed class JsonApplicationStateRepositoryTests
         Assert.AreEqual(
             expected.GmailProductionDeliveryStartedAtUtc,
             actual.GmailProductionDeliveryStartedAtUtc);
+        Assert.AreEqual(expected.GmailDeliveryEnabledSinceUtc, actual.GmailDeliveryEnabledSinceUtc);
+        Assert.IsTrue(actual.GmailDeliveryEnabledLastObserved);
+        Assert.IsTrue(actual.GmailAuthenticationWasUsable);
         Assert.AreEqual(expected.LastSuccessfulFetchAtUtc, actual.LastSuccessfulFetchAtUtc);
         Assert.AreEqual(99, actual.LastUsageSnapshot?.RateLimits.Single().RemainingPercent);
         Assert.AreEqual(2, actual.LastUsageSnapshot?.ResetCredits);
@@ -120,6 +127,9 @@ public sealed class JsonApplicationStateRepositoryTests
         Assert.AreEqual(
             capturedAtUtc.AddMinutes(3),
             actual.RateLimitNotificationStates.Single().GmailNextRetryAtUtc);
+        Assert.AreEqual(
+            GmailDeliveryFailureKind.Transient,
+            actual.RateLimitNotificationStates.Single().GmailFailureKind);
         Assert.AreEqual(3, actual.RateLimitRecoveryStates.Single().RecoverySequence);
         Assert.IsFalse(Directory.EnumerateFiles(temporaryDirectory.Path, "*.tmp").Any());
     }
