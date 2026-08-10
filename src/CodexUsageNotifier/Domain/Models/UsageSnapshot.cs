@@ -28,7 +28,7 @@ public sealed class UsageSnapshot
         window => window.Classification == RateLimitClassification.Weekly);
 
     /// <summary>
-    /// リセット回数を取得または設定します。
+    /// App Serverが返した利用可能なrate-limit reset credit数を取得または設定します。
     /// </summary>
     public int? ResetCredits { get; init; }
 

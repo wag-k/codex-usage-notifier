@@ -83,7 +83,7 @@ public sealed class StatusViewModel : INotifyPropertyChanged, IUsageStatusSink
     }
 
     /// <summary>
-    /// リセット回数の表示文字列を取得します。
+    /// App Serverが返した利用可能なrate-limit reset credit数の表示文字列を取得します。
     /// </summary>
     public string ResetCredits
     {

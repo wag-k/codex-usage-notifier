@@ -157,9 +157,9 @@ internal static class CodexRateLimitMapper
     }
 
     /// <summary>
-    /// リセット回数を内部モデルで保持可能な場合だけ変換します。
+    /// 利用可能なrate-limit reset credit数を内部モデルで保持可能な場合だけ変換します。
     /// </summary>
-    /// <param name="availableCount">App Serverが返した利用可能回数です。</param>
+    /// <param name="availableCount">App Serverが返した利用可能なreset credit数です。</param>
     /// <returns>保持可能な回数、またはnullです。</returns>
     private static int? ConvertResetCredits(long? availableCount)
     {

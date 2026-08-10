@@ -17,7 +17,7 @@ Codexの利用枠が回復していても、または長期枠のリセットが
 
 本アプリは、Codex App Serverが返す任意の利用枠をWindows PC上で観測し、短期枠の回復、長期枠のリセット前、および長期枠の新しい利用期間の開始を通知する。初版では、人間が通知を確認してCodexの作業を開始または調整する。
 
-2026年8月4日にCodex CLI `0.145.0-alpha.18`で実アカウントを確認した結果、`limitId=codex`のprimaryに10080分・使用率35%の週間枠だけが存在し、secondaryはnull、リセット回数は1、300分枠は未観測だった。このため、5時間枠の存在を前提にせず、利用枠の期間に応じて通知目的を分ける。
+2026年8月4日にCodex CLI `0.145.0-alpha.18`で実アカウントを確認した結果、`limitId=codex`のprimaryに10080分・使用率35%の週間枠だけが存在し、secondaryはnull、`rateLimitResetCredits.availableCount`は1、300分枠は未観測だった。このため、5時間枠の存在を前提にせず、利用枠の期間に応じて通知目的を分ける。`availableCount`は利用可能なrate-limit reset credit数であり、通常の周期的な利用枠リセット回数ではない。
 
 未使用分が次の利用期間へ繰り越されることは確認できていない。本アプリでは、リセット前に残量を確認できるよう通知するが、未使用分が必ず繰り越される、または必ず消滅するとは断定しない。
 
@@ -223,6 +223,10 @@ Phase 4BはGoogle認証と設定画面からのテストメール送信を提供
    - ログフォルダを開く
    - 終了
 4. 明示的に「終了」を選択した場合のみプロセスを終了する。
+5. DI、永続化、App Server、監視、トレイの初期化前に、Windowsユーザー単位の`Local`名前付きMutexを取得する。
+6. 同じWindowsユーザーで既存インスタンスを検出した場合は、案内を表示して新しいインスタンスを終了する。
+7. 2個目のインスタンスはApp Server、監視、Gmail、Windows通知、トレイを開始せず、`state.json`と履歴を変更しない。
+8. 所有インスタンスの正常終了・異常終了後は、MutexのOSハンドル解放により次の起動を許可する。
 
 ### FR-002 初回起動
 
@@ -279,7 +283,7 @@ Phase 4BはGoogle認証と設定画面からのテストメール送信を提供
    - 次回リセット時刻
    - PlanType
    - RateLimitReachedType
-4. 取得可能な場合はリセット回数も表示する。
+4. 取得可能な場合は`rateLimitResetCredits.availableCount`を「利用可能リセットクレジット数」として表示する。通常の周期的なリセット回数とは解釈しない。
 5. 未知の枠が追加されても、アプリが異常終了しない。
 6. 取得結果はUTCで内部保持し、画面と通知ではローカル時刻に変換する。
 7. 300分の利用枠が存在しなくても取得成功として扱う。
@@ -417,7 +421,7 @@ Windows通知が利用できない場合でも、Gmail通知と監視処理は�
 8. 自分宛てメールで端末通知が届くか、初期設定時に確認を促す。
 9. Phase 4Bのテスト送信結果は画面と安全なログだけへ記録し、本番の`RateLimitNotificationState`、`GmailDeliveryStatus`、試行回数、回復連番、利用枠履歴を作成・変更しない。
 10. テスト送信は同時に最大1件とし、認証済みかつ送信先が有効な場合だけ実行できる。
-11. Gmail APIの401、403、API未有効化、一時的なネットワーク・サーバー障害を区別し、安全で操作可能な概要を表示する。
+11. Gmail APIの401、権限不足403、API未有効化403、未知の恒久403、一時的なネットワーク・サーバー障害を区別し、安全で操作可能な概要を表示する。401と`insufficientPermissions`等の明確な権限不足403は`Authentication`として`ReauthenticationRequired`へ移行し、`accessNotConfigured`と`serviceDisabled`は再認証を要求しない`Permanent`とする。
 12. 通知候補は`RateLimitNotificationPolicy`で一度だけ生成し、WindowsとGmailで共有する。Gmail固有の通知条件判定を複製しない。
 13. WindowsとGmailの配送状態は独立させ、成功済みチャネルへ他方の成否を理由として再送しない。
 14. 初回Phase 4C起動時に`GmailProductionDeliveryStartedAtUtc`をUTCで永続化し、原則として保存済み状態の`ConditionMetAtUtc`が開始時刻以上の通知だけをGmail本番配送対象とする。
@@ -437,6 +441,8 @@ Windows通知が利用できない場合でも、Gmail通知と監視処理は�
 28. `ApplicationState`へ現在のGmail配送有効期間を示す`GmailDeliveryEnabledSinceUtc`を保存する。Gmailをfalseからtrueへ変更したとき、および`ReauthenticationRequired`から再認証へ成功したときに現在UTC時刻へ更新する。
 29. 本番Gmail配送は`ConditionMetAtUtc >= GmailProductionDeliveryStartedAtUtc`かつ`ConditionMetAtUtc >= GmailDeliveryEnabledSinceUtc`を満たす通知だけを対象とする。Gmail無効期間、認証失効期間、認証解除期間に成立した通知、および認証系失敗になった古い通知を後から自動送信しない。
 30. Gmail再試行ではWindows配送状態を変更・再送せず、Windows再試行ではGmail配送状態を変更・再送しない。
+31. `GmailAuthenticationState.Error`、認証状態取得例外、一時通信障害など認証可否を確定できない状態では、直前の`GmailAuthenticationWasUsable`と`GmailDeliveryEnabledSinceUtc`を維持する。
+32. `GmailAuthenticationWasUsable=false`へ変更するのは`Unauthenticated`、`ReauthenticationRequired`、明示的な認証解除・権限失効に限る。一時障害からの回復を再認証完了として記録しない。
 
 ### FR-013 長期枠のリセット前通知
 
@@ -490,13 +496,14 @@ Codex App Serverまたは利用枠取得に失敗した場合、次の処理を�
 | すべての利用枠 | 全LimitId、Position、Classification、期間、使用率、残量、次回リセット時刻、リセットまでの残り時間 |
 | 通知設定 | 各枠の通知設定が有効か、および有効な通知種類 |
 | リセット情報 | `resetsAt`を取得できているか、次回リセット時刻、リセットまでの残り時間。未取得時は「リセット時刻未取得」 |
-| 枠別通知状態 | 各枠で最後に送信した通知、最後のリセット完了判定理由、回復連番 |
-| リセット回数 | 取得できる場合のみ |
+| 枠別通知状態 | 各枠の最終Windows通知と最終Gmail通知、最後のリセット完了判定理由、回復連番 |
+| 利用可能リセットクレジット数 | `rateLimitResetCredits.availableCount`。通常の周期的リセット回数ではない |
 | 監視状態 | 正常、取得中、再接続中、エラー |
 | 最終取得 | 最終成功時刻 |
 | 次回確認 | 予定時刻 |
-| Gmail | 未設定、認証済み、認証エラー |
-| 最終通知 | 通知時刻と送信結果 |
+| Gmail通知 | 有効、無効 |
+| Gmail認証 | 未設定、未認証、認証済み、再認証必要、認証エラー、および認証済みアカウント |
+| 最終通知 | WindowsとGmailそれぞれの通知時刻と送信結果 |
 | 連続失敗 | 現在の失敗回数 |
 
 利用履歴グラフは初版に含めないが、履歴データは将来のグラフ表示に利用できる形式で保存する。
@@ -601,6 +608,8 @@ Phase 4Bでは、OAuthクライアント設定の状態と標準配置先、認�
 
 状態ファイルは一時ファイルへ書き込んだ後に置換し、書き込み途中の破損を防止する。
 
+状態読込前にルートの`SchemaVersion`を検証する。現在版と同じ場合は通常どおり読み込み、現在版より古い場合は明示的にサポートする1段階ごとのmigrationだけを順番に実行して保存する。現在版より新しい場合は、元ファイルの内容、更新日時、名前、配置を変更せず、初期値や現在版で置換せずに起動を中止する。future schema拒否後は監視、App Server、Gmail、Windows通知判定を開始せず、保存版と対応版を含む安全な案内とログを出力する。
+
 OAuthトークンと認証メタデータは`state.json`や`settings.json`へ混在させず、FR-011のDPAPI保護ストアへ分離する。Phase 4Bのテストメールは`state.json`を更新しない。`GmailProductionDeliveryStartedAtUtc`は機密情報を含まない本番配送境界として`state.json`へ保存し、再起動後も変更しない。
 
 ### FR-020 ログ
@@ -621,6 +630,9 @@ OAuthトークンと認証メタデータは`state.json`や`settings.json`へ混
 - アクセストークン更新と再認証必要状態への移行
 - 認証解除のGoogle側失効結果とローカル削除結果
 - Gmailテスト送信の開始、成功、失敗
+- Gmail 401、権限不足403、API未有効化403、恒久403の安全な分類
+- 一時認証状態取得エラーと、確定した再認証必要状態の区別
+- future state schemaの保存版・対応版と起動中止
 - 再試行と復旧
 - 設定変更
 - 履歴削除
@@ -653,6 +665,8 @@ Weeklyなどの長期枠について、新しい利用期間の開始を`LongWin
 - 不正なレスポンスを検出してログへ記録する。
 - 同じ利用枠・リセット期間・通知種別・通知段階で通知を乱発しない。
 - PC再起動後も通知済み状態を維持する。
+- 現在より新しい状態スキーマを古いアプリで変更しない。
+- 同じWindowsユーザーで複数の監視プロセスを実行しない。
 
 ### NFR-002 セキュリティ
 
@@ -696,7 +710,7 @@ Weeklyなどの長期枠について、新しい利用期間の開始を`LongWin
 | RateLimits | IReadOnlyList&lt;RateLimitWindow&gt; | App Serverから取得したすべての利用枠 |
 | FiveHourCandidate | RateLimitWindow? | 最初に観測された300分枠。存在しない場合はnull |
 | WeeklyCandidate | RateLimitWindow? | 最初に観測された10080分枠。存在しない場合はnull |
-| ResetCredits | int? | リセット回数 |
+| ResetCredits | int? | App Serverの`rateLimitResetCredits.availableCount`由来の利用可能リセットクレジット数。JSON互換性のため内部名を維持し、通常の周期的リセット回数とは解釈しない |
 | Trigger | UsageCheckTrigger | 取得契機 |
 
 ### 8.2 RateLimitWindow
@@ -1061,6 +1075,37 @@ Weeklyなどの長期枠について、新しい利用期間の開始を`LongWin
 - Windows成功・Gmail失敗、Windows失敗・Gmail成功、片方のみ有効、両方有効の各状態を独立して扱い、一方の再試行で他方を再送しない。
 - 成功済み候補を再送しない。
 
+### AC-021 Future state compatibility
+
+- `state.json`のSchemaVersionが現在版と同じ場合は、ファイルを書き換えず通常読み込みできる。
+- 明示的にサポートする旧SchemaVersionを1段階ごとのmigrationで現在版へ移行できる。
+- 現在より新しいSchemaVersionは拒否し、元ファイルの内容・更新日時・名前・配置を変更しない。
+- future schemaでは安全な案内とログを出力し、監視、Codex App Server、Gmail、Windows通知判定を開始しない。
+- 破損JSONに対する既存の退避・初期化処理は維持する。
+
+### AC-022 Gmail authorization classification
+
+- Gmail API 401と、`insufficientPermissions`等の明確な権限不足403を`Authentication`として`ReauthenticationRequired`へ移行し、自動再試行しない。
+- `accessNotConfigured`と`serviceDisabled`はAPI未有効化の`Permanent`とし、再認証を要求しない。
+- 未知の403を無条件に認証失効とせず、恒久拒否として自動再試行しない。
+- 429、5xx、ネットワーク障害、タイムアウトは既存どおり`Transient`とする。
+- `Authenticated → Error/状態取得例外 → Authenticated`では配送境界を変更せず、障害中に成立した通知を回復後も配送対象にできる。
+- `Authenticated → ReauthenticationRequired → Authenticated`では新しい配送境界を開始し、失効期間の通知を後送しない。
+
+### AC-023 Single instance
+
+- 同じWindowsユーザーでは1つのインスタンスだけがユーザー単位の名前付きMutexを取得できる。
+- 2個目は案内を表示して終了し、監視、App Server、トレイ、Gmail、Windows通知、状態・履歴書込みを開始しない。
+- 所有インスタンス終了後は次の起動がMutexを取得できる。プロセス異常終了時もOSがハンドルを解放する。
+- Windowsユーザーが異なる場合はMutex名が衝突しない。
+
+### AC-024 Status accuracy
+
+- Gmail通知設定の有効・無効と、OAuthの認証済み・未認証・再認証必要・エラーを別々に表示する。
+- 認証済みアカウントを表示できるが、トークン、`client_secret`、認証エラー本文に含まれ得る機密値は表示しない。
+- WindowsとGmailの最終通知を全体および利用枠ごとに独立表示し、一方だけ成功した場合も「通知なし」と誤表示しない。
+- `rateLimitResetCredits.availableCount`を「利用可能リセットクレジット数」と表示し、通常の周期的リセット回数と説明しない。
+
 ## 11. 単体テスト対象
 
 最低限、次を単体テストする。
@@ -1180,6 +1225,21 @@ Weeklyなどの長期枠について、新しい利用期間の開始を`LongWin
 113. Windows成功・Gmail失敗、Windows失敗・Gmail成功の独立状態
 114. Gmail再試行によるWindows状態非変更とWindows再試行によるGmail状態非変更
 115. Gmail成功済み候補の再送抑止
+116. 現在SchemaVersionの無変更読込、旧SchemaVersionの段階migration
+117. future schemaの拒否と、元ファイル内容・更新日時・名前・配置の完全維持
+118. future schema時の監視初期化抑止と安全なユーザー案内
+119. 破損state JSONの既存復旧動作
+120. Gmail権限不足403のAuthentication分類と再認証状態
+121. `accessNotConfigured`、`serviceDisabled`、未知の恒久403のPermanent分類
+122. 一時認証Error・状態取得例外からの回復時にGmail配送境界を維持すること
+123. 明示的な再認証完了時だけGmail配送境界を更新すること
+124. 一時認証障害中の通知維持と、認証失効中の通知後送抑止
+125. 同じMutex名の初回取得、2個目拒否、解放後の再取得
+126. 2個目の起動経路で監視、App Server、状態書込みを開始しないこと
+127. Windowsユーザー識別子ごとのMutex名分離
+128. Gmail設定、OAuth認証、認証アカウントの状態表示
+129. Windows／Gmail別、および利用枠別の最終通知表示
+130. 状態画面にトークンと`client_secret`を表示しないこと
 
 ## 12. 実装上の設計方針
 
@@ -1438,6 +1498,17 @@ Phase 4C-1ではGmailの初回送信だけを実行し、失敗後の自動再�
 - Windows／Gmailの独立再試行
 
 Phase 4C-2でも専用の短時間再試行タイマーと、本番アプリで偽の通知候補を生成する機能は追加しない。実Googleアカウントの本番配送は自然な通知条件が成立した際の手動確認項目とし、Phase 4C-2の完了条件には含めない。
+
+### Phase 5前Release Gate：信頼性・互換性・運用安全性
+
+- future `state.json`の無変更拒否と、旧版の明示的な段階migration
+- Gmail 403の認証・権限失効、API未有効化、恒久拒否の分類
+- 一時認証状態取得エラーからの回復時に配送境界を維持
+- Windowsユーザー単位の単一インスタンス制御
+- Gmail通知設定、OAuth認証、Windows／Gmail別最終通知の状態表示
+- `rateLimitResetCredits.availableCount`を利用可能リセットクレジット数として明確化
+
+このRelease Gateでは、Windows自動起動登録、履歴90日削除、ログ30日削除、配布ビルド、インストーラー、CI、正式アイコンを実装しない。
 
 ### Phase 5：運用機能
 

@@ -20,7 +20,7 @@ internal sealed class CodexRateLimitResponse
     public Dictionary<string, CodexRateLimitSnapshot?>? RateLimitsByLimitId { get; init; }
 
     /// <summary>
-    /// 利用可能なリセット回数の概要を取得または設定します。
+    /// 利用可能なrate-limit reset credit数の概要を取得または設定します。
     /// </summary>
     [JsonPropertyName("rateLimitResetCredits")]
     public CodexRateLimitResetCredits? RateLimitResetCredits { get; init; }
@@ -93,12 +93,12 @@ internal sealed class CodexRateLimitWindow
 }
 
 /// <summary>
-/// 利用可能なリセット回数の概要を表します。
+/// 利用可能なrate-limit reset credit数の概要を表します。
 /// </summary>
 internal sealed class CodexRateLimitResetCredits
 {
     /// <summary>
-    /// 利用可能なリセット回数を取得または設定します。
+    /// 利用可能なrate-limit reset credit数を取得または設定します。
     /// </summary>
     [JsonPropertyName("availableCount")]
     public long AvailableCount { get; init; }

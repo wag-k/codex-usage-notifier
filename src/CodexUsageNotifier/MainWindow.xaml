@@ -48,7 +48,7 @@
                         <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding FiveHourRateLimit}" />
                         <TextBlock Grid.Row="1" Margin="0,14,0,0" FontWeight="SemiBold" Text="週間枠" />
                         <TextBlock Grid.Row="1" Grid.Column="1" Margin="0,14,0,0" Text="{Binding WeeklyRateLimit}" />
-                        <TextBlock Grid.Row="2" Margin="0,14,0,0" FontWeight="SemiBold" Text="リセット回数" />
+                        <TextBlock Grid.Row="2" Margin="0,14,0,0" FontWeight="SemiBold" Text="利用可能リセットクレジット数" TextWrapping="Wrap" />
                         <TextBlock Grid.Row="2" Grid.Column="1" Margin="0,14,0,0" Text="{Binding ResetCredits}" />
                         <TextBlock Grid.Row="3" Margin="0,14,0,0" FontWeight="SemiBold" Text="すべての利用枠" />
                         <TextBlock Grid.Row="3" Grid.Column="1" Margin="0,14,0,0" Text="{Binding AllRateLimits}" TextWrapping="Wrap" />

@@ -23,9 +23,9 @@ Codex App Serverが返す任意の利用枠をWindows上で観測し、利用枠
 - 深夜の通知を保留し、通知可能時刻に再取得・再判定
 - タスクトレイから本番状態を変更しない6種類のテスト通知を送信
 - WPF設定画面から通知・監視設定を検証、保存し、再起動なしで反映
-- 利用履歴を90日間保存
+- 利用履歴を保存（90日保守削除はPhase 5）
 - 一時的な通信失敗から自動復旧
-- Windowsログイン時の自動起動に対応
+- Windowsログイン時の自動起動設定を保持（実際の登録はPhase 5）
 
 ## 初版の通知方針
 
@@ -90,7 +90,7 @@ Codex週間枠のリセットが近づいています
 
 ## 現在の実装状況
 
-Phase 1の基盤、Phase 2のCodex App Server連携、Phase 3の監視・Windows通知、Phase 3.1の複数枠通知基盤、Phase 3.2の通知信頼性改善、Phase 4Aの設定画面、Phase 4BのGmail認証・テスト送信、およびPhase 4C-1／4C-2のGmail本番通知配送まで実装しています。
+Phase 1の基盤、Phase 2のCodex App Server連携、Phase 3の監視・Windows通知、Phase 3.1の複数枠通知基盤、Phase 3.2の通知信頼性改善、Phase 4Aの設定画面、Phase 4BのGmail認証・テスト送信、およびPhase 4C-1／4C-2のGmail本番通知配送まで実装しています。Phase 5前Release Gateとして、将来版状態の保護、Gmail認証異常の厳密化、単一起動、状態表示の正確性も実装済みです。
 
 - `codex app-server`を本アプリ所有の子プロセスとして起動
 - stdin/stdoutのJSONL形式で`initialize`、`initialized`、`account/rateLimits/read`を実行
@@ -129,8 +129,15 @@ Phase 1の基盤、Phase 2のCodex App Server連携、Phase 3の監視・Windows
 - Gmail一時障害を60分後以降の次回正常取得で1回だけ再試行し、初回と合わせて最大2回に制限
 - Gmailの古い`InProgress`復旧、Quiet Hours中の試行抑止、段階・残量・利用期間による再試行期限切れ
 - Gmailの無効化・認証失効後に過去通知を後送しない`GmailDeliveryEnabledSinceUtc`
+- 現在より新しい`state.json`を変更せず起動中止し、旧版だけを明示的な段階migrationで更新
+- Gmail 403を権限不足、API未有効化、未知の恒久拒否へ分類し、権限不足だけを再認証へ移行
+- 一時的なGmail認証状態取得エラーでは配送境界を進めず、通知を回復後の配送対象として維持
+- Windowsユーザー単位の名前付きMutexにより、監視・App Server・永続化の二重起動を防止
+- 状態画面へGmail通知設定、OAuth認証、認証アカウント、Windows／Gmail別の最終通知を表示
 
-2026年8月4日にCodex CLI `0.145.0-alpha.18`で実アカウントを確認したところ、`limitId=codex`の`primary`に10080分・使用率35%の週間枠だけが存在し、`secondary=null`、リセット回数1、300分枠は未観測でした。この場合、画面には「5時間枠：未観測」と表示し、10080分枠の長期通知が有効になります。300分枠は単体テストで対応済みですが、すべての環境で取得できるとは限りません。
+2026年8月4日にCodex CLI `0.145.0-alpha.18`で実アカウントを確認したところ、`limitId=codex`の`primary`に10080分・使用率35%の週間枠だけが存在し、`secondary=null`、`rateLimitResetCredits.availableCount=1`、300分枠は未観測でした。この場合、画面には「5時間枠：未観測」と表示し、10080分枠の長期通知が有効になります。300分枠は単体テストで対応済みですが、すべての環境で取得できるとは限りません。
+
+`rateLimitResetCredits.availableCount`は、App Serverが返す「利用可能なrate-limit reset credit数」です。通常の周期的な利用枠リセットの回数や、「通常のリセットがあと何回あるか」を表す値ではありません。画面では「利用可能リセットクレジット数」と表示します。
 
 実際のCodex利用枠通知メールはPhase 4C-1で有効になり、Phase 4C-2で一時障害後の60分再試行、認証異常、通知禁止時間、再起動時復旧を実装しました。再試行専用タイマーは使わず、補助確認、App Server更新、スリープ復帰、リセット後確認、手動確認などによる次の正常取得を契機にします。Phase 4Bのテストメール送信は引き続き本番の通知済み状態、`GmailDeliveryStatus`、試行回数、回復連番、利用枠履歴を変更しません。実際の自動起動登録と履歴グラフは未実装です。通知別設定は`settings.json`へ保存し、観測履歴のJSONL保存も実装済みです。リセット完了の使用率低下による補助判定は、非表示設定`ResetInferenceUsageDropPoints`として保持し、初期値は50ポイントです。
 
@@ -194,6 +201,12 @@ CodexUsageNotifier.sln
 ```text
 アプリ起動
    │
+   ├─ Windowsユーザー単位の単一起動Mutexを取得
+   ├─ 既存インスタンスあり：案内を表示して終了（状態・監視を変更しない）
+   │
+   ├─ state.jsonのSchemaVersionを検証
+   ├─ 将来版：ファイルを変更せず案内を表示して終了
+   │
    ├─ Codex App Serverを起動・初期化
    │
    ├─ 現在の利用枠を取得
@@ -240,11 +253,11 @@ CodexUsageNotifier.sln
 - 各枠で最後に送信した通知と最後のリセット完了判定理由
 - 各枠の回復連番
 - 次回リセット時刻
-- リセット回数
+- 利用可能リセットクレジット数（`rateLimitResetCredits.availableCount`。通常の周期的リセット回数ではない）
 - 最終取得時刻
 - 監視状態
-- Gmail認証状態
-- 最後の通知結果
+- Gmail通知の有効・無効、OAuth認証状態、認証済みアカウント
+- WindowsとGmailそれぞれの最後の通知結果
 
 将来は利用履歴グラフを追加する予定です。
 
@@ -264,6 +277,10 @@ CodexUsageNotifier.sln
 ```
 
 `google-oauth-client.json`は利用者がGoogle Cloud Consoleから取得したデスクトップアプリ設定です。トークンを含む`google-oauth-credentials.dat`はスキーマバージョン付きの内容全体をWindows DPAPIの`CurrentUser`スコープで暗号化します。別のWindowsユーザーでは復号できず、アクセストークン、リフレッシュトークン、IDトークンを平文保存しません。両ファイルともGit管理対象外です。
+
+`state.json`はSchemaVersionを読み込み前に検証します。現在版と同じ場合は通常読込、古い対応済み版は1段階ずつmigrationし、現在版より新しい場合は元の内容・配置・更新日時を変更せずに起動を中止します。新しいアプリで作成した状態を保持したまま古いアプリへロールバックすると起動できない場合があります。状態ファイルを古い形式へ書き戻さず、新しいCodex Usage Notifierを使用してください。
+
+同じWindowsユーザーでは`Local\CodexUsageNotifier-{UserIdentifierHash}`形式の名前付きMutexにより1インスタンスだけを実行します。2個目は「すでに起動しています」と表示して終了し、Codex App Server、監視、トレイ、Gmail、Windows通知、状態保存を開始しません。異常終了時もMutexハンドルはOSにより解放されます。
 
 ## Gmail認証とテストメール（Phase 4B）
 
@@ -311,7 +328,10 @@ CodexUsageNotifier.sln
 - 「OAuthクライアント設定がありません」：Google Cloud Consoleからデスクトップアプリ用JSONを取得し、設定画面から登録します。
 - JSONが拒否される：Webアプリ用ではなくデスクトップアプリ用であること、ファイルが破損していないことを確認します。
 - ブラウザー認証が完了しない：ローカルループバック通信をファイアウォールが遮断していないか確認し、5分以内に同意を完了します。
-- 403またはAPI未有効化：対象Google CloudプロジェクトでGmail APIを有効にし、`gmail.send`権限を許可して再認証します。
+- 403（`insufficientPermissions`等）：`gmail.send`権限不足として再認証を案内し、古い通知は自動再送しません。
+- 403（`accessNotConfigured` / `serviceDisabled`）：再認証ではなく、対象Google CloudプロジェクトでGmail APIを有効にします。
+- 理由不明の恒久403：自動再試行・自動再認証を行わず、Google Cloudまたはアカウントの設定を確認します。
+- 一時的な認証状態取得エラー：認証失効とは扱わず、Gmail配送有効期間の境界を変更しません。明示的な未認証・権限失効から再認証した場合だけ新しい境界を開始します。
 - 再認証が必要：Google側で権限が取り消されたかリフレッシュトークンが失効しています。「再認証」を実行します。
 - 認証情報を復号できない：同じWindowsユーザーで実行しているか確認し、再認証します。
 
