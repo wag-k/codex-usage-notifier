@@ -8,6 +8,9 @@ namespace CodexUsageNotifier.Infrastructure.Startup;
 /// </summary>
 public sealed partial class WindowsAutoStartManager : IAutoStartManager
 {
+    /// <summary>Runキーからの起動を手動起動と区別する固定引数です。</summary>
+    internal const string AutoStartArgument = "--autostart";
+
     private readonly IAutoStartRegistry registry;
     private readonly IExecutablePathProvider executablePathProvider;
     private readonly ILogger<WindowsAutoStartManager> logger;
@@ -173,7 +176,7 @@ public sealed partial class WindowsAutoStartManager : IAutoStartManager
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(executablePath);
         string fullPath = Path.GetFullPath(executablePath);
-        return $"\"{fullPath}\"";
+        return $"\"{fullPath}\" {AutoStartArgument}";
     }
 
     /// <summary>Registry確認エラーの安全な表示状態を生成します。</summary>

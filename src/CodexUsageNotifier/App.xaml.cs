@@ -76,7 +76,11 @@ public partial class App : System.Windows.Application
             await InitializePersistenceAsync(serviceProvider, CancellationToken.None);
 
             MainWindow mainWindow = serviceProvider.GetRequiredService<MainWindow>();
-            mainWindow.Show();
+            if (!IsAutoStartLaunch(e.Args))
+            {
+                mainWindow.Show();
+            }
+
             serviceProvider.GetRequiredService<TrayIconService>().Initialize();
             serviceProvider.GetRequiredService<UsageMonitor>().Start();
             serviceProvider.GetRequiredService<IApplicationMaintenanceService>().Start();
@@ -99,6 +103,19 @@ public partial class App : System.Windows.Application
                 System.Windows.MessageBoxImage.Error);
             Shutdown(-1);
         }
+    }
+
+    /// <summary>
+    /// 起動引数からWindowsログイン時の自動起動かどうかを判定します。
+    /// </summary>
+    /// <param name="arguments">WPFが受け取った起動引数です。</param>
+    /// <returns>固定の自動起動引数が含まれる場合はtrueです。</returns>
+    internal static bool IsAutoStartLaunch(IEnumerable<string> arguments)
+    {
+        ArgumentNullException.ThrowIfNull(arguments);
+        return arguments.Contains(
+            WindowsAutoStartManager.AutoStartArgument,
+            StringComparer.OrdinalIgnoreCase);
     }
 
     /// <summary>

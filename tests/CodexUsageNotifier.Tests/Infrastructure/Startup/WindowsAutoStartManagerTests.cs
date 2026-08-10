@@ -20,7 +20,9 @@ public sealed class WindowsAutoStartManagerTests
         AutoStartOperationResult result = await manager.EnableAsync(CancellationToken.None);
 
         Assert.IsTrue(result.Succeeded);
-        Assert.AreEqual("\"C:\\Program Files\\Codex Usage Notifier\\CodexUsageNotifier.exe\"", registry.Command);
+        Assert.AreEqual(
+            "\"C:\\Program Files\\Codex Usage Notifier\\CodexUsageNotifier.exe\" --autostart",
+            registry.Command);
     }
 
     /// <summary>無効化時に登録値を削除することを検証します。</summary>
@@ -130,6 +132,16 @@ public sealed class WindowsAutoStartManagerTests
         }
 
         Assert.IsNull(registry.ReadCommand());
+    }
+
+    /// <summary>固定引数だけを自動起動として判定することを検証します。</summary>
+    [TestMethod]
+    public void IsAutoStartLaunch_FixedArgument_DistinguishesManualLaunch()
+    {
+        Assert.IsTrue(App.IsAutoStartLaunch(new[] { "--autostart" }));
+        Assert.IsTrue(App.IsAutoStartLaunch(new[] { "--AUTOSTART" }));
+        Assert.IsFalse(App.IsAutoStartLaunch(Array.Empty<string>()));
+        Assert.IsFalse(App.IsAutoStartLaunch(new[] { "--other" }));
     }
 
     /// <summary>既定のテスト対象を生成します。</summary>
