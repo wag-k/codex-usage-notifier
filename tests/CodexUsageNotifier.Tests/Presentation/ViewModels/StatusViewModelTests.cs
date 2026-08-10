@@ -1,5 +1,7 @@
 using CodexUsageNotifier.Domain.Models;
+using CodexUsageNotifier.Application.Gmail;
 using CodexUsageNotifier.Presentation.ViewModels;
+using CodexUsageNotifier.Tests.TestDoubles;
 
 namespace CodexUsageNotifier.Tests.Presentation.ViewModels;
 
@@ -78,5 +80,160 @@ public sealed class StatusViewModelTests
         StringAssert.Contains(viewModel.AllRateLimits, "Classification=Unknown");
         StringAssert.Contains(viewModel.AllRateLimits, "通知設定=通知対象外");
         StringAssert.Contains(viewModel.NotificationTarget, "通知対象外");
+    }
+
+    /// <summary>Gmail通知設定とOAuth認証済みアカウントを別々に表示することを検証します。</summary>
+    [TestMethod]
+    public async Task RefreshGmailAuthenticationStatusAsync_Authenticated_ShowsSeparateStatusAndAccount()
+    {
+        StubGmailAuthenticationService authentication = new()
+        {
+            Status = new GmailAuthenticationStatus
+            {
+                State = GmailAuthenticationState.Authenticated,
+                HasClientConfiguration = true,
+                AuthenticatedEmailAddress = "user@example.com",
+            },
+        };
+        StatusViewModel viewModel = new(authentication);
+        AppSettings settings = AppSettings.CreateDefault() with { GmailNotificationEnabled = true };
+        viewModel.Initialize(settings, new ApplicationState());
+
+        await viewModel.RefreshGmailAuthenticationStatusAsync(CancellationToken.None);
+
+        Assert.AreEqual("有効", viewModel.GmailNotificationStatus);
+        Assert.AreEqual("認証済み", viewModel.GmailAuthenticationStatus);
+        Assert.AreEqual("user@example.com", viewModel.GmailAuthenticatedAccount);
+    }
+
+    /// <summary>Gmail通知が無効の場合に認証状態とは別に無効と表示することを検証します。</summary>
+    [TestMethod]
+    public void Initialize_GmailDisabled_ShowsDisabled()
+    {
+        StatusViewModel viewModel = new();
+
+        viewModel.Initialize(AppSettings.CreateDefault(), new ApplicationState());
+
+        Assert.AreEqual("無効", viewModel.GmailNotificationStatus);
+    }
+
+    /// <summary>WindowsとGmailの直近配送結果を互いに混同せず表示することを検証します。</summary>
+    [TestMethod]
+    public void Initialize_ChannelDeliveryResults_ShowsBothChannelsSeparately()
+    {
+        StatusViewModel viewModel = new();
+        ApplicationState state = new()
+        {
+            WindowsDeliveryResult = new DeliveryResultState
+            {
+                Status = DeliveryStatus.Succeeded,
+                AttemptedAtUtc = new DateTimeOffset(2026, 8, 10, 1, 0, 0, TimeSpan.Zero),
+                Summary = "Windows通知を表示しました。",
+            },
+            GmailDeliveryResult = new DeliveryResultState
+            {
+                Status = DeliveryStatus.Failed,
+                AttemptedAtUtc = new DateTimeOffset(2026, 8, 10, 2, 0, 0, TimeSpan.Zero),
+                Summary = "一時的な送信失敗です。",
+            },
+        };
+
+        viewModel.Initialize(AppSettings.CreateDefault(), state);
+
+        StringAssert.Contains(viewModel.LastWindowsNotification, "成功");
+        StringAssert.Contains(viewModel.LastWindowsNotification, "Windows通知を表示しました。");
+        StringAssert.Contains(viewModel.LastGmailNotification, "失敗");
+        StringAssert.Contains(viewModel.LastGmailNotification, "一時的な送信失敗です。");
+    }
+
+    /// <summary>Gmailだけが成功した利用枠でもGmail最終通知を表示することを検証します。</summary>
+    [TestMethod]
+    public void Initialize_GmailOnlyWindowSuccess_ShowsGmailNotificationWithOwnTimestamp()
+    {
+        RateLimitWindow window = new()
+        {
+            LimitId = "codex",
+            Position = RateLimitPosition.Primary,
+            Classification = RateLimitClassification.FiveHour,
+            WindowDurationMinutes = 300,
+            UsedPercent = 1,
+            RemainingPercent = 99,
+        };
+        ApplicationState state = new()
+        {
+            LastUsageSnapshot = new UsageSnapshot
+            {
+                CapturedAtUtc = new DateTimeOffset(2026, 8, 10, 3, 0, 0, TimeSpan.Zero),
+                RateLimits = [window],
+            },
+            RateLimitNotificationStates =
+            [
+                new RateLimitNotificationState
+                {
+                    LimitId = "codex",
+                    Position = RateLimitPosition.Primary,
+                    WindowDurationMinutes = 300,
+                    RecoveryWindowId = "window-1",
+                    NotificationType = RateLimitNotificationType.ShortWindowRecovered,
+                    NotificationStage = RateLimitNotificationStage.Recovered,
+                    ConditionMetAtUtc = new DateTimeOffset(2026, 8, 10, 1, 0, 0, TimeSpan.Zero),
+                    WindowsDeliveryStatus = DeliveryStatus.NotAttempted,
+                    GmailDeliveryStatus = DeliveryStatus.Succeeded,
+                    GmailLastAttemptedAtUtc = new DateTimeOffset(2026, 8, 10, 2, 0, 0, TimeSpan.Zero),
+                },
+            ],
+        };
+        StatusViewModel viewModel = new();
+
+        viewModel.Initialize(AppSettings.CreateDefault(), state);
+
+        StringAssert.Contains(viewModel.AllRateLimits, "最終Windows通知=なし");
+        StringAssert.Contains(viewModel.AllRateLimits, "最終Gmail通知=ShortWindowRecovered/Recovered");
+        StringAssert.Contains(viewModel.AllRateLimits, "2026/08/10");
+    }
+
+    /// <summary>Gmail再認証必要状態と安全な案内を表示することを検証します。</summary>
+    [TestMethod]
+    public async Task RefreshGmailAuthenticationStatusAsync_ReauthenticationRequired_ShowsGuidance()
+    {
+        StubGmailAuthenticationService authentication = new()
+        {
+            Status = new GmailAuthenticationStatus
+            {
+                State = GmailAuthenticationState.ReauthenticationRequired,
+                HasClientConfiguration = true,
+                LastErrorSummary = "Googleアカウントを再認証してください。",
+            },
+        };
+        StatusViewModel viewModel = new(authentication);
+        viewModel.Initialize(AppSettings.CreateDefault(), new ApplicationState());
+
+        await viewModel.RefreshGmailAuthenticationStatusAsync(CancellationToken.None);
+
+        StringAssert.Contains(viewModel.GmailAuthenticationStatus, "再認証が必要");
+        Assert.AreEqual("未認証", viewModel.GmailAuthenticatedAccount);
+    }
+
+    /// <summary>認証状態の安全性に依存せずトークンやclient_secretを画面へ表示しないことを検証します。</summary>
+    [TestMethod]
+    public async Task RefreshGmailAuthenticationStatusAsync_DoesNotDisplayCredentialDetails()
+    {
+        StubGmailAuthenticationService authentication = new()
+        {
+            Status = new GmailAuthenticationStatus
+            {
+                State = GmailAuthenticationState.Error,
+                HasClientConfiguration = true,
+                LastErrorSummary = "access_token=secret client_secret=secret",
+            },
+        };
+        StatusViewModel viewModel = new(authentication);
+        viewModel.Initialize(AppSettings.CreateDefault(), new ApplicationState());
+
+        await viewModel.RefreshGmailAuthenticationStatusAsync(CancellationToken.None);
+
+        Assert.AreEqual("エラー", viewModel.GmailAuthenticationStatus);
+        Assert.IsFalse(viewModel.GmailAuthenticationStatus.Contains("access_token", StringComparison.Ordinal));
+        Assert.IsFalse(viewModel.GmailAuthenticationStatus.Contains("client_secret", StringComparison.Ordinal));
     }
 }

@@ -187,7 +187,9 @@ public partial class App : System.Windows.Application
                 cancellationToken);
         }
 
-        provider.GetRequiredService<StatusViewModel>().Initialize(settings, state);
+        StatusViewModel statusViewModel = provider.GetRequiredService<StatusViewModel>();
+        statusViewModel.Initialize(settings, state);
+        await statusViewModel.RefreshGmailAuthenticationStatusAsync(cancellationToken);
         LogInitializationCompleted(logger, null);
     }
 

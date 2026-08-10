@@ -11,6 +11,7 @@ public partial class MainWindow : System.Windows.Window
 {
     private readonly ApplicationLifetime applicationLifetime;
     private readonly SettingsWindow settingsWindow;
+    private readonly StatusViewModel viewModel;
 
     /// <summary>
     /// 状態表示用のデータとアプリケーション終了状態を受け取って初期化します。
@@ -29,9 +30,11 @@ public partial class MainWindow : System.Windows.Window
 
         InitializeComponent();
         DataContext = viewModel;
+        this.viewModel = viewModel;
         this.applicationLifetime = applicationLifetime;
         this.settingsWindow = settingsWindow;
         Closing += OnClosing;
+        Activated += OnActivated;
     }
 
     /// <summary>
@@ -58,5 +61,13 @@ public partial class MainWindow : System.Windows.Window
     private async void OnOpenSettings(object sender, System.Windows.RoutedEventArgs e)
     {
         await settingsWindow.ShowSettingsAsync(this, CancellationToken.None);
+    }
+
+    /// <summary>状態画面が表示されるたびにGmail認証状態を非同期で更新します。</summary>
+    /// <param name="sender">状態画面です。</param>
+    /// <param name="e">アクティブ化イベントです。</param>
+    private async void OnActivated(object? sender, EventArgs e)
+    {
+        await viewModel.RefreshGmailAuthenticationStatusAsync(CancellationToken.None);
     }
 }

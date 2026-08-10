@@ -6,7 +6,7 @@
         mc:Ignorable="d"
         Title="Codex Usage Notifier"
         Width="720"
-        Height="620"
+        Height="700"
         MinWidth="620"
         MinHeight="520"
         WindowStartupLocation="CenterScreen">
@@ -19,7 +19,7 @@
                 </DockPanel>
                 <TextBlock Margin="0,6,0,24"
                            Foreground="#5B6573"
-                           Text="Phase 4A 利用枠監視 — 通知設定を再起動なしで編集できます。" />
+                           Text="Phase 4C 利用枠監視 — Windows通知とGmail通知を独立して配送します。" />
 
                 <Border Padding="22" Background="White" CornerRadius="10">
                     <Grid>
@@ -28,6 +28,9 @@
                             <ColumnDefinition Width="*" />
                         </Grid.ColumnDefinitions>
                         <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
@@ -57,12 +60,18 @@
                         <TextBlock Grid.Row="6" Grid.Column="1" Margin="0,14,0,0" Text="{Binding LastSuccessfulFetch}" />
                         <TextBlock Grid.Row="7" Margin="0,14,0,0" FontWeight="SemiBold" Text="次回確認" />
                         <TextBlock Grid.Row="7" Grid.Column="1" Margin="0,14,0,0" Text="{Binding NextCheck}" />
-                        <TextBlock Grid.Row="8" Margin="0,14,0,0" FontWeight="SemiBold" Text="Gmail" />
-                        <TextBlock Grid.Row="8" Grid.Column="1" Margin="0,14,0,0" Text="{Binding GmailStatus}" />
-                        <TextBlock Grid.Row="9" Margin="0,14,0,0" FontWeight="SemiBold" Text="最終通知" />
-                        <TextBlock Grid.Row="9" Grid.Column="1" Margin="0,14,0,0" Text="{Binding LastNotification}" />
-                        <TextBlock Grid.Row="10" Margin="0,14,0,0" FontWeight="SemiBold" Text="連続失敗" />
-                        <TextBlock Grid.Row="10" Grid.Column="1" Margin="0,14,0,0" Text="{Binding ConsecutiveFailures}" />
+                        <TextBlock Grid.Row="8" Margin="0,14,0,0" FontWeight="SemiBold" Text="Gmail通知" />
+                        <TextBlock Grid.Row="8" Grid.Column="1" Margin="0,14,0,0" Text="{Binding GmailNotificationStatus}" />
+                        <TextBlock Grid.Row="9" Margin="0,14,0,0" FontWeight="SemiBold" Text="Gmail認証" />
+                        <TextBlock Grid.Row="9" Grid.Column="1" Margin="0,14,0,0" Text="{Binding GmailAuthenticationStatus}" TextWrapping="Wrap" />
+                        <TextBlock Grid.Row="10" Margin="0,14,0,0" FontWeight="SemiBold" Text="Googleアカウント" />
+                        <TextBlock Grid.Row="10" Grid.Column="1" Margin="0,14,0,0" Text="{Binding GmailAuthenticatedAccount}" />
+                        <TextBlock Grid.Row="11" Margin="0,14,0,0" FontWeight="SemiBold" Text="最終Windows通知" />
+                        <TextBlock Grid.Row="11" Grid.Column="1" Margin="0,14,0,0" Text="{Binding LastWindowsNotification}" TextWrapping="Wrap" />
+                        <TextBlock Grid.Row="12" Margin="0,14,0,0" FontWeight="SemiBold" Text="最終Gmail通知" />
+                        <TextBlock Grid.Row="12" Grid.Column="1" Margin="0,14,0,0" Text="{Binding LastGmailNotification}" TextWrapping="Wrap" />
+                        <TextBlock Grid.Row="13" Margin="0,14,0,0" FontWeight="SemiBold" Text="連続失敗" />
+                        <TextBlock Grid.Row="13" Grid.Column="1" Margin="0,14,0,0" Text="{Binding ConsecutiveFailures}" />
                     </Grid>
                 </Border>
 
