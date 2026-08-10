@@ -3,6 +3,7 @@ using CodexUsageNotifier.Application.State;
 using CodexUsageNotifier.Application.Gmail;
 using CodexUsageNotifier.Domain.Models;
 using CodexUsageNotifier.Presentation.ViewModels;
+using CodexUsageNotifier.Application.Startup;
 using CodexUsageNotifier.Tests.TestDoubles;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -50,6 +51,62 @@ public sealed class SettingsViewModelTests
         Assert.AreEqual(95, context.SettingsRepository.Settings.ShortWindowRecoveryThresholdPercent);
         Assert.AreSame(context.SettingsRepository.Settings, context.SettingsSink.AppliedSettings);
         Assert.IsFalse(context.ViewModel.HasUnsavedChanges);
+    }
+
+    /// <summary>
+    /// 自動起動を無効化して保存するとOS登録を先に同期することを検証します。
+    /// </summary>
+    [TestMethod]
+    public async Task SaveAsync_AutoStartChanged_SynchronizesOperatingSystem()
+    {
+        TestContext context = CreateContext(AppSettings.CreateDefault());
+        await context.ViewModel.LoadAsync(CancellationToken.None);
+        context.ViewModel.AutoStartEnabled = false;
+
+        bool result = await context.ViewModel.SaveAsync(CancellationToken.None);
+
+        Assert.IsTrue(result);
+        CollectionAssert.AreEqual(new[] { false }, context.AutoStartManager.SynchronizeRequests);
+        Assert.IsFalse(context.SettingsRepository.Settings.AutoStartEnabled);
+        Assert.AreEqual("未登録", context.ViewModel.AutoStartRegistrationStatus);
+    }
+
+    /// <summary>
+    /// OS側の自動起動変更に失敗した場合は設定を保存しないことを検証します。
+    /// </summary>
+    [TestMethod]
+    public async Task SaveAsync_AutoStartSynchronizationFails_DoesNotSaveSettings()
+    {
+        TestContext context = CreateContext(AppSettings.CreateDefault());
+        await context.ViewModel.LoadAsync(CancellationToken.None);
+        context.AutoStartManager.FailSynchronization = true;
+        context.ViewModel.AutoStartEnabled = false;
+
+        bool result = await context.ViewModel.SaveAsync(CancellationToken.None);
+
+        Assert.IsFalse(result);
+        Assert.AreEqual(0, context.SettingsRepository.SaveCount);
+        Assert.IsTrue(context.SettingsRepository.Settings.AutoStartEnabled);
+        Assert.AreEqual("確認エラー", context.ViewModel.AutoStartRegistrationStatus);
+    }
+
+    /// <summary>
+    /// 設定保存に失敗した場合は自動起動を変更前の状態へ戻すことを検証します。
+    /// </summary>
+    [TestMethod]
+    public async Task SaveAsync_SettingsSaveFails_RollsBackAutoStart()
+    {
+        TestContext context = CreateContext(AppSettings.CreateDefault());
+        await context.ViewModel.LoadAsync(CancellationToken.None);
+        context.SettingsRepository.ThrowOnSave = true;
+        context.ViewModel.AutoStartEnabled = false;
+
+        bool result = await context.ViewModel.SaveAsync(CancellationToken.None);
+
+        Assert.IsFalse(result);
+        CollectionAssert.AreEqual(new[] { false, true }, context.AutoStartManager.SynchronizeRequests);
+        Assert.IsTrue(context.AutoStartManager.Enabled);
+        Assert.IsTrue(context.SettingsRepository.Settings.AutoStartEnabled);
     }
 
     /// <summary>
@@ -374,8 +431,10 @@ public sealed class SettingsViewModelTests
         StubGoogleOAuthClientConfigurationService configurationService = new();
         StubGmailAuthenticationService authenticationService = new();
         StubGmailTestMailSender testMailSender = new();
+        StubAutoStartManager autoStartManager = new(settings.AutoStartEnabled);
         SettingsViewModel viewModel = new(
             settingsRepository,
+            autoStartManager,
             stateStore,
             settingsSink,
             configurationService,
@@ -389,7 +448,8 @@ public sealed class SettingsViewModelTests
             stateStore,
             settingsSink,
             authenticationService,
-            testMailSender);
+            testMailSender,
+            autoStartManager);
     }
 
     /// <summary>固定UTC時刻を返すテスト用時刻提供元です。</summary>
@@ -489,7 +549,8 @@ public sealed class SettingsViewModelTests
             ApplicationStateStore stateStore,
             RecordingSettingsChangeSink settingsSink,
             StubGmailAuthenticationService authenticationService,
-            StubGmailTestMailSender testMailSender)
+            StubGmailTestMailSender testMailSender,
+            StubAutoStartManager autoStartManager)
         {
             ViewModel = viewModel;
             SettingsRepository = settingsRepository;
@@ -497,6 +558,7 @@ public sealed class SettingsViewModelTests
             SettingsSink = settingsSink;
             AuthenticationService = authenticationService;
             TestMailSender = testMailSender;
+            AutoStartManager = autoStartManager;
         }
 
         /// <summary>
@@ -528,6 +590,86 @@ public sealed class SettingsViewModelTests
         /// Gmailテスト送信を記録するテスト用サービスを取得します。
         /// </summary>
         public StubGmailTestMailSender TestMailSender { get; }
+
+        /// <summary>
+        /// Windows自動起動の同期結果を制御するテスト用サービスを取得します。
+        /// </summary>
+        public StubAutoStartManager AutoStartManager { get; }
+    }
+
+    /// <summary>
+    /// Windows自動起動の状態と同期回数をメモリ上で保持します。
+    /// </summary>
+    private sealed class StubAutoStartManager : IAutoStartManager
+    {
+        /// <summary>初期登録状態を指定して初期化します。</summary>
+        /// <param name="enabled">現在の登録状態です。</param>
+        public StubAutoStartManager(bool enabled) => Enabled = enabled;
+
+        /// <summary>現在の登録状態を取得します。</summary>
+        public bool Enabled { get; private set; }
+
+        /// <summary>同期要求の履歴を取得します。</summary>
+        public List<bool> SynchronizeRequests { get; } = [];
+
+        /// <summary>同期を失敗させるかどうかを取得または設定します。</summary>
+        public bool FailSynchronization { get; set; }
+
+        /// <inheritdoc />
+        public Task<bool> IsEnabledAsync(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult(Enabled);
+        }
+
+        /// <inheritdoc />
+        public Task<AutoStartStatus> GetStatusAsync(bool expectedEnabled, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            bool matches = expectedEnabled == Enabled;
+            return Task.FromResult(new AutoStartStatus
+            {
+                State = matches
+                    ? expectedEnabled ? AutoStartRegistrationState.Registered : AutoStartRegistrationState.NotRegistered
+                    : AutoStartRegistrationState.Mismatch,
+                HasRegistration = Enabled,
+                IsCurrentExecutableRegistered = Enabled,
+                Message = matches ? expectedEnabled ? "登録済み" : "未登録" : "不一致",
+            });
+        }
+
+        /// <inheritdoc />
+        public Task<AutoStartOperationResult> EnableAsync(CancellationToken cancellationToken) =>
+            SynchronizeAsync(enabled: true, cancellationToken);
+
+        /// <inheritdoc />
+        public Task<AutoStartOperationResult> DisableAsync(CancellationToken cancellationToken) =>
+            SynchronizeAsync(enabled: false, cancellationToken);
+
+        /// <inheritdoc />
+        public Task<AutoStartOperationResult> SynchronizeAsync(bool enabled, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            SynchronizeRequests.Add(enabled);
+            if (!FailSynchronization)
+            {
+                Enabled = enabled;
+            }
+
+            return Task.FromResult(new AutoStartOperationResult
+            {
+                Succeeded = !FailSynchronization,
+                Status = new AutoStartStatus
+                {
+                    State = FailSynchronization
+                        ? AutoStartRegistrationState.Error
+                        : enabled ? AutoStartRegistrationState.Registered : AutoStartRegistrationState.NotRegistered,
+                    HasRegistration = Enabled,
+                    IsCurrentExecutableRegistered = Enabled,
+                    Message = FailSynchronization ? "テスト用同期失敗" : enabled ? "登録済み" : "未登録",
+                },
+            });
+        }
     }
 
     /// <summary>

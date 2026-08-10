@@ -11,6 +11,7 @@ using CodexUsageNotifier.Infrastructure.WindowsNotifications;
 using CodexUsageNotifier.Infrastructure.Gmail;
 using CodexUsageNotifier.Infrastructure.Startup;
 using CodexUsageNotifier.Application.Gmail;
+using CodexUsageNotifier.Application.Startup;
 using CodexUsageNotifier.Presentation.Tray;
 using CodexUsageNotifier.Presentation.ViewModels;
 using CodexUsageNotifier.Presentation;
@@ -35,6 +36,9 @@ public partial class App : System.Windows.Application
 
     private static readonly Action<ILogger, Exception?> LogApplicationStopFailed =
         LoggerMessage.Define(LogLevel.Error, new EventId(1003, "ApplicationStopFailed"), "アプリケーションの終了処理中にエラーが発生しました。");
+
+    private static readonly Action<ILogger, string, Exception?> LogAutoStartSynchronizationFailed =
+        LoggerMessage.Define<string>(LogLevel.Warning, new EventId(1004, "AutoStartSynchronizationFailed"), "Windows自動起動の起動時同期に失敗しました。Reason={Reason}");
 
     private ServiceProvider? serviceProvider;
     private ApplicationInstanceGuard? instanceGuard;
@@ -116,6 +120,7 @@ public partial class App : System.Windows.Application
         });
 
         services.AddSingleton<ISettingsRepository, JsonSettingsRepository>();
+        services.AddSingleton<IAutoStartManager, WindowsAutoStartManager>();
         services.AddSingleton<IApplicationStateMigrator, ApplicationStateMigrator>();
         services.AddSingleton<IApplicationStateRepository, JsonApplicationStateRepository>();
         services.AddSingleton<IUsageHistoryRepository, JsonUsageHistoryRepository>();
@@ -169,6 +174,13 @@ public partial class App : System.Windows.Application
         LogApplicationStarting(logger, null);
         AppSettings settings = await provider.GetRequiredService<ISettingsRepository>()
             .LoadAsync(cancellationToken);
+        AutoStartOperationResult autoStartResult = await provider.GetRequiredService<IAutoStartManager>()
+            .SynchronizeAsync(settings.AutoStartEnabled, cancellationToken);
+        if (!autoStartResult.Succeeded)
+        {
+            LogAutoStartSynchronizationFailed(logger, autoStartResult.Status.Message, null);
+        }
+
         provider.GetRequiredService<CodexAppServerOptions>().ExecutablePath = settings.CodexExecutablePath;
         ApplyLogLevel(settings, provider.GetRequiredService<DailyFileLoggerProvider>());
         ApplicationState state = await provider.GetRequiredService<ApplicationStateStore>()

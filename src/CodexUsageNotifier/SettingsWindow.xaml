@@ -66,6 +66,8 @@
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
                         </Grid.RowDefinitions>
                         <TextBlock Grid.Row="0" Style="{StaticResource SectionLabel}" Text="Windows通知" />
                         <CheckBox Grid.Row="0" Grid.Column="1" VerticalAlignment="Center"
@@ -91,9 +93,13 @@
                             <TextBlock Style="{StaticResource ErrorText}" Text="{Binding FallbackPollingError}" />
                         </StackPanel>
                         <TextBlock Grid.Row="4" Style="{StaticResource SectionLabel}" Text="Windowsログイン時" />
-                        <CheckBox Grid.Row="4" Grid.Column="1" VerticalAlignment="Center"
-                                  Content="自動起動を有効にする（登録処理は後続フェーズ）"
-                                  IsChecked="{Binding AutoStartEnabled}" />
+                        <StackPanel Grid.Row="4" Grid.Column="1">
+                            <CheckBox VerticalAlignment="Center"
+                                      Content="Windowsログイン時に自動起動する"
+                                      IsChecked="{Binding AutoStartEnabled}" />
+                            <TextBlock Margin="0,6,0,0" Text="{Binding AutoStartRegistrationStatus, StringFormat=OS登録状態：{0}}" />
+                            <TextBlock Style="{StaticResource ErrorText}" Text="{Binding AutoStartWarning}" />
+                        </StackPanel>
                         <TextBlock Grid.Row="5" Grid.ColumnSpan="2" Margin="0,8,0,0" Foreground="#5B6573"
                                    Text="開始時刻が終了時刻より後の場合は、日付をまたぐ通知禁止時間として扱います。" />
                     </Grid>

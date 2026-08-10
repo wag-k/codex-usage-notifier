@@ -7,6 +7,7 @@ using CodexUsageNotifier.Application.State;
 using CodexUsageNotifier.Application.Gmail;
 using CodexUsageNotifier.Domain.Models;
 using CodexUsageNotifier.Domain.Services;
+using CodexUsageNotifier.Application.Startup;
 using Microsoft.Extensions.Logging;
 
 namespace CodexUsageNotifier.Presentation.ViewModels;
@@ -26,6 +27,7 @@ public sealed partial class SettingsViewModel : INotifyPropertyChanged
         LoggerMessage.Define(LogLevel.Error, new EventId(2503, "SettingsApplyFailed"), "保存済み設定を監視処理へ反映できませんでした。");
 
     private readonly ISettingsRepository settingsRepository;
+    private readonly IAutoStartManager autoStartManager;
     private readonly ApplicationStateStore stateStore;
     private readonly ISettingsChangeSink settingsChangeSink;
     private readonly IGoogleOAuthClientConfigurationService googleOAuthConfigurationService;
@@ -73,6 +75,8 @@ public sealed partial class SettingsViewModel : INotifyPropertyChanged
     private string gmailNotificationError = string.Empty;
     private string gmailRecipientError = string.Empty;
     private string operationMessage = string.Empty;
+    private string autoStartRegistrationStatus = "確認中";
+    private string autoStartWarning = string.Empty;
 
     /// <summary>
     /// 設定値または検証状態が変更されたときに発生します。
@@ -88,6 +92,7 @@ public sealed partial class SettingsViewModel : INotifyPropertyChanged
     /// <param name="logger">読み書き結果の記録先です。</param>
     public SettingsViewModel(
         ISettingsRepository settingsRepository,
+        IAutoStartManager autoStartManager,
         ApplicationStateStore stateStore,
         ISettingsChangeSink settingsChangeSink,
         IGoogleOAuthClientConfigurationService googleOAuthConfigurationService,
@@ -97,6 +102,7 @@ public sealed partial class SettingsViewModel : INotifyPropertyChanged
         ILogger<SettingsViewModel> logger)
     {
         ArgumentNullException.ThrowIfNull(settingsRepository);
+        ArgumentNullException.ThrowIfNull(autoStartManager);
         ArgumentNullException.ThrowIfNull(stateStore);
         ArgumentNullException.ThrowIfNull(settingsChangeSink);
         ArgumentNullException.ThrowIfNull(googleOAuthConfigurationService);
@@ -105,6 +111,7 @@ public sealed partial class SettingsViewModel : INotifyPropertyChanged
         ArgumentNullException.ThrowIfNull(timeProvider);
         ArgumentNullException.ThrowIfNull(logger);
         this.settingsRepository = settingsRepository;
+        this.autoStartManager = autoStartManager;
         this.stateStore = stateStore;
         this.settingsChangeSink = settingsChangeSink;
         this.googleOAuthConfigurationService = googleOAuthConfigurationService;
@@ -171,6 +178,24 @@ public sealed partial class SettingsViewModel : INotifyPropertyChanged
     {
         get => autoStartEnabled;
         set => SetEditableProperty(ref autoStartEnabled, value);
+    }
+
+    /// <summary>
+    /// Windows側の自動起動登録状態を取得します。
+    /// </summary>
+    public string AutoStartRegistrationStatus
+    {
+        get => autoStartRegistrationStatus;
+        private set => SetProperty(ref autoStartRegistrationStatus, value);
+    }
+
+    /// <summary>
+    /// 設定値とWindows登録の不一致または確認エラーを取得します。
+    /// </summary>
+    public string AutoStartWarning
+    {
+        get => autoStartWarning;
+        private set => SetProperty(ref autoStartWarning, value);
     }
 
     /// <summary>
@@ -437,6 +462,7 @@ public sealed partial class SettingsViewModel : INotifyPropertyChanged
             observedSnapshot = state.LastUsageSnapshot;
             ApplySettings(settings);
             await RefreshGmailStatusAsync(cancellationToken);
+            await RefreshAutoStartStatusAsync(settings.AutoStartEnabled, cancellationToken);
             baselineSignature = CaptureEditSignature();
             ValidateAndTrackChanges();
         }
@@ -467,17 +493,48 @@ public sealed partial class SettingsViewModel : INotifyPropertyChanged
         IsBusy = true;
         OperationMessage = string.Empty;
         AppSettings previousSettings = baselineSettings;
+        bool autoStartChanged = previousSettings.AutoStartEnabled != settings.AutoStartEnabled;
+        if (autoStartChanged)
+        {
+            AutoStartOperationResult autoStartResult = await autoStartManager.SynchronizeAsync(
+                settings.AutoStartEnabled,
+                cancellationToken);
+            ApplyAutoStartStatus(autoStartResult.Status);
+            if (!autoStartResult.Succeeded)
+            {
+                OperationMessage = $"Windows自動起動を変更できないため設定を保存していません。{autoStartResult.Status.Message}";
+                IsBusy = false;
+                return false;
+            }
+        }
+
         try
         {
             await Task.Run(
                 () => settingsRepository.SaveAsync(settings, cancellationToken),
                 cancellationToken);
         }
-        catch (Exception exception) when (exception is not OperationCanceledException)
+        catch (Exception exception)
         {
-            OperationMessage = "設定を保存できませんでした。元の設定を維持しています。";
+            AutoStartOperationResult? rollbackResult = null;
+            if (autoStartChanged)
+            {
+                rollbackResult = await autoStartManager.SynchronizeAsync(
+                    previousSettings.AutoStartEnabled,
+                    CancellationToken.None);
+                ApplyAutoStartStatus(rollbackResult.Status);
+            }
+
+            OperationMessage = rollbackResult?.Succeeded == false
+                ? "設定保存とWindows自動起動のロールバックに失敗しました。設定とOS状態が一致していない可能性があります。"
+                : "設定を保存できませんでした。Windows自動起動を含む元の設定を維持しています。";
             LogSettingsSaveFailed(logger, exception);
             IsBusy = false;
+            if (exception is OperationCanceledException)
+            {
+                throw;
+            }
+
             return false;
         }
 
@@ -493,6 +550,7 @@ public sealed partial class SettingsViewModel : INotifyPropertyChanged
             }
 
             await settingsChangeSink.ApplyAsync(settings, cancellationToken);
+            await RefreshAutoStartStatusAsync(settings.AutoStartEnabled, cancellationToken);
             OperationMessage = "設定を保存しました。次の正常取得から通知判定へ適用します。";
             return true;
         }
@@ -506,6 +564,42 @@ public sealed partial class SettingsViewModel : INotifyPropertyChanged
         {
             IsBusy = false;
         }
+    }
+
+    /// <summary>
+    /// 設定値とWindowsの自動起動登録状態を再確認します。
+    /// </summary>
+    /// <param name="expectedEnabled">設定ファイル上の有効状態です。</param>
+    /// <param name="cancellationToken">処理のキャンセル通知です。</param>
+    /// <returns>状態確認の完了を表す処理です。</returns>
+    private async Task RefreshAutoStartStatusAsync(
+        bool expectedEnabled,
+        CancellationToken cancellationToken)
+    {
+        AutoStartStatus status = await autoStartManager.GetStatusAsync(expectedEnabled, cancellationToken);
+        ApplyAutoStartStatus(status);
+    }
+
+    /// <summary>
+    /// Windows自動起動の確認結果を画面表示へ反映します。
+    /// </summary>
+    /// <param name="status">表示する確認結果です。</param>
+    private void ApplyAutoStartStatus(AutoStartStatus status)
+    {
+        ArgumentNullException.ThrowIfNull(status);
+        AutoStartRegistrationStatus = status.State switch
+        {
+            AutoStartRegistrationState.Registered => "登録済み",
+            AutoStartRegistrationState.NotRegistered => "未登録",
+            AutoStartRegistrationState.Mismatch => "不一致",
+            AutoStartRegistrationState.Unsupported => "登録不可",
+            _ => "確認エラー",
+        };
+        AutoStartWarning = status.State is AutoStartRegistrationState.Mismatch
+            or AutoStartRegistrationState.Unsupported
+            or AutoStartRegistrationState.Error
+                ? status.Message
+                : string.Empty;
     }
 
     /// <summary>
