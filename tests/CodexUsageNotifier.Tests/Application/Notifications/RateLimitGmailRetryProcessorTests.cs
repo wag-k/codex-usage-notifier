@@ -5,7 +5,7 @@ using CodexUsageNotifier.Application.State;
 using CodexUsageNotifier.Domain.Models;
 using CodexUsageNotifier.Domain.Services;
 using CodexUsageNotifier.Tests.TestDoubles;
-using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Logging;
 
 namespace CodexUsageNotifier.Tests.Application.Notifications;
 
@@ -583,6 +583,129 @@ public sealed class RateLimitGmailRetryProcessorTests
         Assert.AreEqual(NowUtc, (await context.StateStore.LoadAsync(CancellationToken.None)).GmailDeliveryEnabledSinceUtc);
     }
 
+    /// <summary>認証状態が一時Errorになって回復しても配送境界を進めないことを検証します。</summary>
+    [TestMethod]
+    public async Task ProcessAsync_AuthenticationErrorThenRecovery_PreservesDeliveryBoundary()
+    {
+        DateTimeOffset originalBoundary = NowUtc.AddDays(-1);
+        MutableTimeProvider timeProvider = new(NowUtc);
+        TestContext context = CreateContext(CreateState([]), timeProvider: timeProvider);
+        context.Authentication.Status = context.Authentication.Status with
+        {
+            State = GmailAuthenticationState.Error,
+            LastErrorSummary = "一時的に状態を確認できません。",
+        };
+
+        await context.Processor.ProcessAsync(
+            CreateSnapshot(NowUtc, []),
+            CreateSettings(windowsEnabled: false),
+            CancellationToken.None);
+        timeProvider.UtcNow = NowUtc.AddMinutes(1);
+        context.Authentication.Status = context.Authentication.Status with
+        {
+            State = GmailAuthenticationState.Authenticated,
+            LastErrorSummary = null,
+        };
+        await context.Processor.ProcessAsync(
+            CreateSnapshot(timeProvider.UtcNow, []),
+            CreateSettings(windowsEnabled: false),
+            CancellationToken.None);
+
+        ApplicationState state = await context.StateStore.LoadAsync(CancellationToken.None);
+        Assert.AreEqual(originalBoundary, state.GmailDeliveryEnabledSinceUtc);
+        Assert.IsTrue(state.GmailAuthenticationWasUsable);
+        Assert.IsFalse(context.Logger.Messages.Any(message => message.Contains("Reauthenticated", StringComparison.Ordinal)));
+    }
+
+    /// <summary>認証状態取得例外から回復しても配送境界を進めないことを検証します。</summary>
+    [TestMethod]
+    public async Task ProcessAsync_AuthenticationStatusExceptionThenRecovery_PreservesDeliveryBoundary()
+    {
+        DateTimeOffset originalBoundary = NowUtc.AddDays(-1);
+        MutableTimeProvider timeProvider = new(NowUtc);
+        TestContext context = CreateContext(CreateState([]), timeProvider: timeProvider);
+        context.Authentication.StatusException = new HttpRequestException("temporary");
+
+        await context.Processor.ProcessAsync(
+            CreateSnapshot(NowUtc, []),
+            CreateSettings(windowsEnabled: false),
+            CancellationToken.None);
+        timeProvider.UtcNow = NowUtc.AddMinutes(1);
+        context.Authentication.StatusException = null;
+        await context.Processor.ProcessAsync(
+            CreateSnapshot(timeProvider.UtcNow, []),
+            CreateSettings(windowsEnabled: false),
+            CancellationToken.None);
+
+        ApplicationState state = await context.StateStore.LoadAsync(CancellationToken.None);
+        Assert.AreEqual(originalBoundary, state.GmailDeliveryEnabledSinceUtc);
+        Assert.IsTrue(state.GmailAuthenticationWasUsable);
+    }
+
+    /// <summary>一時Error中に成立した通知を認証回復後も配送対象として維持することを検証します。</summary>
+    [TestMethod]
+    public async Task ProcessAsync_NotificationDuringAuthenticationError_RemainsEligibleAfterRecovery()
+    {
+        MutableTimeProvider timeProvider = new(NowUtc);
+        TestContext context = CreateContext(CreateState([]), timeProvider: timeProvider);
+        RateLimitWindow window = CreateFiveHourWindow("codex", NowUtc.AddHours(5), 99);
+        context.Authentication.Status = context.Authentication.Status with { State = GmailAuthenticationState.Error };
+
+        await context.Processor.ProcessAsync(
+            CreateSnapshot(NowUtc, [window]),
+            CreateSettings(windowsEnabled: false),
+            CancellationToken.None);
+        Assert.AreEqual(0, context.GmailSender.SendCallCount);
+
+        timeProvider.UtcNow = NowUtc.AddMinutes(1);
+        context.Authentication.Status = context.Authentication.Status with { State = GmailAuthenticationState.Authenticated };
+        NotificationProcessingResult result = await context.Processor.ProcessAsync(
+            CreateSnapshot(timeProvider.UtcNow, [window]),
+            CreateSettings(windowsEnabled: false),
+            CancellationToken.None);
+
+        Assert.AreEqual(1, context.GmailSender.SendCallCount);
+        Assert.AreEqual(DeliveryStatus.Succeeded, result.State.RateLimitNotificationStates.Single().GmailDeliveryStatus);
+        Assert.AreEqual(NowUtc.AddDays(-1), result.State.GmailDeliveryEnabledSinceUtc);
+    }
+
+    /// <summary>明示的な再認証期間中に成立した通知を新しい配送境界より前として送らないことを検証します。</summary>
+    [TestMethod]
+    public async Task ProcessAsync_NotificationDuringReauthentication_IsExcludedAfterRecovery()
+    {
+        MutableTimeProvider timeProvider = new(NowUtc);
+        TestContext context = CreateContext(CreateState([]), timeProvider: timeProvider);
+        context.Authentication.Status = context.Authentication.Status with
+        {
+            State = GmailAuthenticationState.ReauthenticationRequired,
+        };
+        await context.Processor.ProcessAsync(
+            CreateSnapshot(NowUtc, []),
+            CreateSettings(windowsEnabled: false),
+            CancellationToken.None);
+
+        timeProvider.UtcNow = NowUtc.AddMinutes(1);
+        RateLimitWindow window = CreateFiveHourWindow("codex", NowUtc.AddHours(5), 99);
+        await context.Processor.ProcessAsync(
+            CreateSnapshot(timeProvider.UtcNow, [window]),
+            CreateSettings(windowsEnabled: false),
+            CancellationToken.None);
+
+        timeProvider.UtcNow = NowUtc.AddMinutes(2);
+        context.Authentication.Status = context.Authentication.Status with
+        {
+            State = GmailAuthenticationState.Authenticated,
+        };
+        NotificationProcessingResult result = await context.Processor.ProcessAsync(
+            CreateSnapshot(timeProvider.UtcNow, [window]),
+            CreateSettings(windowsEnabled: false),
+            CancellationToken.None);
+
+        Assert.AreEqual(0, context.GmailSender.SendCallCount);
+        Assert.AreEqual(timeProvider.UtcNow, result.State.GmailDeliveryEnabledSinceUtc);
+        Assert.IsTrue(context.Logger.Messages.Any(message => message.Contains("Reauthenticated", StringComparison.Ordinal)));
+    }
+
     /// <summary>共通するテスト用プロセッサーと依存先を生成します。</summary>
     private static TestContext CreateContext(
         ApplicationState? initialState = null,
@@ -603,14 +726,15 @@ public sealed class RateLimitGmailRetryProcessorTests
                 AuthenticatedEmailAddress = "sender@example.com",
             },
         };
+        CollectingLogger<RateLimitNotificationProcessor> logger = new();
         RateLimitNotificationProcessor processor = new(
             stateStore,
             windowsSender,
             authentication,
             gmailSender,
             actualTimeProvider,
-            NullLogger<RateLimitNotificationProcessor>.Instance);
-        return new TestContext(processor, stateStore, windowsSender, gmailSender);
+            logger);
+        return new TestContext(processor, stateStore, windowsSender, gmailSender, authentication, logger);
     }
 
     /// <summary>Gmailと任意のWindows設定を有効にした設定を生成します。</summary>
@@ -741,7 +865,34 @@ public sealed class RateLimitGmailRetryProcessorTests
         RateLimitNotificationProcessor Processor,
         ApplicationStateStore StateStore,
         RecordingWindowsNotificationSender WindowsSender,
-        StubGmailNotificationSender GmailSender);
+        StubGmailNotificationSender GmailSender,
+        StubGmailAuthenticationService Authentication,
+        CollectingLogger<RateLimitNotificationProcessor> Logger);
+
+    /// <summary>整形済みログメッセージを記録するテスト用ロガーです。</summary>
+    private sealed class CollectingLogger<T> : ILogger<T>
+    {
+        /// <summary>記録された安全なメッセージを取得します。</summary>
+        public List<string> Messages { get; } = [];
+
+        /// <inheritdoc />
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        /// <inheritdoc />
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        /// <inheritdoc />
+        public void Log<TState>(
+            LogLevel logLevel,
+            EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            ArgumentNullException.ThrowIfNull(formatter);
+            Messages.Add(formatter(state, exception));
+        }
+    }
 
     /// <summary>メモリ上へ状態を永続化します。</summary>
     private sealed class InMemoryStateRepository : IApplicationStateRepository

@@ -262,16 +262,17 @@ public sealed partial class RateLimitNotificationProcessor
 
         bool becameEnabled = settings.GmailNotificationEnabled
             && !state.GmailDeliveryEnabledLastObserved;
+        bool? confirmedAuthenticationWasUsable = settings.GmailNotificationEnabled
+            ? GetConfirmedAuthenticationUsability(authenticationStatus)
+            : null;
         bool reauthenticationCompleted = settings.GmailNotificationEnabled
-            && authenticationStatus?.CanSendMail == true
+            && confirmedAuthenticationWasUsable == true
             && !state.GmailAuthenticationWasUsable;
-        bool authenticationWasUsable = settings.GmailNotificationEnabled
-            && authenticationStatus?.CanSendMail == true;
         if (!becameEnabled
             && !reauthenticationCompleted
             && state.GmailDeliveryEnabledLastObserved == settings.GmailNotificationEnabled
-            && (authenticationStatus is null
-                || state.GmailAuthenticationWasUsable == authenticationWasUsable))
+            && (confirmedAuthenticationWasUsable is null
+                || state.GmailAuthenticationWasUsable == confirmedAuthenticationWasUsable.Value))
         {
             return (state, authenticationStatus);
         }
@@ -284,9 +285,9 @@ public sealed partial class RateLimitNotificationProcessor
                     ? nowUtc
                     : current.GmailDeliveryEnabledSinceUtc,
                 GmailDeliveryEnabledLastObserved = settings.GmailNotificationEnabled,
-                GmailAuthenticationWasUsable = authenticationStatus is null
+                GmailAuthenticationWasUsable = confirmedAuthenticationWasUsable is null
                     ? current.GmailAuthenticationWasUsable
-                    : authenticationWasUsable,
+                    : confirmedAuthenticationWasUsable.Value,
             },
             cancellationToken);
         if (becameEnabled || reauthenticationCompleted)
@@ -298,6 +299,23 @@ public sealed partial class RateLimitNotificationProcessor
         }
 
         return (updated, authenticationStatus);
+    }
+
+    /// <summary>
+    /// 配送境界を変更してよい、確定した認証可用状態だけを返します。
+    /// </summary>
+    /// <param name="authenticationStatus">取得できた認証状態です。</param>
+    /// <returns>利用可能はtrue、明示的な失効はfalse、一時的に不明な場合はnullです。</returns>
+    private static bool? GetConfirmedAuthenticationUsability(
+        GmailAuthenticationStatus? authenticationStatus)
+    {
+        return authenticationStatus?.State switch
+        {
+            GmailAuthenticationState.Authenticated or GmailAuthenticationState.RefreshRequired
+                when authenticationStatus.CanSendMail => true,
+            GmailAuthenticationState.Unauthenticated or GmailAuthenticationState.ReauthenticationRequired => false,
+            _ => null,
+        };
     }
 
     /// <summary>

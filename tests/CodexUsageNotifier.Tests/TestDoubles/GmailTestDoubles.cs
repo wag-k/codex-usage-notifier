@@ -65,11 +65,16 @@ internal sealed class StubGmailAuthenticationService : IGmailAuthenticationServi
     /// <summary>認証解除の呼び出し回数を取得します。</summary>
     public int DisconnectCallCount { get; private set; }
 
+    /// <summary>状態取得時に発生させる一時例外を取得または設定します。</summary>
+    public Exception? StatusException { get; set; }
+
     /// <inheritdoc />
     public Task<GmailAuthenticationStatus> GetStatusAsync(CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        return Task.FromResult(Status);
+        return StatusException is null
+            ? Task.FromResult(Status)
+            : Task.FromException<GmailAuthenticationStatus>(StatusException);
     }
 
     /// <inheritdoc />
