@@ -114,6 +114,7 @@ public partial class App : System.Windows.Application
         services.AddSingleton(paths);
         services.AddSingleton<IAppDataPaths>(paths);
         services.AddSingleton(fileLoggerProvider);
+        services.AddSingleton<ILogMaintenance, LogMaintenance>();
         services.AddLogging(builder =>
         {
             builder.SetMinimumLevel(LogLevel.Trace);
