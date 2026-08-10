@@ -9,6 +9,7 @@ using CodexUsageNotifier.Infrastructure.Persistence;
 using CodexUsageNotifier.Infrastructure.Codex;
 using CodexUsageNotifier.Infrastructure.WindowsNotifications;
 using CodexUsageNotifier.Infrastructure.Gmail;
+using CodexUsageNotifier.Infrastructure.Startup;
 using CodexUsageNotifier.Application.Gmail;
 using CodexUsageNotifier.Presentation.Tray;
 using CodexUsageNotifier.Presentation.ViewModels;
@@ -33,6 +34,7 @@ public partial class App : System.Windows.Application
         LoggerMessage.Define(LogLevel.Information, new EventId(1001, "InitializationCompleted"), "設定と状態の読み込みが完了しました。");
 
     private ServiceProvider? serviceProvider;
+    private ApplicationInstanceGuard? instanceGuard;
 
     /// <summary>
     /// DIコンテナを構築し、永続化基盤とタスクトレイを初期化します。
@@ -41,6 +43,19 @@ public partial class App : System.Windows.Application
     protected override async void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+
+        if (!ApplicationInstanceGuard.TryAcquireForCurrentUser(out ApplicationInstanceGuard? acquiredGuard))
+        {
+            System.Windows.MessageBox.Show(
+                "Codex Usage Notifierはすでに起動しています。タスクトレイを確認してください。",
+                "Codex Usage Notifier",
+                System.Windows.MessageBoxButton.OK,
+                System.Windows.MessageBoxImage.Information);
+            Shutdown(0);
+            return;
+        }
+
+        instanceGuard = acquiredGuard;
 
         try
         {
@@ -200,12 +215,21 @@ public partial class App : System.Windows.Application
     /// <param name="e">終了時の引数です。</param>
     protected override void OnExit(ExitEventArgs e)
     {
-        ILogger<App>? logger = serviceProvider?.GetService<ILogger<App>>();
-        if (logger is not null)
+        try
         {
-            LogApplicationStopping(logger, null);
+            ILogger<App>? logger = serviceProvider?.GetService<ILogger<App>>();
+            if (logger is not null)
+            {
+                LogApplicationStopping(logger, null);
+            }
+
+            serviceProvider?.DisposeAsync().AsTask().GetAwaiter().GetResult();
         }
-        serviceProvider?.DisposeAsync().AsTask().GetAwaiter().GetResult();
-        base.OnExit(e);
+        finally
+        {
+            instanceGuard?.Dispose();
+            instanceGuard = null;
+            base.OnExit(e);
+        }
     }
 }
