@@ -213,8 +213,7 @@ public sealed partial class RateLimitNotificationProcessor
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(state);
-        if (state.GmailProductionDeliveryStartedAtUtc is not null
-            && state.SchemaVersion == ApplicationState.CurrentSchemaVersion)
+        if (state.GmailProductionDeliveryStartedAtUtc is not null)
         {
             return state;
         }
@@ -223,7 +222,6 @@ public sealed partial class RateLimitNotificationProcessor
         ApplicationState updated = await stateStore.UpdateAsync(
             current => current with
             {
-                SchemaVersion = ApplicationState.CurrentSchemaVersion,
                 GmailProductionDeliveryStartedAtUtc =
                     current.GmailProductionDeliveryStartedAtUtc ?? startedAtUtc,
             },

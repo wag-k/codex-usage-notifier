@@ -55,6 +55,15 @@ public partial class App : System.Windows.Application
             serviceProvider.GetRequiredService<TrayIconService>().Initialize();
             serviceProvider.GetRequiredService<UsageMonitor>().Start();
         }
+        catch (UnsupportedFutureStateVersionException exception)
+        {
+            System.Windows.MessageBox.Show(
+                exception.Message,
+                "Codex Usage Notifier",
+                System.Windows.MessageBoxButton.OK,
+                System.Windows.MessageBoxImage.Error);
+            Shutdown(-1);
+        }
         catch (Exception exception)
         {
             System.Windows.MessageBox.Show(
@@ -87,6 +96,7 @@ public partial class App : System.Windows.Application
         });
 
         services.AddSingleton<ISettingsRepository, JsonSettingsRepository>();
+        services.AddSingleton<IApplicationStateMigrator, ApplicationStateMigrator>();
         services.AddSingleton<IApplicationStateRepository, JsonApplicationStateRepository>();
         services.AddSingleton<IUsageHistoryRepository, JsonUsageHistoryRepository>();
         services.AddSingleton<IGoogleOAuthClientConfigurationService, GoogleOAuthClientConfigurationService>();
@@ -143,14 +153,12 @@ public partial class App : System.Windows.Application
         ApplyLogLevel(settings, provider.GetRequiredService<DailyFileLoggerProvider>());
         ApplicationState state = await provider.GetRequiredService<ApplicationStateStore>()
             .LoadAsync(cancellationToken);
-        if (state.GmailProductionDeliveryStartedAtUtc is null
-            || state.SchemaVersion != ApplicationState.CurrentSchemaVersion)
+        if (state.GmailProductionDeliveryStartedAtUtc is null)
         {
             DateTimeOffset startedAtUtc = provider.GetRequiredService<TimeProvider>().GetUtcNow();
             state = await provider.GetRequiredService<ApplicationStateStore>().UpdateAsync(
                 current => current with
                 {
-                    SchemaVersion = ApplicationState.CurrentSchemaVersion,
                     GmailProductionDeliveryStartedAtUtc =
                         current.GmailProductionDeliveryStartedAtUtc ?? startedAtUtc,
                 },
