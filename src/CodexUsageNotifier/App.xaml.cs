@@ -13,6 +13,7 @@ using CodexUsageNotifier.Infrastructure.Startup;
 using CodexUsageNotifier.Application.Gmail;
 using CodexUsageNotifier.Application.Startup;
 using CodexUsageNotifier.Application.Maintenance;
+using CodexUsageNotifier.Application.Versioning;
 using CodexUsageNotifier.Presentation.Tray;
 using CodexUsageNotifier.Presentation.ViewModels;
 using CodexUsageNotifier.Presentation;
@@ -161,6 +162,7 @@ public partial class App : System.Windows.Application
         services.AddSingleton<IGmailTestMailSender, GmailTestMailSender>();
         services.AddSingleton<IGmailNotificationSender, GmailNotificationSender>();
         services.AddSingleton<ApplicationStateStore>();
+        services.AddSingleton<ApplicationVersionProvider>();
         services.AddSingleton<TimeProvider>(TimeProvider.System);
         services.AddSingleton<IPowerEventSource, SystemPowerEventSource>();
         services.AddSingleton<TrayIconHost>();

@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using CodexUsageNotifier.Application.Abstractions;
 using CodexUsageNotifier.Application.Gmail;
+using CodexUsageNotifier.Application.Versioning;
 using CodexUsageNotifier.Domain.Models;
 using CodexUsageNotifier.Domain.Services;
 
@@ -13,6 +14,7 @@ namespace CodexUsageNotifier.Presentation.ViewModels;
 public sealed class StatusViewModel : INotifyPropertyChanged, IUsageStatusSink
 {
     private readonly IGmailAuthenticationStatusProvider? gmailAuthenticationStatusProvider;
+    private readonly ApplicationVersionProvider applicationVersionProvider;
     private string fiveHourRateLimit = "未観測";
     private string weeklyRateLimit = "未観測";
     private string allRateLimits = "未取得";
@@ -28,23 +30,38 @@ public sealed class StatusViewModel : INotifyPropertyChanged, IUsageStatusSink
     private string lastGmailNotification = "通知実績なし";
     private string consecutiveFailures = "0回";
 
-    /// <summary>DIからGmail認証状態の安全な提供元を受け取ります。</summary>
+    /// <summary>Gmail認証状態の安全な提供元と実行Assemblyのバージョンを受け取ります。</summary>
     /// <param name="gmailAuthenticationStatusProvider">トークンを公開しない認証状態の提供元です。</param>
     public StatusViewModel(IGmailAuthenticationStatusProvider gmailAuthenticationStatusProvider)
+        : this(gmailAuthenticationStatusProvider, new ApplicationVersionProvider())
+    {
+    }
+
+    /// <summary>DIからGmail認証状態と共通バージョンの提供元を受け取ります。</summary>
+    /// <param name="gmailAuthenticationStatusProvider">トークンを公開しない認証状態の提供元です。</param>
+    public StatusViewModel(
+        IGmailAuthenticationStatusProvider gmailAuthenticationStatusProvider,
+        ApplicationVersionProvider applicationVersionProvider)
     {
         ArgumentNullException.ThrowIfNull(gmailAuthenticationStatusProvider);
+        ArgumentNullException.ThrowIfNull(applicationVersionProvider);
         this.gmailAuthenticationStatusProvider = gmailAuthenticationStatusProvider;
+        this.applicationVersionProvider = applicationVersionProvider;
     }
 
     /// <summary>外部通信を行わない表示テスト用のインスタンスを初期化します。</summary>
     internal StatusViewModel()
     {
+        applicationVersionProvider = new ApplicationVersionProvider();
     }
 
     /// <summary>
     /// 表示値が変更されたときに発生します。
     /// </summary>
     public event PropertyChangedEventHandler? PropertyChanged;
+
+    /// <summary>状態画面に表示するRelease Versionを取得します。</summary>
+    public string ApplicationVersion => $"Version {applicationVersionProvider.Version}";
 
     /// <summary>
     /// 5時間枠の表示文字列を取得します。

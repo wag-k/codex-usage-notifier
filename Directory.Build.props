@@ -1,0 +1,9 @@
+<Project>
+  <PropertyGroup>
+    <!-- Phase 5B以降のアプリ、App Serverクライアント、配布物で共有する唯一の既定バージョンです。 -->
+    <VersionPrefix>0.5.0</VersionPrefix>
+    <Version Condition="'$(Version)' == ''">$(VersionPrefix)</Version>
+    <InformationalVersion Condition="'$(InformationalVersion)' == ''">$(Version)</InformationalVersion>
+    <Product>Codex Usage Notifier</Product>
+  </PropertyGroup>
+</Project>

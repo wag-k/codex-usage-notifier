@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using System.Threading.Channels;
 using CodexUsageNotifier.Application.Abstractions;
+using CodexUsageNotifier.Application.Versioning;
 using CodexUsageNotifier.Domain.Models;
 using CodexUsageNotifier.Infrastructure.Codex;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -23,12 +24,14 @@ public sealed class CodexAppServerClientTests
     {
         FakeCodexProcess process = new();
         FakeProcessFactory factory = new(process);
+        ApplicationVersionProvider versionProvider = new("9.8.7+test");
         await using CodexAppServerClient client = new(
             factory,
             new CodexAppServerOptions(),
             TimeProvider.System,
             NullLoggerFactory.Instance,
-            NullLogger<CodexAppServerClient>.Instance);
+            NullLogger<CodexAppServerClient>.Instance,
+            versionProvider);
 
         UsageSnapshot result = await client.ReadAsync(
             UsageCheckTrigger.Startup,
@@ -43,6 +46,10 @@ public sealed class CodexAppServerClientTests
         CollectionAssert.AreEqual(
             new[] { "initialize", "initialized", "account/rateLimits/read" },
             methods);
+        using JsonDocument initialize = JsonDocument.Parse(process.SentLines.First());
+        Assert.AreEqual(
+            versionProvider.Version,
+            initialize.RootElement.GetProperty("params").GetProperty("clientInfo").GetProperty("version").GetString());
     }
 
     /// <summary>

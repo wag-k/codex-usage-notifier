@@ -1,5 +1,6 @@
 using System.Text.Json;
 using CodexUsageNotifier.Application.Abstractions;
+using CodexUsageNotifier.Application.Versioning;
 using CodexUsageNotifier.Domain.Models;
 using Microsoft.Extensions.Logging;
 
@@ -15,6 +16,7 @@ internal sealed partial class CodexAppServerClient : ICodexRateLimitClient, IAsy
     private readonly TimeProvider timeProvider;
     private readonly ILoggerFactory loggerFactory;
     private readonly ILogger<CodexAppServerClient> logger;
+    private readonly ApplicationVersionProvider applicationVersionProvider;
     private readonly SemaphoreSlim connectionGate = new(1, 1);
     private ICodexAppServerProcess? process;
     private JsonRpcConnection? connection;
@@ -46,23 +48,27 @@ internal sealed partial class CodexAppServerClient : ICodexRateLimitClient, IAsy
     /// <param name="timeProvider">時刻とタイムアウトを提供する実装です。</param>
     /// <param name="loggerFactory">通信層のロガーを生成するファクトリです。</param>
     /// <param name="logger">クライアントの診断情報を記録するロガーです。</param>
+    /// <param name="applicationVersionProvider">Assembly由来の共通バージョン提供元です。</param>
     public CodexAppServerClient(
         ICodexAppServerProcessFactory processFactory,
         CodexAppServerOptions options,
         TimeProvider timeProvider,
         ILoggerFactory loggerFactory,
-        ILogger<CodexAppServerClient> logger)
+        ILogger<CodexAppServerClient> logger,
+        ApplicationVersionProvider applicationVersionProvider)
     {
         ArgumentNullException.ThrowIfNull(processFactory);
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(timeProvider);
         ArgumentNullException.ThrowIfNull(loggerFactory);
         ArgumentNullException.ThrowIfNull(logger);
+        ArgumentNullException.ThrowIfNull(applicationVersionProvider);
         this.processFactory = processFactory;
         this.options = options;
         this.timeProvider = timeProvider;
         this.loggerFactory = loggerFactory;
         this.logger = logger;
+        this.applicationVersionProvider = applicationVersionProvider;
     }
 
     /// <summary>
@@ -174,7 +180,7 @@ internal sealed partial class CodexAppServerClient : ICodexRateLimitClient, IAsy
                     {
                         name = "codex_usage_notifier",
                         title = "Codex Usage Notifier",
-                        version = "0.2.0",
+                        version = applicationVersionProvider.Version,
                     },
                     capabilities = new
                     {

@@ -15,7 +15,10 @@
             <StackPanel Margin="28">
                 <DockPanel>
                     <Button DockPanel.Dock="Right" Padding="14,7" Content="設定を開く" Click="OnOpenSettings" />
-                    <TextBlock VerticalAlignment="Center" FontSize="26" FontWeight="SemiBold" Text="Codex Usage Notifier" />
+                    <StackPanel>
+                        <TextBlock VerticalAlignment="Center" FontSize="26" FontWeight="SemiBold" Text="Codex Usage Notifier" />
+                        <TextBlock Foreground="#5B6573" Text="{Binding ApplicationVersion}" />
+                    </StackPanel>
                 </DockPanel>
                 <TextBlock Margin="0,6,0,24"
                            Foreground="#5B6573"
