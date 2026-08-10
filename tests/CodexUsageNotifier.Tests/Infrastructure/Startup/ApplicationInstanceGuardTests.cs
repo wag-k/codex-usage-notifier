@@ -1,4 +1,5 @@
 using CodexUsageNotifier.Infrastructure.Startup;
+using System.Diagnostics;
 
 namespace CodexUsageNotifier.Tests.Infrastructure.Startup;
 
@@ -31,6 +32,42 @@ public sealed class ApplicationInstanceGuardTests
 
         Assert.IsTrue(ApplicationInstanceGuard.TryAcquire(mutexName, out ApplicationInstanceGuard? next));
         next!.Dispose();
+    }
+
+    /// <summary>別プロセスの異常終了後にWindowsがMutexを解放することを検証します。</summary>
+    [TestMethod]
+    public async Task TryAcquire_AfterOwnerProcessKilled_AllowsNextInstance()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            Assert.Inconclusive("Windows名前付きMutexの統合テストです。");
+        }
+
+        string mutexName = CreateUniqueMutexName();
+        using Process ownerProcess = CreateMutexOwnerProcess(mutexName);
+        try
+        {
+            Assert.IsTrue(ownerProcess.Start());
+            using CancellationTokenSource readyTimeout = new(TimeSpan.FromSeconds(10));
+            string? ready = await ownerProcess.StandardOutput.ReadLineAsync(readyTimeout.Token);
+            Assert.AreEqual("READY", ready);
+            Assert.IsFalse(ApplicationInstanceGuard.TryAcquire(mutexName, out ApplicationInstanceGuard? blocked));
+            Assert.IsNull(blocked);
+
+            ownerProcess.Kill(entireProcessTree: true);
+            await ownerProcess.WaitForExitAsync(readyTimeout.Token);
+
+            Assert.IsTrue(ApplicationInstanceGuard.TryAcquire(mutexName, out ApplicationInstanceGuard? recovered));
+            recovered!.Dispose();
+        }
+        finally
+        {
+            if (!ownerProcess.HasExited)
+            {
+                ownerProcess.Kill(entireProcessTree: true);
+                await ownerProcess.WaitForExitAsync();
+            }
+        }
     }
 
     /// <summary>二重起動側が監視・App Server・状態書込みの起動経路へ進まないことを検証します。</summary>
@@ -95,5 +132,26 @@ public sealed class ApplicationInstanceGuardTests
     private static string CreateUniqueMutexName()
     {
         return $"Local\\CodexUsageNotifier.Tests-{Guid.NewGuid():N}";
+    }
+
+    /// <summary>指定Mutexを取得したまま待機するWindows子プロセスを生成します。</summary>
+    private static Process CreateMutexOwnerProcess(string mutexName)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(mutexName);
+        ProcessStartInfo startInfo = new("powershell.exe")
+        {
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true,
+        };
+        startInfo.ArgumentList.Add("-NoProfile");
+        startInfo.ArgumentList.Add("-NonInteractive");
+        startInfo.ArgumentList.Add("-Command");
+        startInfo.ArgumentList.Add(
+            $"$mutex = [System.Threading.Mutex]::new($true, '{mutexName}'); "
+            + "[Console]::Out.WriteLine('READY'); [Console]::Out.Flush(); "
+            + "[System.Threading.Thread]::Sleep([System.Threading.Timeout]::Infinite)");
+        return new Process { StartInfo = startInfo };
     }
 }
