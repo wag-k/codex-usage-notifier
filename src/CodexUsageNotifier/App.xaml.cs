@@ -52,7 +52,8 @@ public partial class App : System.Windows.Application
     {
         base.OnStartup(e);
 
-        if (!ApplicationInstanceGuard.TryAcquireForCurrentUser(out ApplicationInstanceGuard? acquiredGuard))
+        AppDataPaths paths = AppDataPaths.CreateDefault();
+        if (!ApplicationInstanceGuard.TryAcquire(paths.InstanceLockFilePath, out ApplicationInstanceGuard? acquiredGuard))
         {
             System.Windows.MessageBox.Show(
                 "Codex Usage Notifierはすでに起動しています。タスクトレイを確認してください。",
@@ -67,7 +68,6 @@ public partial class App : System.Windows.Application
 
         try
         {
-            AppDataPaths paths = AppDataPaths.CreateDefault();
             paths.EnsureDirectories();
             serviceProvider = BuildServiceProvider(paths);
             serviceProvider.GetRequiredService<ApplicationLifetime>()

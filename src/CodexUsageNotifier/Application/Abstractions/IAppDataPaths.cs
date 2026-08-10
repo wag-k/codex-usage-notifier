@@ -11,6 +11,11 @@ public interface IAppDataPaths
     string RootDirectory { get; }
 
     /// <summary>
+    /// 単一インスタンス制御用ロックファイルのパスを取得します。
+    /// </summary>
+    string InstanceLockFilePath { get; }
+
+    /// <summary>
     /// 設定ファイルのパスを取得します。
     /// </summary>
     string SettingsFilePath { get; }

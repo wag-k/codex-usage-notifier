@@ -23,6 +23,11 @@ public sealed class AppDataPaths : IAppDataPaths
     public string RootDirectory { get; }
 
     /// <summary>
+    /// 単一インスタンス制御用ロックファイルのパスを取得します。
+    /// </summary>
+    public string InstanceLockFilePath => Path.Combine(RootDirectory, "instance.lock");
+
+    /// <summary>
     /// 設定ファイルのパスを取得します。
     /// </summary>
     public string SettingsFilePath => Path.Combine(RootDirectory, "settings.json");
