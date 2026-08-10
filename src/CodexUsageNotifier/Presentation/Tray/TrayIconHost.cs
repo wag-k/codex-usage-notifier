@@ -7,7 +7,10 @@ namespace CodexUsageNotifier.Presentation.Tray;
 /// </summary>
 public sealed class TrayIconHost : IDisposable
 {
+    private const string IconResourceName = "CodexUsageNotifier.AppIcon.ico";
+
     private Forms.NotifyIcon? notifyIcon;
+    private System.Drawing.Icon? applicationIcon;
     private bool disposed;
 
     /// <summary>
@@ -30,10 +33,11 @@ public sealed class TrayIconHost : IDisposable
             return;
         }
 
+        applicationIcon ??= LoadApplicationIcon();
         notifyIcon = new Forms.NotifyIcon
         {
             Text = "Codex Usage Notifier",
-            Icon = System.Drawing.SystemIcons.Application,
+            Icon = applicationIcon,
             ContextMenuStrip = menu,
             Visible = true,
         };
@@ -57,6 +61,18 @@ public sealed class TrayIconHost : IDisposable
         icon.BalloonTipText = body;
         icon.BalloonTipIcon = Forms.ToolTipIcon.Info;
         icon.ShowBalloonTip(10000);
+    }
+
+    /// <summary>
+    /// 埋め込みリソースからアプリケーションアイコンを読み込みます。
+    /// </summary>
+    /// <returns>呼び出し元が破棄するアプリケーションアイコンです。</returns>
+    private static System.Drawing.Icon LoadApplicationIcon()
+    {
+        using Stream stream = typeof(TrayIconHost).Assembly.GetManifestResourceStream(IconResourceName)
+            ?? throw new InvalidOperationException("アプリケーションアイコンを読み込めませんでした。");
+        using System.Drawing.Icon resourceIcon = new(stream);
+        return (System.Drawing.Icon)resourceIcon.Clone();
     }
 
     /// <summary>
@@ -87,5 +103,8 @@ public sealed class TrayIconHost : IDisposable
             notifyIcon.Dispose();
             notifyIcon = null;
         }
+
+        applicationIcon?.Dispose();
+        applicationIcon = null;
     }
 }

@@ -10,6 +10,7 @@
     <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
     <EnableNETAnalyzers>true</EnableNETAnalyzers>
     <AnalysisLevel>latest-recommended</AnalysisLevel>
+    <ApplicationIcon>Assets\AppIcon.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>
@@ -23,6 +24,8 @@
   </ItemGroup>
 
   <ItemGroup>
+    <EmbeddedResource Include="Assets\AppIcon.ico" LogicalName="CodexUsageNotifier.AppIcon.ico" />
+
     <!-- AppSettings.CreateDefaultを正とし、この配布用参照設定との一致を単体テストで保証します。 -->
     <None Update="appsettings.default.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
