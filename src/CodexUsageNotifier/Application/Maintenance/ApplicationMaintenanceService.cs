@@ -201,21 +201,26 @@ public sealed partial class ApplicationMaintenanceService : IApplicationMaintena
         gate.Dispose();
     }
 
+    /// <summary>運用保守の完了時刻を記録します。</summary>
     [LoggerMessage(5300, LogLevel.Information, "運用保守が完了しました。MaintenanceAtUtc={MaintenanceAtUtc}")]
     private static partial void LogApplicationMaintenanceCompleted(
         ILogger logger,
         DateTimeOffset maintenanceAtUtc,
         Exception? exception);
 
+    /// <summary>利用履歴保守の非致命エラーを記録します。</summary>
     [LoggerMessage(5301, LogLevel.Warning, "利用履歴保守に失敗しました。利用枠監視は継続します。")]
     private static partial void LogHistoryMaintenanceFailed(ILogger logger, Exception exception);
 
+    /// <summary>ログ保守の非致命エラーを記録します。</summary>
     [LoggerMessage(5302, LogLevel.Warning, "ログ保守に失敗しました。利用枠監視は継続します。")]
     private static partial void LogLogMaintenanceFailed(ILogger logger, Exception exception);
 
+    /// <summary>運用保守スケジュールの非致命エラーを記録します。</summary>
     [LoggerMessage(5303, LogLevel.Warning, "運用保守に失敗しました。利用枠監視は継続します。")]
     private static partial void LogApplicationMaintenanceFailed(ILogger logger, Exception exception);
 
+    /// <summary>次回期限の状態読込失敗を記録します。</summary>
     [LoggerMessage(5304, LogLevel.Warning, "次回保守時刻を確認できないため1時間後に再確認します。")]
     private static partial void LogMaintenanceScheduleReadFailed(ILogger logger, Exception exception);
 }

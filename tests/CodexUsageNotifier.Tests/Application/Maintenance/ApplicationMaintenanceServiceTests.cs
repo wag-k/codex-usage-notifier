@@ -152,11 +152,33 @@ public sealed class ApplicationMaintenanceServiceTests
     }
 
     /// <summary>テスト対象と依存関係を保持します。</summary>
-    private sealed record TestContext(
-        ApplicationMaintenanceService Service,
-        ApplicationStateStore StateStore,
-        RecordingHistoryMaintenance History,
-        RecordingLogMaintenance Log);
+    private sealed class TestContext
+    {
+        /// <summary>テスト対象と操作可能な依存関係を指定して初期化します。</summary>
+        public TestContext(
+            ApplicationMaintenanceService service,
+            ApplicationStateStore stateStore,
+            RecordingHistoryMaintenance history,
+            RecordingLogMaintenance log)
+        {
+            Service = service;
+            StateStore = stateStore;
+            History = history;
+            Log = log;
+        }
+
+        /// <summary>テスト対象の運用保守サービスを取得します。</summary>
+        public ApplicationMaintenanceService Service { get; }
+
+        /// <summary>永続化後の状態を確認するストアを取得します。</summary>
+        public ApplicationStateStore StateStore { get; }
+
+        /// <summary>履歴保守のテストダブルを取得します。</summary>
+        public RecordingHistoryMaintenance History { get; }
+
+        /// <summary>ログ保守のテストダブルを取得します。</summary>
+        public RecordingLogMaintenance Log { get; }
+    }
 
     /// <summary>固定設定を返すテスト用リポジトリです。</summary>
     private sealed class FixedSettingsRepository : ISettingsRepository

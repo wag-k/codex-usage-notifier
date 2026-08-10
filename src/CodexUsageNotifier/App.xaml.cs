@@ -198,6 +198,10 @@ public partial class App : System.Windows.Application
         LogApplicationStarting(logger, null);
         AppSettings settings = await provider.GetRequiredService<ISettingsRepository>()
             .LoadAsync(cancellationToken);
+        provider.GetRequiredService<CodexAppServerOptions>().ExecutablePath = settings.CodexExecutablePath;
+        ApplyLogLevel(settings, provider.GetRequiredService<DailyFileLoggerProvider>());
+        ApplicationState state = await provider.GetRequiredService<ApplicationStateStore>()
+            .LoadAsync(cancellationToken);
         AutoStartOperationResult autoStartResult = await provider.GetRequiredService<IAutoStartManager>()
             .SynchronizeAsync(settings.AutoStartEnabled, cancellationToken);
         if (!autoStartResult.Succeeded)
@@ -205,10 +209,6 @@ public partial class App : System.Windows.Application
             LogAutoStartSynchronizationFailed(logger, autoStartResult.Status.Message, null);
         }
 
-        provider.GetRequiredService<CodexAppServerOptions>().ExecutablePath = settings.CodexExecutablePath;
-        ApplyLogLevel(settings, provider.GetRequiredService<DailyFileLoggerProvider>());
-        ApplicationState state = await provider.GetRequiredService<ApplicationStateStore>()
-            .LoadAsync(cancellationToken);
         if (state.GmailProductionDeliveryStartedAtUtc is null)
         {
             DateTimeOffset startedAtUtc = provider.GetRequiredService<TimeProvider>().GetUtcNow();

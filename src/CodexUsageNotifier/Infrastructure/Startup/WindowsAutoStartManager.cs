@@ -189,18 +189,23 @@ public sealed partial class WindowsAutoStartManager : IAutoStartManager
         };
     }
 
+    /// <summary>Windows自動起動の登録成功を記録します。</summary>
     [LoggerMessage(5100, LogLevel.Information, "Windows自動起動を現在ユーザーへ登録しました。")]
     private static partial void LogEnabled(ILogger logger, Exception? exception);
 
+    /// <summary>Windows自動起動の削除成功を記録します。</summary>
     [LoggerMessage(5101, LogLevel.Information, "Windows自動起動の現在ユーザー登録を削除しました。")]
     private static partial void LogDisabled(ILogger logger, Exception? exception);
 
+    /// <summary>Windows自動起動の登録失敗を記録します。</summary>
     [LoggerMessage(5102, LogLevel.Error, "Windows自動起動を登録できませんでした。")]
     private static partial void LogEnableFailed(ILogger logger, Exception exception);
 
+    /// <summary>Windows自動起動の削除失敗を記録します。</summary>
     [LoggerMessage(5103, LogLevel.Error, "Windows自動起動の登録を削除できませんでした。")]
     private static partial void LogDisableFailed(ILogger logger, Exception exception);
 
+    /// <summary>Windows自動起動の状態確認失敗を記録します。</summary>
     [LoggerMessage(5104, LogLevel.Warning, "Windows自動起動の登録状態を確認できませんでした。")]
     private static partial void LogStatusFailed(ILogger logger, Exception exception);
 }

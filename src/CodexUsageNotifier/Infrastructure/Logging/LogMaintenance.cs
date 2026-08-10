@@ -115,6 +115,7 @@ public sealed partial class LogMaintenance : ILogMaintenance
     [GeneratedRegex(@"^codex-usage-notifier-(\d{8})\.log$", RegexOptions.CultureInvariant)]
     private static partial Regex LogFileNamePattern();
 
+    /// <summary>ログ保守の完了件数を記録します。</summary>
     [LoggerMessage(5200, LogLevel.Information, "ログ保守が完了しました。DeletedFileCount={DeletedFileCount}, FailedFileCount={FailedFileCount}")]
     private static partial void LogMaintenanceCompleted(
         ILogger logger,
@@ -122,6 +123,7 @@ public sealed partial class LogMaintenance : ILogMaintenance
         int failedFileCount,
         Exception? exception);
 
+    /// <summary>対象ログ1件の削除失敗を記録します。</summary>
     [LoggerMessage(5201, LogLevel.Warning, "保持期間外ログを削除できませんでした。FileName={FileName}")]
     private static partial void LogFileDeletionFailed(
         ILogger logger,

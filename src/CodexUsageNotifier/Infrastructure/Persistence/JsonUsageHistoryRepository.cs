@@ -313,9 +313,11 @@ public sealed partial class JsonUsageHistoryRepository : IUsageHistoryRepository
     [LoggerMessage(2030, LogLevel.Warning, "利用履歴の破損行を無視しました。LineNumber={LineNumber}")]
     private static partial void LogCorruptedHistoryLine(ILogger logger, int lineNumber, Exception exception);
 
+    /// <summary>保守時に破損行を保持したことを記録します。</summary>
     [LoggerMessage(2031, LogLevel.Warning, "利用履歴の破損行をデータ損失防止のため保持しました。LineNumber={LineNumber}")]
     private static partial void LogCorruptedHistoryLineRetained(ILogger logger, int lineNumber, Exception exception);
 
+    /// <summary>利用履歴保守の完了件数を記録します。</summary>
     [LoggerMessage(2032, LogLevel.Information, "利用履歴保守が完了しました。DeletedLineCount={DeletedLineCount}, RetainedLineCount={RetainedLineCount}, CorruptedLineCount={CorruptedLineCount}")]
     private static partial void LogHistoryMaintenanceCompleted(
         ILogger logger,
