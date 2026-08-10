@@ -91,7 +91,7 @@ Codex週間枠のリセットが近づいています
 
 ## 現在の実装状況
 
-Phase 1の基盤、Phase 2のCodex App Server連携、Phase 3の監視・Windows通知、Phase 3.1の複数枠通知基盤、Phase 3.2の通知信頼性改善、Phase 4Aの設定画面、Phase 4BのGmail認証・テスト送信、Phase 4C-1／4C-2のGmail本番通知配送、およびPhase 5Aの常駐運用機能まで実装しています。Phase 5前Release Gateとして、将来版状態の保護、Gmail認証異常の厳密化、単一起動、状態表示の正確性も実装済みです。
+Phase 1からPhase 5Aまでに加え、Phase 5BのWindows CI、再現可能restore、win-x64自己完結配布ZIP、SHA-256検証まで実装しています。Phase 5前Release Gateとして、将来版状態の保護、Gmail認証異常の厳密化、単一起動、状態表示の正確性も実装済みです。
 
 - `codex app-server`を本アプリ所有の子プロセスとして起動
 - stdin/stdoutのJSONL形式で`initialize`、`initialized`、`account/rateLimits/read`を実行
@@ -133,12 +133,15 @@ Phase 1の基盤、Phase 2のCodex App Server連携、Phase 3の監視・Windows
 - 現在より新しい`state.json`を変更せず起動中止し、旧版だけを明示的な段階migrationで更新
 - Gmail 403を権限不足、API未有効化、未知の恒久拒否へ分類し、権限不足だけを再認証へ移行
 - 一時的なGmail認証状態取得エラーでは配送境界を進めず、通知を回復後の配送対象として維持
-- Windowsユーザー単位の名前付きMutexにより、監視・App Server・永続化の二重起動を防止
+- Windowsユーザー固有LocalAppDataの`instance.lock`を排他保持し、ログオンセッションをまたぐ二重起動を防止
 - 状態画面へGmail通知設定、OAuth認証、認証アカウント、Windows／Gmail別の最終通知を表示
 - CurrentUserのRunキーによる管理者権限不要のWindows自動起動、設定との起動時同期、設定画面のOS登録状態表示
 - 取得単位JSONLの90日保持、破損行保持、追記との排他、保守後のobservedKeys再構築
 - 命名規則に一致する日付別ログだけを対象とする30日保持
 - 起動時と前回試行から24時間後の非同期運用保守、および終了時Cancellation
+- Release Version `0.5.0`をAssembly、状態画面、App Server `clientInfo.version`、配布物名へ一元反映
+- `packages.lock.json`とlocked restore、Windows Release build/test、NuGet direct/transitive脆弱性ゲート
+- win-x64 self-contained、非trim、非single-fileのZIPとSHA-256を手動Actions artifactとして生成
 
 2026年8月4日にCodex CLI `0.145.0-alpha.18`で実アカウントを確認したところ、`limitId=codex`の`primary`に10080分・使用率35%の週間枠だけが存在し、`secondary=null`、`rateLimitResetCredits.availableCount=1`、300分枠は未観測でした。この場合、画面には「5時間枠：未観測」と表示し、10080分枠の長期通知が有効になります。300分枠は単体テストで対応済みですが、すべての環境で取得できるとは限りません。
 
@@ -211,7 +214,7 @@ CodexUsageNotifier.sln
 ```text
 アプリ起動
    │
-   ├─ Windowsユーザー単位の単一起動Mutexを取得
+   ├─ ユーザー固有LocalAppDataのinstance.lockを排他取得
    ├─ 既存インスタンスあり：案内を表示して終了（状態・監視を変更しない）
    │
    ├─ state.jsonのSchemaVersionを検証
@@ -281,6 +284,7 @@ CodexUsageNotifier.sln
 
 ```text
 %LOCALAPPDATA%\CodexUsageNotifier\
+├─ instance.lock
 ├─ settings.json
 ├─ state.json
 ├─ usage-history.jsonl
@@ -294,7 +298,7 @@ CodexUsageNotifier.sln
 
 `state.json`はSchemaVersionを読み込み前に検証します。現在版と同じ場合は通常読込、古い対応済み版は1段階ずつmigrationし、現在版より新しい場合は元の内容・配置・更新日時を変更せずに起動を中止します。新しいアプリで作成した状態を保持したまま古いアプリへロールバックすると起動できない場合があります。状態ファイルを古い形式へ書き戻さず、新しいCodex Usage Notifierを使用してください。
 
-同じWindowsユーザーでは`Local\CodexUsageNotifier-{UserIdentifierHash}`形式の名前付きMutexにより1インスタンスだけを実行します。2個目は「すでに起動しています」と表示して終了し、Codex App Server、監視、トレイ、Gmail、Windows通知、状態保存を開始しません。異常終了時もMutexハンドルはOSにより解放されます。
+同じWindowsユーザーでは`%LOCALAPPDATA%\CodexUsageNotifier\instance.lock`を`FileShare.None`で開いたハンドルを生存中保持し、複数ログオンセッションを含め1インスタンスだけを実行します。ファイルの存在ではなくOSの排他ハンドルを判定に使うため、異常終了後にファイルが残っても次回起動できます。2個目は「すでに起動しています」と表示して終了し、Codex App Server、監視、トレイ、Gmail、Windows通知、状態保存を開始しません。
 
 ## Windows自動起動と運用保守（Phase 5A）
 
@@ -331,6 +335,59 @@ Windows側だけを確認・解除する場合は、タスクマネージャー�
 7. 履歴・ログ保守は本番データを加工せず、単体テストまたは別のテスト用LocalAppDataパスで、期限超過データだけが削除されることを確認します。
 
 Windowsのサインアウト／再ログインを伴う確認は自動テストに含めません。自然な運用環境で上記手順を実施してください。
+
+## CIと手動Release配布（Phase 5B）
+
+既定Release Versionはルートの`Directory.Build.props`にある`VersionPrefix=0.5.0`を単一情報源とします。状態画面は`Version 0.5.0`を表示し、Codex App Serverの`initialize.clientInfo.version`もAssemblyのInformationalVersionから同じRelease Versionを取得します。手動Release workflowの入力値はAssembly/Product Version、配布物名、SHA-256ファイル名へ反映されます。
+
+`.github/workflows/ci.yml`は`main`へのpush、pull request、手動実行でWindows Release buildと全テストを実行します。`.github/workflows/release-build.yml`は`workflow_dispatch`で厳密な`MAJOR.MINOR.PATCH`を受け取り、locked restore、Release build、全テスト、direct/transitive NuGet脆弱性確認を通過した場合だけ次を生成します。GitHub Releaseやタグは作成せず、Actions artifactとして14日保持します。
+
+```text
+CodexUsageNotifier-v0.5.0-win-x64.zip
+CodexUsageNotifier-v0.5.0-win-x64.zip.sha256
+```
+
+publish方式は`win-x64`、`Release`、self-containedです。利用者による.NET Runtimeの別途導入を前提とせず、trimming、Single File、AOTは無効です。一般配布ZIPからPDBを除外します。ZIPにはpublishされた実行ファイル群だけを含め、`settings.json`、`state.json`、履歴、ログ、OAuthクライアント設定、DPAPI認証情報、テスト、ソース、`.git`を検査して除外します。コード署名、インストーラー、自動更新、正式アイコン、GitHub Release自動公開は未実装です。
+
+ローカルで同等の品質ゲートを確認する例：
+
+```powershell
+dotnet restore CodexUsageNotifier.sln --locked-mode
+dotnet build CodexUsageNotifier.sln -c Release --no-restore -warnaserror
+dotnet test CodexUsageNotifier.sln -c Release --no-build
+.\eng\Test-NuGetVulnerabilities.ps1
+```
+
+### ZIPの配置と初回起動
+
+1. ZIPと`.sha256`を同じフォルダへ保存し、`(Get-FileHash .\CodexUsageNotifier-v0.5.0-win-x64.zip -Algorithm SHA256).Hash`がSHA-256ファイルの64桁値と一致することを確認します。
+2. ZIPを新しい空フォルダへ展開し、ダウンロード一時フォルダではなく、今後維持する安定したフォルダへ配置します。
+3. `CodexUsageNotifier.exe`を手動起動し、状態画面のVersion、トレイ、利用枠取得、設定保存を確認します。
+4. 自動起動が必要なら、配置先を確定した後に設定画面で有効にします。Runキーはexeの絶対パスを保持するため、一時フォルダから有効にしないでください。
+
+別フォルダへ移動した場合は新しいexeを一度手動起動し、起動時同期または設定保存でRunキーが新しい絶対パスへ更新されたことを確認してください。
+
+### ZIPアップグレード
+
+1. タスクトレイからCodex Usage Notifierを終了します。
+2. 新しいZIPのSHA-256を確認して展開します。
+3. 既存の安定した配置フォルダのファイルを新しいpublish内容で置換します。
+4. 新しいexeを手動起動し、状態ファイルのmigration、Version、Codex監視、Gmail認証状態を確認します。
+5. 自動起動登録が現在のexeを指すことを設定画面で確認します。
+
+`%LOCALAPPDATA%\CodexUsageNotifier`の設定、状態、履歴、ログ、OAuth認証情報はpublishフォルダとは別であり、通常アップグレードでは削除しません。新しいschemaの状態を古いアプリで開く場合はfuture schema保護により起動を拒否することがあります。
+
+### Release smoke test
+
+1. Actions artifactをダウンロードし、SHA-256を確認して新しい空フォルダへ展開します。
+2. exeを起動し、状態画面、Version、タスクトレイ、Codex App Server接続、利用枠取得、設定保存を確認します。
+3. 同じWindowsユーザーの既存Gmail認証が維持され、Gmailテストメールを送信できることを確認します。
+4. 自動起動を有効にし、Runキーが展開先exeを指すことを確認します。
+5. `--autostart`ではMainWindowを表示せずトレイへ常駐することを確認します。
+6. 2個目の起動が拒否され、状態や監視を変更しないことを確認します。
+7. タスクトレイの「終了」で正常終了することを確認します。
+
+Windowsサインアウト／再サインイン、実アカウントのCodex/Gmail通信、GitHub-hosted runner上のworkflowは人間による確認項目です。Phase 5BではGitHub Releaseの作成、タグpush、外部公開を行いません。
 
 ## Gmail認証とテストメール（Phase 4B）
 
@@ -495,10 +552,11 @@ Codex App Serverとの通信に失敗した場合は、自動的に再接続し�
 - 複数PC間の設定同期
 - 利用履歴グラフ
 - Windowsサービス化
-- インストーラー、MSIX、MSI、ClickOnce、配布ZIP
-- GitHub Actions、Release自動作成、コード署名、自動アップデート
+- インストーラー、MSIX、MSI、ClickOnce、コード署名
+- GitHub Release自動作成、タグ自動push、自動アップデート
+- Single File、trimming、AOT
 
-短期枠回復通知、長期枠のリセット前通知・リセット完了通知は初版とPhase 3の実装対象であり、複数枠・回復連番・Windowsテスト通知はPhase 3.1、設定画面はPhase 4A、Google OAuthとGmail APIテストメールはPhase 4B、本番の利用枠通知メールはPhase 4C-1、一時障害後の再試行と再起動復旧はPhase 4C-2、自動起動と履歴・ログ保守はPhase 5Aで実装しています。配布・CIはPhase 5Bの対象です。
+短期枠回復通知、長期枠のリセット前通知・リセット完了通知は初版とPhase 3の実装対象であり、複数枠・回復連番・Windowsテスト通知はPhase 3.1、設定画面はPhase 4A、Google OAuthとGmail APIテストメールはPhase 4B、本番の利用枠通知メールはPhase 4C-1、一時障害後の再試行と再起動復旧はPhase 4C-2、自動起動と履歴・ログ保守はPhase 5A、手動配布ZIPとCIはPhase 5Bで実装しています。
 
 ## 将来構想
 
@@ -547,7 +605,7 @@ Codexへ作業を投入
 9. Gmail本番通知の自動再試行（Phase 4C-2、実装済み）
 10. 自動起動と初回設定（Phase 5A、実装済み）
 11. 履歴・ログ保存と保守処理（Phase 5A、実装済み）
-12. 配布用ビルドとCI（Phase 5B）
+12. 配布用ビルドとCI（Phase 5B、実装済み）
 
 ## 公式資料
 

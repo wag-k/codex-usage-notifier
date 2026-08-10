@@ -7,7 +7,7 @@
 | 文書名 | Codex Usage Notifier 仕様書 |
 | 対象バージョン | 初版（MVP） |
 | 作成日 | 2026-08-04 |
-| 最終更新日 | 2026-08-11（Phase 5A） |
+| 最終更新日 | 2026-08-11（Phase 5B） |
 | 対象OS | Windows 11 |
 | 開発基盤 | .NET 8 / WPF |
 | 主目的 | 任意のCodex利用枠を監視し、期間に応じた回復・リセット前・リセット完了をWindowsとGmailへ通知する |
@@ -77,7 +77,7 @@ Codexの利用枠が回復していても、または長期枠のリセットが
 
 Notification Policyは、Positionではなく利用枠別通知設定、Classification、期間を基準に、取得できたすべての枠について短期枠回復、長期枠リセット前、長期枠リセット完了を独立に判定する。
 
-Phase 5Aの起動順序は次のとおりとする。運用保守はUsageMonitor開始後に非同期で開始し、完了待ちで監視を遅らせない。
+Phase 5B時点の起動順序は次のとおりとする。運用保守はUsageMonitor開始後に非同期で開始し、完了待ちで監視を遅らせない。
 
 ```text
 アプリ起動
@@ -244,10 +244,10 @@ Phase 4BはGoogle認証と設定画面からのテストメール送信を提供
    - ログフォルダを開く
    - 終了
 4. 明示的に「終了」を選択した場合のみプロセスを終了する。
-5. DI、永続化、App Server、監視、トレイの初期化前に、Windowsユーザー単位の`Local`名前付きMutexを取得する。
+5. DI、永続化、App Server、監視、トレイの初期化前に、ユーザー固有LocalAppDataの`instance.lock`を`FileShare.None`で排他取得し、アプリ生存中ハンドルを保持する。
 6. 同じWindowsユーザーで既存インスタンスを検出した場合は、案内を表示して新しいインスタンスを終了する。
 7. 2個目のインスタンスはApp Server、監視、Gmail、Windows通知、トレイを開始せず、`state.json`と履歴を変更しない。
-8. 所有インスタンスの正常終了・異常終了後は、MutexのOSハンドル解放により次の起動を許可する。
+8. ロックファイルの存在だけでは起動を拒否せず、所有インスタンスの正常終了・異常終了後にOSがハンドルを解放していれば次の起動を許可する。
 
 ### FR-002 初回起動
 
@@ -1158,10 +1158,10 @@ Weeklyなどの長期枠について、新しい利用期間の開始を`LongWin
 
 ### AC-023 Single instance
 
-- 同じWindowsユーザーでは1つのインスタンスだけがユーザー単位の名前付きMutexを取得できる。
+- 同じWindowsユーザーでは、複数ログオンセッションを含め1つのインスタンスだけが`%LOCALAPPDATA%\CodexUsageNotifier\instance.lock`の排他ハンドルを取得できる。
 - 2個目は案内を表示して終了し、監視、App Server、トレイ、Gmail、Windows通知、状態・履歴書込みを開始しない。
-- 所有インスタンス終了後は次の起動がMutexを取得できる。プロセス異常終了時もOSがハンドルを解放する。
-- Windowsユーザーが異なる場合はMutex名が衝突しない。
+- 所有インスタンス終了後は次の起動が排他ハンドルを取得できる。プロセス異常終了後にロックファイルが残っても、OSがハンドルを解放していれば起動できる。
+- Windowsユーザーが異なる場合はLocalAppDataのロックパスが分離される。
 
 ### AC-024 Status accuracy
 
@@ -1201,6 +1201,37 @@ Weeklyなどの長期枠について、新しい利用期間の開始を`LongWin
 - 複数トリガーをsingle-flightで処理し、履歴失敗後もログ保守を、ログ失敗後も監視を継続できる。
 - `LastMaintenanceAtUtc`をVersion 3→4 migrationで追加し、future state schemaの無変更拒否を維持する。
 - UsageMonitor開始を保守完了待ちで遅らせず、アプリ終了Cancellationでバックグラウンド保守を停止できる。
+
+### AC-029 Cross-session single instance
+
+- 同一Windowsユーザーの異なるログオンセッションから同じLocalAppDataロックを開こうとした場合も2個目を拒否する。
+- 単一インスタンス判定の正はファイル排他ハンドル1か所とし、Mutexとの二重ロックを行わない。
+
+### AC-030 Reproducible restore
+
+- アプリとテストの`packages.lock.json`をGit管理し、`dotnet restore --locked-mode`が成功する。
+- PackageReferenceまたは解決済みtransitive依存がlock fileと一致しない場合はCIを失敗させる。
+
+### AC-031 Continuous integration
+
+- `main`へのpush、pull request、手動実行で`windows-latest`上のlocked restore、Release build、全テスト、NuGet脆弱性確認を行う。
+- workflow権限は`contents: read`だけとし、公式Actionを安定版の完全長commit SHAへ固定する。
+- テスト失敗時もTRXを14日間のActions artifactとして保存する。
+
+### AC-032 Release publish
+
+- 手動workflowへ`MAJOR.MINOR.PATCH`を入力し、品質ゲート成功後だけ`win-x64`、Release、self-contained、non-trimmed、non-single-fileでpublishする。
+- GitHub Release、タグpush、インストーラー、コード署名、自動更新を実行しない。
+
+### AC-033 Artifact hygiene
+
+- publish結果だけからRelease ZIPを作り、PDB、設定、状態、履歴、ログ、OAuth設定、認証情報、テスト、ソース、Git管理情報を含めない。
+- ZIPの存在、非ゼロサイズ、exe、禁止ファイル不在を検証し、再計算で一致するSHA-256ファイルを同じActions artifactへ含める。
+
+### AC-034 Version consistency
+
+- `Directory.Build.props`のRelease VersionをAssembly/Product Version、状態画面、App Server `clientInfo.version`の既定値として共有する。
+- Release workflow入力値をexe、ZIP名、SHA-256ファイル名へ反映し、exeのProductVersion／FileVersionを生成後に検証する。
 
 ## 11. 単体テスト対象
 
@@ -1330,9 +1361,9 @@ Weeklyなどの長期枠について、新しい利用期間の開始を`LongWin
 122. 一時認証Error・状態取得例外からの回復時にGmail配送境界を維持すること
 123. 明示的な再認証完了時だけGmail配送境界を更新すること
 124. 一時認証障害中の通知維持と、認証失効中の通知後送抑止
-125. 同じMutex名の初回取得、2個目拒否、解放後の再取得
+125. 同じLocalAppDataロックパスの初回取得、2個目拒否、解放後の再取得
 126. 2個目の起動経路で監視、App Server、状態書込みを開始しないこと
-127. Windowsユーザー識別子ごとのMutex名分離
+127. 残存ロックファイル、およびロック所有子プロセスの異常終了後の再取得
 128. Gmail設定、OAuth認証、認証アカウントの状態表示
 129. Windows／Gmail別、および利用枠別の最終通知表示
 130. 状態画面にトークンと`client_secret`を表示しないこと
@@ -1353,6 +1384,10 @@ Weeklyなどの長期枠について、新しい利用期間の開始を`LongWin
 145. 履歴失敗後のログ保守継続、ログ失敗後の非致命動作
 146. アプリ終了Cancellationによるバックグラウンド保守停止
 147. Version 3→4の`LastMaintenanceAtUtc` migrationとfuture schema保護回帰
+148. ApplicationVersionProviderが空でないAssembly由来Release Versionを返すこと
+149. App Server initializeの`clientInfo.version`が共通Release Versionと一致すること
+150. InformationalVersionのビルドメタデータを除いたRelease Version解決
+151. ReleaseスクリプトのSemVer検証、禁止ファイル検出、exeバージョン検証、SHA-256再照合
 
 ## 12. 実装上の設計方針
 
@@ -1408,14 +1443,17 @@ Domain層は、WPF、Gmail、JSON-RPC、ファイルシステムへ直接依存�
 
 ## 13. 配布方針
 
-初版では次を想定する。
+Phase 5Bの手動テスト用配布は次とする。
 
-- x64向けWindowsアプリ
-- 自己完結型またはフレームワーク依存型のいずれかをビルド時に選定
-- インストーラーは後工程
+- `win-x64`、Release、self-containedのWindowsアプリ
+- `PublishTrimmed=false`、`PublishSingleFile=false`、AOTなし
+- 品質ゲート後にZIPとSHA-256を生成し、GitHub Actions artifactとして14日保持
+- GitHub Release自動公開、タグpush、インストーラー、コード署名、自動更新は後工程
 - 初期開発中はVisual Studioまたは`dotnet run`で起動
 - OAuthクライアント設定は利用者自身のGoogle Cloudプロジェクトで作成
-- シークレットや認証ファイルは配布物・リポジトリに含めない
+- PDB、シークレット、ユーザー設定、状態、履歴、ログ、OAuth設定、認証ファイル、ソース、テスト、Git管理情報は配布物に含めない
+- ZIPは安定したフォルダへ展開してから自動起動を設定し、アップグレード時はトレイ終了後にpublishファイルだけを置換する
+- LocalAppDataの設定・状態・履歴・ログ・認証情報は通常アップグレードで削除せず、future schema保護を維持する
 
 ## 14. 将来機能：利用枠連動バックログ自動実行
 
@@ -1640,11 +1678,16 @@ Phase 5Aではインストーラー、MSIX、MSI、ClickOnce、GitHub Actions、
 
 ### Phase 5B：配布とCI
 
-- GitHub Actionsによるビルド・テストCI
-- Release向けpublish構成
-- 配布形式の確定
-- 配布パッケージ作成
-- 必要に応じたインストーラー、コード署名、正式アイコンの検討
+- LocalAppDataファイル排他によるログオンセッション横断のユーザー単位単一インスタンス
+- `VersionPrefix=0.5.0`を既定とするAssembly、状態画面、App Server、配布物のバージョン一元化
+- アプリ・テストの`packages.lock.json`とlocked restore
+- 最小`contents: read`権限、公式Action完全長SHA固定のWindows GitHub Actions CI
+- direct/transitive NuGet脆弱性JSON検査を含むRelease品質ゲート
+- `workflow_dispatch`のSemVer入力によるwin-x64 self-contained、non-trimmed、non-single-file publish
+- PDBと禁止ファイルを除外したRelease ZIP、SHA-256、14日保持のActions artifact
+- exe ProductVersion／FileVersion、ZIP内容、SHA-256の生成後検証
+
+Phase 5BではGitHub Release、タグpush、MSI／MSIX／ClickOnce、コード署名、自動更新、正式アイコン、Single File、trimming、AOTを実装しない。
 
 ## 16. 未決事項
 
@@ -1653,7 +1696,7 @@ Phase 5Aではインストーラー、MSIX、MSI、ClickOnce、GitHub Actions、
 1. Google OAuth同意画面がテスト公開・本番公開の各構成で期待どおり表示されるか
 2. アクセストークン自動更新、Google側権限取消、再認証を実アカウントで一巡確認できるか
 3. 自分宛てGmailのPC・スマートフォン・タブレット通知の実機挙動
-4. 配布形式
+4. インストーラーとコード署名をいつ導入するか
 5. アプリ名・アイコン
 6. 300分枠を返す実アカウントで、5時間枠候補と閾値遷移の実挙動を確認できるか
 7. 短期枠回復通知の保留中に残量が閾値未満へ下がった場合も、回復していた事実を通知するか。Phase 4C-2のGmail再試行では期限切れとして送らない
@@ -1662,7 +1705,7 @@ Phase 5Aではインストーラー、MSIX、MSI、ClickOnce、GitHub Actions、
 10. `ResetInferenceUsageDropPoints`を一般ユーザー向け画面へ公開するか
 11. 未使用分が次の利用期間へ繰り越されるか。公式レスポンスからは未確認であり、通知文では断定しない
 12. Windows再ログイン後の自動起動、トレイ専用表示、単一インスタンス、UsageMonitor開始を配布用exeで一巡確認できるか
-13. Phase 5Bで採用するpublish方式、配布形式、コード署名、インストーラーの要否
+13. GitHub Release公開、コード署名、インストーラー導入の判断時期
 
 ## 17. 公式参考資料
 
