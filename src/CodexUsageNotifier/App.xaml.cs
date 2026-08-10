@@ -12,6 +12,7 @@ using CodexUsageNotifier.Infrastructure.Gmail;
 using CodexUsageNotifier.Infrastructure.Startup;
 using CodexUsageNotifier.Application.Gmail;
 using CodexUsageNotifier.Application.Startup;
+using CodexUsageNotifier.Application.Maintenance;
 using CodexUsageNotifier.Presentation.Tray;
 using CodexUsageNotifier.Presentation.ViewModels;
 using CodexUsageNotifier.Presentation;
@@ -123,7 +124,9 @@ public partial class App : System.Windows.Application
         services.AddSingleton<IAutoStartManager, WindowsAutoStartManager>();
         services.AddSingleton<IApplicationStateMigrator, ApplicationStateMigrator>();
         services.AddSingleton<IApplicationStateRepository, JsonApplicationStateRepository>();
-        services.AddSingleton<IUsageHistoryRepository, JsonUsageHistoryRepository>();
+        services.AddSingleton<JsonUsageHistoryRepository>();
+        services.AddSingleton<IUsageHistoryRepository>(provider => provider.GetRequiredService<JsonUsageHistoryRepository>());
+        services.AddSingleton<IUsageHistoryMaintenance>(provider => provider.GetRequiredService<JsonUsageHistoryRepository>());
         services.AddSingleton<IGoogleOAuthClientConfigurationService, GoogleOAuthClientConfigurationService>();
         services.AddSingleton<IUserDataProtector, WindowsUserDataProtector>();
         services.AddSingleton<IGmailCredentialStore, DpapiGmailCredentialStore>();

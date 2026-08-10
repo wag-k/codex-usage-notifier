@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using CodexUsageNotifier.Application.Abstractions;
+using CodexUsageNotifier.Application.Maintenance;
 using CodexUsageNotifier.Domain.Models;
 using Microsoft.Extensions.Logging;
 
@@ -10,7 +11,7 @@ namespace CodexUsageNotifier.Infrastructure.Persistence;
 /// <summary>
 /// 取得単位の全利用枠をJSONL履歴へ追記し、過去の識別組み合わせを保持します。
 /// </summary>
-public sealed partial class JsonUsageHistoryRepository : IUsageHistoryRepository, IDisposable
+public sealed partial class JsonUsageHistoryRepository : IUsageHistoryRepository, IUsageHistoryMaintenance, IDisposable
 {
     private static readonly JsonSerializerOptions SerializerOptions = CreateSerializerOptions();
     private readonly IAppDataPaths paths;
@@ -77,6 +78,128 @@ public sealed partial class JsonUsageHistoryRepository : IUsageHistoryRepository
             }
 
             return newlyObserved;
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<UsageHistoryMaintenanceResult> MaintainAsync(
+        DateTimeOffset retainedFromUtc,
+        CancellationToken cancellationToken)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+        await gate.WaitAsync(cancellationToken);
+        try
+        {
+            if (!File.Exists(paths.UsageHistoryFilePath))
+            {
+                observedKeys.Clear();
+                observedKeysLoaded = true;
+                return new UsageHistoryMaintenanceResult();
+            }
+
+            string? directory = Path.GetDirectoryName(paths.UsageHistoryFilePath);
+            if (string.IsNullOrWhiteSpace(directory))
+            {
+                throw new InvalidOperationException("利用履歴の保存先ディレクトリを特定できません。");
+            }
+
+            Directory.CreateDirectory(directory);
+            string temporaryPath = $"{paths.UsageHistoryFilePath}.{Guid.NewGuid():N}.tmp";
+            HashSet<string> retainedObservedKeys = new(StringComparer.Ordinal);
+            int deletedLineCount = 0;
+            int retainedLineCount = 0;
+            int corruptedLineCount = 0;
+            int lineNumber = 0;
+            try
+            {
+                await using (FileStream stream = new(
+                    temporaryPath,
+                    FileMode.CreateNew,
+                    FileAccess.Write,
+                    FileShare.None,
+                    bufferSize: 4096,
+                    FileOptions.Asynchronous | FileOptions.WriteThrough))
+                await using (StreamWriter writer = new(
+                    stream,
+                    new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
+                    bufferSize: 4096,
+                    leaveOpen: true))
+                {
+                    await foreach (string line in File.ReadLinesAsync(
+                        paths.UsageHistoryFilePath,
+                        cancellationToken))
+                    {
+                        lineNumber++;
+                        bool retainLine = true;
+                        try
+                        {
+                            UsageHistoryEntry? entry = JsonSerializer.Deserialize<UsageHistoryEntry>(
+                                line,
+                                SerializerOptions);
+                            if (entry?.RateLimits is null)
+                            {
+                                throw new JsonException("利用履歴行に必要なデータがありません。");
+                            }
+
+                            retainLine = entry.CapturedAtUtc >= retainedFromUtc;
+                            if (retainLine)
+                            {
+                                foreach (RateLimitObservation observation in entry.RateLimits)
+                                {
+                                    retainedObservedKeys.Add(CreateObservationKey(observation));
+                                }
+                            }
+                        }
+                        catch (JsonException exception)
+                        {
+                            corruptedLineCount++;
+                            retainLine = true;
+                            LogCorruptedHistoryLineRetained(logger, lineNumber, exception);
+                        }
+
+                        if (retainLine)
+                        {
+                            await writer.WriteLineAsync(line.AsMemory(), cancellationToken);
+                            retainedLineCount++;
+                        }
+                        else
+                        {
+                            deletedLineCount++;
+                        }
+                    }
+
+                    await writer.FlushAsync(cancellationToken);
+                    stream.Flush(flushToDisk: true);
+                }
+
+                File.Replace(temporaryPath, paths.UsageHistoryFilePath, destinationBackupFileName: null);
+                observedKeys.Clear();
+                observedKeys.UnionWith(retainedObservedKeys);
+                observedKeysLoaded = true;
+                LogHistoryMaintenanceCompleted(
+                    logger,
+                    deletedLineCount,
+                    retainedLineCount,
+                    corruptedLineCount,
+                    null);
+                return new UsageHistoryMaintenanceResult
+                {
+                    DeletedLineCount = deletedLineCount,
+                    RetainedLineCount = retainedLineCount,
+                    CorruptedLineCount = corruptedLineCount,
+                };
+            }
+            finally
+            {
+                if (File.Exists(temporaryPath))
+                {
+                    File.Delete(temporaryPath);
+                }
+            }
         }
         finally
         {
@@ -189,4 +312,15 @@ public sealed partial class JsonUsageHistoryRepository : IUsageHistoryRepository
 
     [LoggerMessage(2030, LogLevel.Warning, "利用履歴の破損行を無視しました。LineNumber={LineNumber}")]
     private static partial void LogCorruptedHistoryLine(ILogger logger, int lineNumber, Exception exception);
+
+    [LoggerMessage(2031, LogLevel.Warning, "利用履歴の破損行をデータ損失防止のため保持しました。LineNumber={LineNumber}")]
+    private static partial void LogCorruptedHistoryLineRetained(ILogger logger, int lineNumber, Exception exception);
+
+    [LoggerMessage(2032, LogLevel.Information, "利用履歴保守が完了しました。DeletedLineCount={DeletedLineCount}, RetainedLineCount={RetainedLineCount}, CorruptedLineCount={CorruptedLineCount}")]
+    private static partial void LogHistoryMaintenanceCompleted(
+        ILogger logger,
+        int deletedLineCount,
+        int retainedLineCount,
+        int corruptedLineCount,
+        Exception? exception);
 }
