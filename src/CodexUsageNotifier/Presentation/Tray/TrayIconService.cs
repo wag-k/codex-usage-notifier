@@ -241,8 +241,8 @@ public sealed class TrayIconService : IDisposable
     /// </summary>
     /// <param name="sender">イベント送信元です。</param>
     /// <param name="e">イベント引数です。</param>
-    private void OnExit(object? sender, EventArgs e)
+    private async void OnExit(object? sender, EventArgs e)
     {
-        applicationLifetime.RequestExit();
+        await applicationLifetime.RequestExitAsync();
     }
 }

@@ -33,6 +33,9 @@ public partial class App : System.Windows.Application
     private static readonly Action<ILogger, Exception?> LogInitializationCompleted =
         LoggerMessage.Define(LogLevel.Information, new EventId(1001, "InitializationCompleted"), "設定と状態の読み込みが完了しました。");
 
+    private static readonly Action<ILogger, Exception?> LogApplicationStopFailed =
+        LoggerMessage.Define(LogLevel.Error, new EventId(1003, "ApplicationStopFailed"), "アプリケーションの終了処理中にエラーが発生しました。");
+
     private ServiceProvider? serviceProvider;
     private ApplicationInstanceGuard? instanceGuard;
 
@@ -62,6 +65,8 @@ public partial class App : System.Windows.Application
             AppDataPaths paths = AppDataPaths.CreateDefault();
             paths.EnsureDirectories();
             serviceProvider = BuildServiceProvider(paths);
+            serviceProvider.GetRequiredService<ApplicationLifetime>()
+                .ConfigureExitAction(ShutdownFromTrayAsync);
 
             await InitializePersistenceAsync(serviceProvider, CancellationToken.None);
 
@@ -209,6 +214,47 @@ public partial class App : System.Windows.Application
         }
 
         provider.MinimumLevel = minimumLevel;
+    }
+
+    /// <summary>
+    /// トレイアイコンを先に隠し、監視と子プロセスを非同期解放してからWPFを終了します。
+    /// </summary>
+    /// <returns>終了準備の完了を表す処理です。</returns>
+    private async Task ShutdownFromTrayAsync()
+    {
+        ServiceProvider? provider = serviceProvider;
+        ILogger<App>? logger = provider?.GetService<ILogger<App>>();
+        if (logger is not null)
+        {
+            LogApplicationStopping(logger, null);
+        }
+
+        try
+        {
+            provider?.GetService<TrayIconHost>()?.Dispose();
+            if (provider is not null)
+            {
+                await provider.DisposeAsync();
+            }
+        }
+        catch (Exception exception)
+        {
+            if (logger is not null)
+            {
+                LogApplicationStopFailed(logger, exception);
+            }
+        }
+        finally
+        {
+            if (ReferenceEquals(serviceProvider, provider))
+            {
+                serviceProvider = null;
+            }
+
+            instanceGuard?.Dispose();
+            instanceGuard = null;
+            Shutdown();
+        }
     }
 
     /// <summary>
