@@ -174,12 +174,19 @@ public sealed record AppSettings
     /// <returns>使用率低下推定閾値が有効範囲内に補正された設定です。</returns>
     public AppSettings NormalizeLoadedValues()
     {
-        return ResetInferenceUsageDropPoints is >= 1 and <= 100
-            ? this
-            : this with
-            {
-                ResetInferenceUsageDropPoints = CreateDefault().ResetInferenceUsageDropPoints,
-            };
+        AppSettings defaults = CreateDefault();
+        return this with
+        {
+            ResetInferenceUsageDropPoints = ResetInferenceUsageDropPoints is >= 1 and <= 100
+                ? ResetInferenceUsageDropPoints
+                : defaults.ResetInferenceUsageDropPoints,
+            HistoryRetentionDays = HistoryRetentionDays is >= 7 and <= 3650
+                ? HistoryRetentionDays
+                : defaults.HistoryRetentionDays,
+            LogRetentionDays = LogRetentionDays is >= 7 and <= 3650
+                ? LogRetentionDays
+                : defaults.LogRetentionDays,
+        };
     }
 
     /// <summary>
@@ -206,8 +213,8 @@ public sealed record AppSettings
             && IsValidOptionalEmailAddress(GmailRecipient)
             && FallbackPollingMinutes is >= 1 and <= 1440
             && ResetCheckDelaySeconds >= 0
-            && HistoryRetentionDays >= 1
-            && LogRetentionDays >= 1
+            && HistoryRetentionDays is >= 7 and <= 3650
+            && LogRetentionDays is >= 7 and <= 3650
             && SupportedLogLevels.Contains(MinimumLogLevel);
     }
 

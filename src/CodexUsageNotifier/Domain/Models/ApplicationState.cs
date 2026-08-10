@@ -8,7 +8,7 @@ public sealed record ApplicationState
     /// <summary>
     /// 現在の状態スキーマのバージョンです。
     /// </summary>
-    public const int CurrentSchemaVersion = 3;
+    public const int CurrentSchemaVersion = 4;
 
     /// <summary>
     /// 状態スキーマのバージョンを取得または設定します。
@@ -91,6 +91,11 @@ public sealed record ApplicationState
     /// 初回設定が完了しているかどうかを取得または設定します。
     /// </summary>
     public bool InitialSetupCompleted { get; init; }
+
+    /// <summary>
+    /// 履歴とログの運用保守を最後に試行したUTC時刻を取得または設定します。
+    /// </summary>
+    public DateTimeOffset? LastMaintenanceAtUtc { get; init; }
 
     /// <summary>
     /// 初期状態を生成します。

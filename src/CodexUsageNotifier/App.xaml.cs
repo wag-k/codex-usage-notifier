@@ -79,6 +79,7 @@ public partial class App : System.Windows.Application
             mainWindow.Show();
             serviceProvider.GetRequiredService<TrayIconService>().Initialize();
             serviceProvider.GetRequiredService<UsageMonitor>().Start();
+            serviceProvider.GetRequiredService<IApplicationMaintenanceService>().Start();
         }
         catch (UnsupportedFutureStateVersionException exception)
         {
@@ -115,6 +116,8 @@ public partial class App : System.Windows.Application
         services.AddSingleton<IAppDataPaths>(paths);
         services.AddSingleton(fileLoggerProvider);
         services.AddSingleton<ILogMaintenance, LogMaintenance>();
+        services.AddSingleton<ApplicationMaintenanceService>();
+        services.AddSingleton<IApplicationMaintenanceService>(provider => provider.GetRequiredService<ApplicationMaintenanceService>());
         services.AddLogging(builder =>
         {
             builder.SetMinimumLevel(LogLevel.Trace);

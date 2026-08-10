@@ -185,6 +185,51 @@ public sealed class JsonSettingsRepositoryTests
         Assert.AreEqual("custom-codex", settings.CodexExecutablePath);
     }
 
+    /// <summary>不正な履歴・ログ保持日数だけを既定値へ補正することを確認します。</summary>
+    [TestMethod]
+    public async Task LoadAsync_InvalidRetentionDays_FallsBackOnlyRetentionValues()
+    {
+        using TemporaryDirectory temporaryDirectory = new();
+        string settingsPath = System.IO.Path.Combine(temporaryDirectory.Path, "settings.json");
+        await File.WriteAllTextAsync(
+            settingsPath,
+            """
+            {
+              "schemaVersion": 1,
+              "codexExecutablePath": "custom-codex",
+              "historyRetentionDays": 0,
+              "logRetentionDays": 100000
+            }
+            """);
+        JsonSettingsRepository repository = CreateRepository(temporaryDirectory.Path);
+
+        AppSettings settings = await repository.LoadAsync(CancellationToken.None);
+
+        Assert.AreEqual(90, settings.HistoryRetentionDays);
+        Assert.AreEqual(30, settings.LogRetentionDays);
+        Assert.AreEqual("custom-codex", settings.CodexExecutablePath);
+    }
+
+    /// <summary>保持日数7～3650だけを永続化可能として扱うことを確認します。</summary>
+    [TestMethod]
+    public async Task SaveAsync_RetentionBoundaries_ValidatesRange()
+    {
+        using TemporaryDirectory temporaryDirectory = new();
+        JsonSettingsRepository repository = CreateRepository(temporaryDirectory.Path);
+
+        await repository.SaveAsync(
+            AppSettings.CreateDefault() with { HistoryRetentionDays = 7, LogRetentionDays = 3650 },
+            CancellationToken.None);
+        await Assert.ThrowsExceptionAsync<ArgumentException>(
+            () => repository.SaveAsync(
+                AppSettings.CreateDefault() with { HistoryRetentionDays = 6 },
+                CancellationToken.None));
+        await Assert.ThrowsExceptionAsync<ArgumentException>(
+            () => repository.SaveAsync(
+                AppSettings.CreateDefault() with { LogRetentionDays = 3651 },
+                CancellationToken.None));
+    }
+
     /// <summary>
     /// 配布用の既定設定JSONがコード上の初期値と一致することを確認します。
     /// </summary>

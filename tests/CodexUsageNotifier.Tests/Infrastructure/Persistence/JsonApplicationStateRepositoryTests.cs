@@ -174,7 +174,7 @@ public sealed class JsonApplicationStateRepositoryTests
         Assert.AreEqual(original, await File.ReadAllTextAsync(paths.StateFilePath, CancellationToken.None));
     }
 
-    /// <summary>サポート済みVersion 2を明示的な段階移行でVersion 3へ保存することを確認します。</summary>
+    /// <summary>サポート済みVersion 2を明示的な段階移行で現在版へ保存することを確認します。</summary>
     [TestMethod]
     public async Task LoadAsync_SupportedOldSchema_MigratesToCurrent()
     {
@@ -198,6 +198,7 @@ public sealed class JsonApplicationStateRepositoryTests
         Assert.AreEqual(ApplicationState.CurrentSchemaVersion, state.SchemaVersion);
         Assert.AreEqual(4, state.ConsecutiveFailures);
         Assert.IsNull(state.GmailDeliveryEnabledSinceUtc);
+        Assert.IsNull(state.LastMaintenanceAtUtc);
         StringAssert.Contains(
             await File.ReadAllTextAsync(paths.StateFilePath, CancellationToken.None),
             $"\"schemaVersion\": {ApplicationState.CurrentSchemaVersion}");
@@ -217,6 +218,21 @@ public sealed class JsonApplicationStateRepositoryTests
         Assert.AreEqual(2, migrated.ConsecutiveFailures);
         Assert.IsNotNull(migrated.RateLimitNotificationStates);
         Assert.IsNotNull(migrated.RateLimitRecoveryStates);
+    }
+
+    /// <summary>Version 3からVersion 4へ最終保守時刻を未実行として移行することを確認します。</summary>
+    [TestMethod]
+    public void Migrate_Version3_AddsLastMaintenanceAtUtc()
+    {
+        ApplicationStateMigrator migrator = new();
+
+        ApplicationState migrated = migrator.Migrate(
+            new ApplicationState { SchemaVersion = 3, ConsecutiveFailures = 5 },
+            3);
+
+        Assert.AreEqual(4, migrated.SchemaVersion);
+        Assert.AreEqual(5, migrated.ConsecutiveFailures);
+        Assert.IsNull(migrated.LastMaintenanceAtUtc);
     }
 
     /// <summary>将来スキーマを拒否し、内容・更新時刻・配置を完全に維持することを確認します。</summary>

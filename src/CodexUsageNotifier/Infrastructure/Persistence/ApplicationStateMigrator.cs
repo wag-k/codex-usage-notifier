@@ -43,6 +43,7 @@ public sealed class ApplicationStateMigrator : IApplicationStateMigrator
             {
                 1 => MigrateVersion1To2(migrated),
                 2 => MigrateVersion2To3(migrated),
+                3 => MigrateVersion3To4(migrated),
                 _ => throw new NotSupportedException($"状態スキーマバージョン{version}からの移行はサポートされていません。"),
             };
             version = migrated.SchemaVersion;
@@ -71,6 +72,16 @@ public sealed class ApplicationStateMigrator : IApplicationStateMigrator
             GmailDeliveryEnabledSinceUtc = null,
             GmailDeliveryEnabledLastObserved = false,
             GmailAuthenticationWasUsable = false,
+        };
+    }
+
+    /// <summary>Version 4で追加した最終保守時刻を未実行として初期化します。</summary>
+    private static ApplicationState MigrateVersion3To4(ApplicationState state)
+    {
+        return state with
+        {
+            SchemaVersion = 4,
+            LastMaintenanceAtUtc = null,
         };
     }
 }
