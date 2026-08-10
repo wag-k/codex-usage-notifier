@@ -23,9 +23,10 @@ Codex App Serverが返す任意の利用枠をWindows上で観測し、利用枠
 - 深夜の通知を保留し、通知可能時刻に再取得・再判定
 - タスクトレイから本番状態を変更しない6種類のテスト通知を送信
 - WPF設定画面から通知・監視設定を検証、保存し、再起動なしで反映
-- 利用履歴を保存（90日保守削除はPhase 5）
+- 利用履歴をJSONLへ保存し、90日を超えた正常行を安全に保守
+- 日付別ログを保存し、30日を超えた対象ログだけを保守
 - 一時的な通信失敗から自動復旧
-- Windowsログイン時の自動起動設定を保持（実際の登録はPhase 5）
+- Windowsログイン時の自動起動をCurrentUserのRunキーで管理
 
 ## 初版の通知方針
 
@@ -90,7 +91,7 @@ Codex週間枠のリセットが近づいています
 
 ## 現在の実装状況
 
-Phase 1の基盤、Phase 2のCodex App Server連携、Phase 3の監視・Windows通知、Phase 3.1の複数枠通知基盤、Phase 3.2の通知信頼性改善、Phase 4Aの設定画面、Phase 4BのGmail認証・テスト送信、およびPhase 4C-1／4C-2のGmail本番通知配送まで実装しています。Phase 5前Release Gateとして、将来版状態の保護、Gmail認証異常の厳密化、単一起動、状態表示の正確性も実装済みです。
+Phase 1の基盤、Phase 2のCodex App Server連携、Phase 3の監視・Windows通知、Phase 3.1の複数枠通知基盤、Phase 3.2の通知信頼性改善、Phase 4Aの設定画面、Phase 4BのGmail認証・テスト送信、Phase 4C-1／4C-2のGmail本番通知配送、およびPhase 5Aの常駐運用機能まで実装しています。Phase 5前Release Gateとして、将来版状態の保護、Gmail認証異常の厳密化、単一起動、状態表示の正確性も実装済みです。
 
 - `codex app-server`を本アプリ所有の子プロセスとして起動
 - stdin/stdoutのJSONL形式で`initialize`、`initialized`、`account/rateLimits/read`を実行
@@ -134,12 +135,16 @@ Phase 1の基盤、Phase 2のCodex App Server連携、Phase 3の監視・Windows
 - 一時的なGmail認証状態取得エラーでは配送境界を進めず、通知を回復後の配送対象として維持
 - Windowsユーザー単位の名前付きMutexにより、監視・App Server・永続化の二重起動を防止
 - 状態画面へGmail通知設定、OAuth認証、認証アカウント、Windows／Gmail別の最終通知を表示
+- CurrentUserのRunキーによる管理者権限不要のWindows自動起動、設定との起動時同期、設定画面のOS登録状態表示
+- 取得単位JSONLの90日保持、破損行保持、追記との排他、保守後のobservedKeys再構築
+- 命名規則に一致する日付別ログだけを対象とする30日保持
+- 起動時と前回試行から24時間後の非同期運用保守、および終了時Cancellation
 
 2026年8月4日にCodex CLI `0.145.0-alpha.18`で実アカウントを確認したところ、`limitId=codex`の`primary`に10080分・使用率35%の週間枠だけが存在し、`secondary=null`、`rateLimitResetCredits.availableCount=1`、300分枠は未観測でした。この場合、画面には「5時間枠：未観測」と表示し、10080分枠の長期通知が有効になります。300分枠は単体テストで対応済みですが、すべての環境で取得できるとは限りません。
 
 `rateLimitResetCredits.availableCount`は、App Serverが返す「利用可能なrate-limit reset credit数」です。通常の周期的な利用枠リセットの回数や、「通常のリセットがあと何回あるか」を表す値ではありません。画面では「利用可能リセットクレジット数」と表示します。
 
-実際のCodex利用枠通知メールはPhase 4C-1で有効になり、Phase 4C-2で一時障害後の60分再試行、認証異常、通知禁止時間、再起動時復旧を実装しました。再試行専用タイマーは使わず、補助確認、App Server更新、スリープ復帰、リセット後確認、手動確認などによる次の正常取得を契機にします。Phase 4Bのテストメール送信は引き続き本番の通知済み状態、`GmailDeliveryStatus`、試行回数、回復連番、利用枠履歴を変更しません。実際の自動起動登録と履歴グラフは未実装です。通知別設定は`settings.json`へ保存し、観測履歴のJSONL保存も実装済みです。リセット完了の使用率低下による補助判定は、非表示設定`ResetInferenceUsageDropPoints`として保持し、初期値は50ポイントです。
+実際のCodex利用枠通知メールはPhase 4C-1で有効になり、Phase 4C-2で一時障害後の60分再試行、認証異常、通知禁止時間、再起動時復旧を実装しました。再試行専用タイマーは使わず、補助確認、App Server更新、スリープ復帰、リセット後確認、手動確認などによる次の正常取得を契機にします。Phase 4Bのテストメール送信は引き続き本番の通知済み状態、`GmailDeliveryStatus`、試行回数、回復連番、利用枠履歴を変更しません。Phase 5Aで自動起動登録と履歴・ログ保守を実装しました。利用履歴グラフは未実装です。通知別設定は`settings.json`へ保存します。リセット完了の使用率低下による補助判定は、非表示設定`ResetInferenceUsageDropPoints`として保持し、初期値は50ポイントです。
 
 タスクトレイの「テスト通知」から、短期枠回復、Early、Standard、Final、リセット完了、監視障害を個別に確認できます。テスト通知は本番の通知済み状態、回復連番、利用枠履歴を更新しません。
 
@@ -159,8 +164,11 @@ Windowsでは、既定値`codex`をPATHとPATHEXTから`codex.exe`、`codex.cmd`
 - OAuth設定がない場合は標準配置先と準備手順を表示
 - 認証状態、認証済みアカウント、最終認証成功時刻、再認証要否、最終テスト送信結果を表示
 - Gmail通知設定は認証済みかつ送信先が有効な場合だけ保存可能。本番配送と再試行はPhase 4C-1／4C-2で実装済み
+- Windows自動起動の設定値とOS登録状態を別々に表示し、不一致・確認エラー・開発実行による登録不可を文字で案内
 
 保存は一時ファイルへの書き込み後に置換します。保存成功後も通知済み状態と回復連番を維持し、新しい設定は次の正常取得から通知判定へ使用します。補助確認間隔とリセット確認タイマーは再起動なしで再設定します。保存直後の利用枠取得は行いません。
+
+自動起動の変更では、先にWindows側を設定値へ同期してから設定ファイルを保存します。OS変更に失敗した場合は設定を保存せず、設定保存に失敗した場合は可能な範囲でOS状態を変更前へ戻します。
 
 ## 技術構成
 
@@ -169,15 +177,17 @@ CodexUsageNotifier.sln
 ├─ src/
 │  └─ CodexUsageNotifier/
 │     ├─ Application/
+│     │  ├─ Maintenance/
 │     │  ├─ Monitoring/
 │     │  ├─ Notifications/
-│     │  └─ Settings/
+│     │  └─ Startup/
 │     ├─ Domain/
 │     │  ├─ Models/
 │     │  └─ Services/
 │     ├─ Infrastructure/
 │     │  ├─ Codex/
 │     │  ├─ Gmail/
+│     │  ├─ Logging/
 │     │  ├─ Persistence/
 │     │  ├─ Startup/
 │     │  └─ WindowsNotifications/
@@ -206,6 +216,10 @@ CodexUsageNotifier.sln
    │
    ├─ state.jsonのSchemaVersionを検証
    ├─ 将来版：ファイルを変更せず案内を表示して終了
+   ├─ settings.jsonを正としてWindows自動起動を同期
+   ├─ UIとタスクトレイを初期化（自動起動時はトレイのみ）
+   ├─ UsageMonitorを開始
+   ├─ 履歴・ログ保守をバックグラウンドで期限判定
    │
    ├─ Codex App Serverを起動・初期化
    │
@@ -281,6 +295,42 @@ CodexUsageNotifier.sln
 `state.json`はSchemaVersionを読み込み前に検証します。現在版と同じ場合は通常読込、古い対応済み版は1段階ずつmigrationし、現在版より新しい場合は元の内容・配置・更新日時を変更せずに起動を中止します。新しいアプリで作成した状態を保持したまま古いアプリへロールバックすると起動できない場合があります。状態ファイルを古い形式へ書き戻さず、新しいCodex Usage Notifierを使用してください。
 
 同じWindowsユーザーでは`Local\CodexUsageNotifier-{UserIdentifierHash}`形式の名前付きMutexにより1インスタンスだけを実行します。2個目は「すでに起動しています」と表示して終了し、Codex App Server、監視、トレイ、Gmail、Windows通知、状態保存を開始しません。異常終了時もMutexハンドルはOSにより解放されます。
+
+## Windows自動起動と運用保守（Phase 5A）
+
+自動起動は管理者権限を要求せず、現在ユーザーだけの次のRunキーへ登録します。
+
+```text
+HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Run
+登録名: Codex Usage Notifier
+登録値: "C:\...\CodexUsageNotifier.exe" --autostart
+```
+
+固定引数`--autostart`で手動起動と区別し、Windowsログイン時は状態画面を出さずタスクトレイへ常駐します。設定をOFFにすると同じ登録名だけを削除します。起動時は`settings.json`を正としてRegistryを同期し、失敗してもCodex利用枠監視は継続します。設定画面には「登録済み」「未登録」「不一致」「登録不可」「確認エラー」を表示します。
+
+Visual Studioや通常の`dotnet run`による開発出力を永続登録しないため、`dotnet.exe`と、`publish`以外の`bin\Debug`／`bin\Release`配下からは登録を拒否します。配布用または`dotnet publish`で生成した`CodexUsageNotifier.exe`から設定してください。
+
+利用履歴`usage-history.jsonl`は取得1回を1行として扱い、`CapturedAtUtc >= 現在UTC - HistoryRetentionDays`の正常行を保持します。破損行は削除せずログへ記録して保持します。一時ファイルへ保持行を書き、flush後に原子的に置換します。追記と保守は同じ排他を使うため、保守中の新しい履歴を失いません。保守後の新規枠判定も保持履歴から再構築するため、90日以上観測されなかったLimitId・Position・WindowDurationMinutesは再登場時に新規として検出します。
+
+ログは`codex-usage-notifier-yyyyMMdd.log`へだけ保持期間を適用し、`現在日 - LogRetentionDays`より古い日付を削除します。当日・前日、形式違い、不正日付、利用者が作成した別名ログは削除しません。
+
+保守はUsageMonitor開始後にバックグラウンドで起動し、初回または`state.json`の`LastMaintenanceAtUtc`から24時間以上経過した場合だけ実行します。履歴・ログの一方が失敗しても他方と利用枠監視を継続し、同じ失敗を短時間に繰り返さないため試行時刻を保存します。終了時はCancellationTokenで停止します。
+
+保持日数は現在設定画面へ公開していません。変更する場合はアプリを終了し、`settings.json`の`historyRetentionDays`または`logRetentionDays`を7～3650の範囲で編集してください。範囲外はそれぞれ既定値90日／30日へ補正されます。
+
+Windows側だけを確認・解除する場合は、タスクマネージャーの「スタートアップ アプリ」またはレジストリエディターの上記Runキーで`Codex Usage Notifier`を確認できます。通常は設定画面からOFFにしてください。
+
+### Phase 5AのWindows手動確認
+
+1. `dotnet publish`または配布用の`CodexUsageNotifier.exe`を起動します。
+2. 設定画面で自動起動をONにして保存し、OS登録状態が「登録済み」になることを確認します。
+3. レジストリエディターで上記Runキーの値が、対象exeの引用符付き絶対パスと固定`--autostart`引数になっていることを確認します。
+4. アプリを終了してWindowsからサインアウトし、再ログインします。
+5. 状態画面を表示せずタスクトレイへ1インスタンスだけ常駐し、ログでUsageMonitor開始を確認します。
+6. 設定画面で自動起動をOFFにして保存し、Runキーの本アプリ登録だけが削除されることを確認します。
+7. 履歴・ログ保守は本番データを加工せず、単体テストまたは別のテスト用LocalAppDataパスで、期限超過データだけが削除されることを確認します。
+
+Windowsのサインアウト／再ログインを伴う確認は自動テストに含めません。自然な運用環境で上記手順を実施してください。
 
 ## Gmail認証とテストメール（Phase 4B）
 
@@ -418,6 +468,8 @@ Codex App Serverとの通信に失敗した場合は、自動的に再接続し�
 - Gmailテスト送信失敗：安全な概要を設定画面とログに記録し、認証失効時は再認証を案内
 - Gmail本番通知の一時失敗：60分後以降の正常取得で1回だけ再試行
 - Gmail本番通知の認証失効：過去通知を再送対象へ戻さず、再認証後の新しい配送期間を開始
+- 自動起動同期失敗：設定画面とログへ不一致または安全な理由を表示し、利用枠監視は継続
+- 履歴・ログ保守失敗：失敗した保守をログへ記録し、App Server監視と通知を継続
 - アプリ全体は可能な限り継続動作
 
 ## 初版に含む通知機能
@@ -443,8 +495,10 @@ Codex App Serverとの通信に失敗した場合は、自動的に再接続し�
 - 複数PC間の設定同期
 - 利用履歴グラフ
 - Windowsサービス化
+- インストーラー、MSIX、MSI、ClickOnce、配布ZIP
+- GitHub Actions、Release自動作成、コード署名、自動アップデート
 
-短期枠回復通知、長期枠のリセット前通知・リセット完了通知は初版とPhase 3の実装対象であり、複数枠・回復連番・Windowsテスト通知はPhase 3.1、設定画面はPhase 4A、Google OAuthとGmail APIテストメールはPhase 4B、本番の利用枠通知メールはPhase 4C-1、一時障害後の再試行と再起動復旧はPhase 4C-2で実装しています。
+短期枠回復通知、長期枠のリセット前通知・リセット完了通知は初版とPhase 3の実装対象であり、複数枠・回復連番・Windowsテスト通知はPhase 3.1、設定画面はPhase 4A、Google OAuthとGmail APIテストメールはPhase 4B、本番の利用枠通知メールはPhase 4C-1、一時障害後の再試行と再起動復旧はPhase 4C-2、自動起動と履歴・ログ保守はPhase 5Aで実装しています。配布・CIはPhase 5Bの対象です。
 
 ## 将来構想
 
@@ -491,9 +545,9 @@ Codexへ作業を投入
 7. Gmail API・OAuth認証・テスト送信（Phase 4B、実装済み）
 8. Gmail本番通知配送とチャネル別状態保存（Phase 4C-1、実装済み）
 9. Gmail本番通知の自動再試行（Phase 4C-2、実装済み）
-10. 自動起動と初回設定
-11. 履歴保存と保守処理
-12. 配布用ビルド
+10. 自動起動と初回設定（Phase 5A、実装済み）
+11. 履歴・ログ保存と保守処理（Phase 5A、実装済み）
+12. 配布用ビルドとCI（Phase 5B）
 
 ## 公式資料
 

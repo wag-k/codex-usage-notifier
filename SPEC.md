@@ -7,6 +7,7 @@
 | 文書名 | Codex Usage Notifier 仕様書 |
 | 対象バージョン | 初版（MVP） |
 | 作成日 | 2026-08-04 |
+| 最終更新日 | 2026-08-11（Phase 5A） |
 | 対象OS | Windows 11 |
 | 開発基盤 | .NET 8 / WPF |
 | 主目的 | 任意のCodex利用枠を監視し、期間に応じた回復・リセット前・リセット完了をWindowsとGmailへ通知する |
@@ -75,6 +76,26 @@ Codexの利用枠が回復していても、または長期枠のリセットが
 ```
 
 Notification Policyは、Positionではなく利用枠別通知設定、Classification、期間を基準に、取得できたすべての枠について短期枠回復、長期枠リセット前、長期枠リセット完了を独立に判定する。
+
+Phase 5Aの起動順序は次のとおりとする。運用保守はUsageMonitor開始後に非同期で開始し、完了待ちで監視を遅らせない。
+
+```text
+アプリ起動
+  ↓
+単一インスタンス取得
+  ↓
+保存ディレクトリ準備・設定読み込み
+  ↓
+state schema検証と段階migration
+  ↓
+AutoStart設定同期（失敗は非致命）
+  ↓
+UI／Tray初期化
+  ↓
+UsageMonitor開始
+  ↓
+運用保守をバックグラウンド開始
+```
 
 ### 4.2 外部インターフェース
 
@@ -485,6 +506,13 @@ Codex App Serverまたは利用枠取得に失敗した場合、次の処理を�
 4. 自動起動時はメインウィンドウを表示せず、タスクトレイに常駐する。
 5. 自動起動の登録失敗時は、ユーザーへ理由を表示する。
 6. 管理者権限を必須としない方式を優先する。
+7. `HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Run`へ、登録名`Codex Usage Notifier`で現在の実行ファイル絶対パスを引用符付きで登録する。
+8. 登録値へ固定引数`--autostart`を付加し、Windowsログイン時は状態画面を表示せずトレイだけへ常駐する。ユーザー入力文字列はコマンドラインへ結合しない。
+9. 設定画面で変更すると、OS登録を先に同期してから設定JSONを保存する。OS変更失敗時は設定を保存せず、設定保存失敗時はOS状態を変更前へ戻す。ロールバック失敗時は不一致を明示する。
+10. 起動時は`AppSettings.AutoStartEnabled`を正としてOS登録を同期する。同期失敗は非致命とし、ログと設定画面へ表示して監視を継続する。
+11. 設定画面へ登録済み、未登録、不一致、登録不可、確認エラーを表示する。
+12. `dotnet.exe`、および`publish`以外の`bin\Debug`／`bin\Release`配下からの開発実行は登録を拒否し、配布用exeから設定するよう案内する。実行ファイルパス取得はテストで差し替え可能にする。
+13. Registry操作はCurrentUserだけを使用し、Presentation層から直接呼び出さない。
 
 ### FR-016 状態表示画面
 
@@ -539,7 +567,7 @@ LimitId：codex
 
 Phase 4Bでは、OAuthクライアント設定の状態と標準配置先、認証状態、認証済みGoogleアカウント、最終認証成功時刻、再認証要否、最終テスト送信結果を表示する。「OAuthクライアント設定ファイルを選択」「Googleアカウントで認証」「再認証」「認証解除」「テストメール送信」を提供する。OAuth設定がない場合は認証、未認証または送信先不正の場合はテスト送信を無効化し、認証中・送信中の同じ操作を重複実行しない。
 
-認証成功後に`GmailRecipient`が空なら認証済みアドレスを初期入力する。Gmail通知は初期値を無効とし、認証済みかつ送信先が有効な場合だけtrueとして保存できる。画面には、Google認証、テスト送信、Phase 4C-1／4C-2の本番利用枠通知と一時障害再試行を利用できることを明記する。自動起動は設定値だけを保存し、Windowsへの登録は後続フェーズで実装する。
+認証成功後に`GmailRecipient`が空なら認証済みアドレスを初期入力する。Gmail通知は初期値を無効とし、認証済みかつ送信先が有効な場合だけtrueとして保存できる。画面には、Google認証、テスト送信、Phase 4C-1／4C-2の本番利用枠通知と一時障害再試行を利用できることを明記する。自動起動はPhase 5AでWindowsへ接続し、設定値とOS登録状態を別々に表示する。
 
 取得済みの各利用枠について、LimitId、Position、WindowDurationMinutes、Classification、適用される通知設定、通知有効状態を表示する。FiveHourとWeeklyには編集した分類別既定値を適用する。Unknownは表示するが設定画面から有効化せず、「利用期間の意味を識別できないため、通知対象外です」と表示する。LimitId、Position、WindowDurationMinutesが一致する既存の利用枠別上書き設定は保持する。
 
@@ -568,6 +596,7 @@ Phase 4Bでは、OAuthクライアント設定の状態と標準配置先、認�
 11. Tab、Enter、Escapeによるキーボード操作を可能とし、入力エラーは色だけで表現しない。
 12. OAuth設定ファイルI/O、DPAPI、OAuth通信、Gmail API通信はUIスレッドで実行しない。
 13. 認証解除でGmail通知設定だけを即時無効化しても、他の未保存編集、通知済み状態、回復連番、利用枠履歴を消去しない。
+14. 自動起動設定を変更する場合はOS状態を先に同期し、設定保存失敗時は変更前のOS状態へロールバックする。
 
 ### FR-018 履歴保存
 
@@ -586,6 +615,12 @@ Phase 4Bでは、OAuthクライアント設定の状態と標準配置先、認�
 6. 1レコードの破損で全履歴を読み込めなくならない形式とする。
 7. 将来、SQLiteへ移行できるよう永続化処理を抽象化する。
 8. 過去履歴に存在しないLimitId、Position、WindowDurationMinutesの組み合わせを初観測として検出し、ログへ記録する。
+9. 保持対象は`CapturedAtUtc >= 現在UTC - HistoryRetentionDays`とし、取得1回のJSONL行を単位として扱う。
+10. 保持対象行を同一ディレクトリの一時ファイルへ書き、flush後に原子的に置換する。保守失敗・キャンセル時は元ファイルを維持する。
+11. JSONとして解釈できない破損行は無言で削除せず、警告ログを残してそのまま保持する。
+12. 追記と保守は`JsonUsageHistoryRepository`内部の同じ排他を使用し、追記直後の行を古い内容で上書きしない。
+13. 保守成功後は保持された正常行だけからobservedKeysを再構築する。90日以上観測されなかった組み合わせは再登場時に新規として検出する。
+14. `HistoryRetentionDays`は7～3650とし、設定ファイルの範囲外値は他の有効設定を維持したまま90へ補正する。
 
 ### FR-019 状態保存
 
@@ -605,12 +640,15 @@ Phase 4Bでは、OAuthクライアント設定の状態と標準配置先、認�
 - 連続失敗回数
 - 障害通知済みフラグ
 - 初回設定完了フラグ
+- 最後に履歴・ログ保守を試行したUTC時刻`LastMaintenanceAtUtc`
 
 状態ファイルは一時ファイルへ書き込んだ後に置換し、書き込み途中の破損を防止する。
 
 状態読込前にルートの`SchemaVersion`を検証する。現在版と同じ場合は通常どおり読み込み、現在版より古い場合は明示的にサポートする1段階ごとのmigrationだけを順番に実行して保存する。現在版より新しい場合は、元ファイルの内容、更新日時、名前、配置を変更せず、初期値や現在版で置換せずに起動を中止する。future schema拒否後は監視、App Server、Gmail、Windows通知判定を開始せず、保存版と対応版を含む安全な案内とログを出力する。
 
 OAuthトークンと認証メタデータは`state.json`や`settings.json`へ混在させず、FR-011のDPAPI保護ストアへ分離する。Phase 4Bのテストメールは`state.json`を更新しない。`GmailProductionDeliveryStartedAtUtc`は機密情報を含まない本番配送境界として`state.json`へ保存し、再起動後も変更しない。
+
+Phase 5Aでは状態スキーマをVersion 4へ進め、Version 3から`LastMaintenanceAtUtc=null`を追加する明示的なmigrationを実行する。既存のVersion 1→2→3の段階migrationとfuture version無変更拒否を維持する。
 
 ### FR-020 ログ
 
@@ -636,10 +674,16 @@ OAuthトークンと認証メタデータは`state.json`や`settings.json`へ混
 - 再試行と復旧
 - 設定変更
 - 履歴削除
+- 自動起動の登録、削除、起動時同期失敗
+- 履歴保守の削除・保持・破損行保持件数
+- ログ保守の削除・失敗件数
+- 運用保守の完了と非致命エラー
 
 `access_token`、`refresh_token`、`id_token`、認証コード、クライアントシークレット、Authorizationヘッダー、Cookie、MIMEメール全文、OAuth応答本文をログへ出力しない。例外は安全な分類と概要だけをログへ渡す。メールアドレスをログへ記録する場合は、`ex***@gmail.com`のようにローカル部を部分マスクする。
 
-初期ログ保持期間は30日とする。
+初期ログ保持期間は30日とし、設定値は7～3650とする。範囲外のファイル値は他の有効設定を維持したまま30へ補正する。
+
+`codex-usage-notifier-yyyyMMdd.log`へ完全一致し、実在する日付を持ち、`現在日 - LogRetentionDays`より古いファイルだけを削除する。当日、前日、形式違い、不正日付、別名ログは削除しない。1ファイルの削除失敗は他の対象と監視処理を停止させない。
 
 ### FR-021 長期枠のリセット完了通知
 
@@ -655,6 +699,17 @@ Weeklyなどの長期枠について、新しい利用期間の開始を`LongWin
 6. 通知禁止時間中は保留し、禁止時間終了後に再取得して新しい期間を確認してから送る。
 7. `resetsAt`がない場合も`UsageDropInference`を適用できる。推定閾値の初期値は50ポイントとする。
 8. 判定理由は通知状態と診断ログへ保存する。
+
+### FR-022 運用保守
+
+1. UIやUsageMonitorへ履歴・ログ削除を直接実装せず、`IApplicationMaintenanceService`、`IUsageHistoryMaintenance`、`ILogMaintenance`へ分離する。
+2. UI・タスクトレイ・UsageMonitorの開始後、保守をバックグラウンドで開始する。保守完了を待って監視開始を遅らせない。
+3. `LastMaintenanceAtUtc`がない初回、または前回試行から24時間以上経過した場合だけ履歴とログを保守する。
+4. 起動時・日次・将来の追加トリガーが重なっても`SemaphoreSlim`でsingle-flightにし、後続要求は更新済み時刻を再確認する。
+5. 履歴保守が失敗してもログ保守を試み、ログ保守が失敗してもCodex App Server監視、Windows通知、Gmail通知、設定画面、トレイ常駐を継続する。
+6. 保守を試行した場合は個別結果にかかわらず`LastMaintenanceAtUtc`を更新し、同じ失敗を短時間に大量記録しない。状態保存自体の失敗時は1時間後に期限を再確認する。
+7. 保守中のアプリ終了はCancellationTokenで中止し、バックグラウンドTaskを放置しない。
+8. 保守結果は件数だけをログへ記録し、履歴内容をログへ出力しない。
 
 ## 7. 非機能要件
 
@@ -791,7 +846,7 @@ Weeklyなどの長期枠について、新しい利用期間の開始を`LongWin
 
 ### 8.6 AppSettings
 
-次の表はPhase 4B時点の設定モデルを示す。分類別既定値と画面項目は設定画面から編集でき、利用枠別上書き設定と非表示項目はJSON永続化時に保持する。OAuthトークンと認証済みアカウント情報は`AppSettings`へ含めない。
+次の表はPhase 5A時点の設定モデルを示す。分類別既定値と画面項目は設定画面から編集でき、利用枠別上書き設定と非表示項目はJSON永続化時に保持する。OAuthトークンと認証済みアカウント情報は`AppSettings`へ含めない。
 
 | プロパティ | 初期値 |
 |---|---:|
@@ -818,11 +873,11 @@ Weeklyなどの長期枠について、新しい利用期間の開始を`LongWin
 | QuietHoursEnd | 07:00 |
 | FallbackPollingMinutes | 60 |
 | ResetCheckDelaySeconds | 60 |
-| HistoryRetentionDays | 90 |
-| LogRetentionDays | 30 |
-| AutoStartEnabled | 初回設定で選択、初期表示はtrue |
+| HistoryRetentionDays | 90。設定ファイル上の許容範囲は7～3650。Phase 5Aでは画面非表示 |
+| LogRetentionDays | 30。設定ファイル上の許容範囲は7～3650。Phase 5Aでは画面非表示 |
+| AutoStartEnabled | 初回設定で選択、初期表示はtrue。Phase 5AでCurrentUser Runキーへ接続 |
 
-`ResetInferenceUsageDropPoints`が設定ファイル上で1～100の範囲外の場合は、この項目だけを50へ補正し、他の有効な設定値は維持する。Phase 4Aでは一般ユーザー向け画面から変更できない。
+`ResetInferenceUsageDropPoints`、`HistoryRetentionDays`、`LogRetentionDays`がそれぞれの範囲外の場合は、その項目だけを既定値へ補正し、他の有効な設定値は維持する。保持日数と推定閾値はPhase 5Aでも一般ユーザー向け画面から変更できない。
 
 ### 8.7 GmailAuthenticationStatus（画面用モデル）
 
@@ -848,6 +903,15 @@ Weeklyなどの長期枠について、新しい利用期間の開始を`LongWin
 | CredentialMetadata | GmailCredentialMetadata | 認証済みメールアドレス、最終認証成功時刻、最終更新時刻 |
 
 この概念モデル全体をメモリ上でJSON化した後、DPAPI CurrentUserで暗号化する。ディスクへ書き込む`google-oauth-credentials.dat`は暗号文であり、平文JSON、トークン断片、JWT本文を含めない。
+
+### 8.9 Phase 5A運用状態
+
+| モデル／値 | 内容 |
+|---|---|
+| AutoStartStatus | Registered、NotRegistered、Mismatch、Unsupported、Errorと安全な説明。Registryの生例外は画面へ出さない |
+| UsageHistoryMaintenanceResult | 削除正常行数、保持全行数、保持した破損行数 |
+| LogMaintenanceResult | 削除ファイル数、削除失敗ファイル数 |
+| ApplicationState.LastMaintenanceAtUtc | 履歴・ログ保守を最後に試行したUTC時刻。SchemaVersion 4で追加 |
 
 ## 9. 通知判定フロー
 
@@ -1106,6 +1170,38 @@ Weeklyなどの長期枠について、新しい利用期間の開始を`LongWin
 - WindowsとGmailの最終通知を全体および利用枠ごとに独立表示し、一方だけ成功した場合も「通知なし」と誤表示しない。
 - `rateLimitResetCredits.availableCount`を「利用可能リセットクレジット数」と表示し、通常の周期的リセット回数と説明しない。
 
+### AC-025 Windows autostart
+
+- `AutoStartEnabled=true`を保存すると、CurrentUser Runキーへ引用符付きexeパスと固定`--autostart`引数を登録できる。
+- `AutoStartEnabled=false`を保存すると本アプリの登録名だけを削除できる。
+- 自動起動では状態画面を表示せずトレイへ常駐し、単一インスタンス制御により二重監視を開始しない。
+- 設定ON・Registry OFF、設定OFF・Registry ON、別exe登録を不一致として表示し、起動時に設定値へ同期できる。
+- OS変更失敗時は設定を保存せず、設定保存失敗時はOS状態をロールバックする。ロールバック失敗は不一致として検出できる。
+- `dotnet.exe`と未publishの開発ビルドをRunキーへ登録しない。
+- Registry実操作テストは一意なテスト登録名を使い、本番登録を変更せず後始末する。
+
+### AC-026 Usage history retention
+
+- `CapturedAtUtc >= 現在UTC - HistoryRetentionDays`の取得行を保持し、それより古い正常行だけを削除できる。
+- 複数利用枠を含む1取得行を分割せず、保持境界ちょうどの行を保持できる。
+- 破損行をログへ記録して保持し、原子的置換の失敗またはCancellation時に元履歴を維持できる。
+- Appendと保守の並行要求で新しい履歴を失わず、同時保守を直列化できる。
+- 保守後は保持履歴からobservedKeysを再構築し、90日以上消えていた組み合わせを再度新規検出できる。
+
+### AC-027 Log retention
+
+- `codex-usage-notifier-yyyyMMdd.log`のうち保持境界より古い対象だけを削除し、削除件数を返せる。
+- 当日、前日、保持境界以降、形式違い、不正日付、別名ログを削除しない。
+- 1ファイルの削除失敗を件数とログへ記録し、他の保守と監視を停止しない。
+- `LogRetentionDays`の7～3650を許容し、範囲外のファイル値を30へ補正できる。
+
+### AC-028 Maintenance reliability
+
+- 初回または前回試行から24時間以上で保守を実行し、24時間未満では履歴・ログを書き換えない。
+- 複数トリガーをsingle-flightで処理し、履歴失敗後もログ保守を、ログ失敗後も監視を継続できる。
+- `LastMaintenanceAtUtc`をVersion 3→4 migrationで追加し、future state schemaの無変更拒否を維持する。
+- UsageMonitor開始を保守完了待ちで遅らせず、アプリ終了Cancellationでバックグラウンド保守を停止できる。
+
 ## 11. 単体テスト対象
 
 最低限、次を単体テストする。
@@ -1240,6 +1336,23 @@ Weeklyなどの長期枠について、新しい利用期間の開始を`LongWin
 128. Gmail設定、OAuth認証、認証アカウントの状態表示
 129. Windows／Gmail別、および利用枠別の最終通知表示
 130. 状態画面にトークンと`client_secret`を表示しないこと
+131. 自動起動コマンドの引用符、固定引数、CurrentUser限定、および無効化削除
+132. `dotnet.exe`と未publish開発出力の自動起動登録拒否
+133. 設定ON／OFFとRegistry状態の不一致検出、および設定値への同期
+134. 自動起動変更失敗時の設定非保存と、設定保存失敗時のOSロールバック
+135. 一意なテスト登録名を使うCurrentUser Runキー統合テスト
+136. 90日以内、90日超、保持境界ちょうど、および複数枠取得行の履歴保守
+137. 破損履歴行の保持、Cancellation時の元ファイル維持、一時ファイル後始末
+138. Appendと履歴保守の並行実行、および同時保守の排他
+139. 保守後observedKeys再構築と90日以上消えた枠の再新規検出
+140. 30日以内、30日超、当日、前日、保持境界のログ保守
+141. 形式違い、不正日付、別名ログの保護と削除失敗の非致命処理
+142. HistoryRetentionDays／LogRetentionDaysの7～3650境界と個別フォールバック
+143. 初回、24時間未満、24時間経過の運用保守期限判定
+144. 複数保守トリガーのsingle-flight
+145. 履歴失敗後のログ保守継続、ログ失敗後の非致命動作
+146. アプリ終了Cancellationによるバックグラウンド保守停止
+147. Version 3→4の`LastMaintenanceAtUtc` migrationとfuture schema保護回帰
 
 ## 12. 実装上の設計方針
 
@@ -1262,6 +1375,9 @@ IGoogleGmailMessageGateway
 IGmailMimeMessageFactory
 IGmailTestMailSender
 IUsageHistoryRepository
+IUsageHistoryMaintenance
+ILogMaintenance
+IApplicationMaintenanceService
 IApplicationStateRepository
 ISettingsRepository
 ISettingsChangeSink
@@ -1288,7 +1404,7 @@ Domain層は、WPF、Gmail、JSON-RPC、ファイルシステムへ直接依存�
 
 - 内部時刻：UTC
 - 表示時刻：Windowsのローカルタイムゾーン
-- テスト：`IClock`で固定時刻を注入
+- テスト：`.NET TimeProvider`を差し替えて固定時刻を注入
 
 ## 13. 配布方針
 
@@ -1508,14 +1624,27 @@ Phase 4C-2でも専用の短時間再試行タイマーと、本番アプリで�
 - Gmail通知設定、OAuth認証、Windows／Gmail別最終通知の状態表示
 - `rateLimitResetCredits.availableCount`を利用可能リセットクレジット数として明確化
 
-このRelease Gateでは、Windows自動起動登録、履歴90日削除、ログ30日削除、配布ビルド、インストーラー、CI、正式アイコンを実装しない。
+このRelease Gateでは、Windows自動起動登録、履歴90日削除、ログ30日削除、配布ビルド、インストーラー、CI、正式アイコンを実装しない。前3項目は後続のPhase 5Aで実装する。
 
-### Phase 5：運用機能
+### Phase 5A：常駐運用機能
 
-- 自動起動
-- 履歴の90日保持と保守処理
-- ログ整理
-- 配布ビルド
+- CurrentUser RunキーによるWindowsログイン時の自動起動
+- 設定値を正とする起動時同期、設定保存時ロールバック、OS登録状態表示
+- 開発実行パスの永続登録防止と、自動起動時のトレイ専用表示
+- 履歴の90日保持、破損行保持、原子的置換、Appendとの排他、observedKeys再構築
+- 対象名へ限定したログの30日保持
+- 起動時と24時間ごとのsingle-flight保守、非致命エラー、終了Cancellation
+- `ApplicationState` Version 4とVersion 3→4 migration
+
+Phase 5Aではインストーラー、MSIX、MSI、ClickOnce、GitHub Actions、Release自動作成、コード署名、正式アイコン、配布ZIP、自動アップデート、バックログ自動実行を実装しない。
+
+### Phase 5B：配布とCI
+
+- GitHub Actionsによるビルド・テストCI
+- Release向けpublish構成
+- 配布形式の確定
+- 配布パッケージ作成
+- 必要に応じたインストーラー、コード署名、正式アイコンの検討
 
 ## 16. 未決事項
 
@@ -1532,6 +1661,8 @@ Phase 4C-2でも専用の短時間再試行タイマーと、本番アプリで�
 9. LimitId単位の上書き通知設定を設定画面から直接編集できるようにするか
 10. `ResetInferenceUsageDropPoints`を一般ユーザー向け画面へ公開するか
 11. 未使用分が次の利用期間へ繰り越されるか。公式レスポンスからは未確認であり、通知文では断定しない
+12. Windows再ログイン後の自動起動、トレイ専用表示、単一インスタンス、UsageMonitor開始を配布用exeで一巡確認できるか
+13. Phase 5Bで採用するpublish方式、配布形式、コード署名、インストーラーの要否
 
 ## 17. 公式参考資料
 
