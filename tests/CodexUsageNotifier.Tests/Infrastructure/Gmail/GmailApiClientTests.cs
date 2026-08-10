@@ -30,12 +30,13 @@ public sealed class GmailApiClientTests
         Assert.IsTrue(authentication.MarkedReauthenticationRequired);
     }
 
-    /// <summary>403応答をAPI有効化または権限確認が必要な失敗として分類することを検証します。</summary>
+    /// <summary>理由不明の403応答を再認証しない恒久拒否として分類することを検証します。</summary>
     [TestMethod]
     public async Task SendRawMessageAsync_Forbidden_ReturnsActionableError()
     {
+        StubAuthenticationService authentication = new();
         GmailApiClient client = new(
-            new StubAuthenticationService(),
+            authentication,
             new ThrowingGateway(CreateApiException(HttpStatusCode.Forbidden)));
 
         GmailApiOperationException exception = await Assert.ThrowsExceptionAsync<GmailApiOperationException>(
@@ -43,6 +44,7 @@ public sealed class GmailApiClientTests
 
         Assert.AreEqual(GmailApiErrorKind.Forbidden, exception.Kind);
         StringAssert.Contains(exception.Message, "Gmail API");
+        Assert.IsFalse(authentication.MarkedReauthenticationRequired);
     }
 
     /// <summary>Gmail API未有効化の403をGoogle Cloud設定案内へ変換することを検証します。</summary>
@@ -54,12 +56,53 @@ public sealed class GmailApiClientTests
         {
             Errors = [new SingleError { Reason = "accessNotConfigured" }],
         };
-        GmailApiClient client = new(new StubAuthenticationService(), new ThrowingGateway(apiException));
+        StubAuthenticationService authentication = new();
+        GmailApiClient client = new(authentication, new ThrowingGateway(apiException));
 
         GmailApiOperationException exception = await Assert.ThrowsExceptionAsync<GmailApiOperationException>(
             () => client.SendRawMessageAsync("dGVzdA", CancellationToken.None));
 
+        Assert.AreEqual(GmailApiErrorKind.ApiNotEnabled, exception.Kind);
         StringAssert.Contains(exception.Message, "有効になっていません");
+        Assert.IsFalse(authentication.MarkedReauthenticationRequired);
+    }
+
+    /// <summary>Gmail API未有効化のserviceDisabledも再認証不要として分類することを検証します。</summary>
+    [TestMethod]
+    public async Task SendRawMessageAsync_ServiceDisabled_DoesNotRequireReauthentication()
+    {
+        GoogleApiException apiException = CreateApiException(HttpStatusCode.Forbidden);
+        apiException.Error = new RequestError
+        {
+            Errors = [new SingleError { Reason = "serviceDisabled" }],
+        };
+        StubAuthenticationService authentication = new();
+        GmailApiClient client = new(authentication, new ThrowingGateway(apiException));
+
+        GmailApiOperationException exception = await Assert.ThrowsExceptionAsync<GmailApiOperationException>(
+            () => client.SendRawMessageAsync("dGVzdA", CancellationToken.None));
+
+        Assert.AreEqual(GmailApiErrorKind.ApiNotEnabled, exception.Kind);
+        Assert.IsFalse(authentication.MarkedReauthenticationRequired);
+    }
+
+    /// <summary>gmail.send権限不足の403で再認証必要状態へ移行することを検証します。</summary>
+    [TestMethod]
+    public async Task SendRawMessageAsync_InsufficientPermissions_RequiresReauthentication()
+    {
+        GoogleApiException apiException = CreateApiException(HttpStatusCode.Forbidden);
+        apiException.Error = new RequestError
+        {
+            Errors = [new SingleError { Reason = "insufficientPermissions" }],
+        };
+        StubAuthenticationService authentication = new();
+        GmailApiClient client = new(authentication, new ThrowingGateway(apiException));
+
+        GmailApiOperationException exception = await Assert.ThrowsExceptionAsync<GmailApiOperationException>(
+            () => client.SendRawMessageAsync("dGVzdA", CancellationToken.None));
+
+        Assert.AreEqual(GmailApiErrorKind.AuthorizationRequired, exception.Kind);
+        Assert.IsTrue(authentication.MarkedReauthenticationRequired);
     }
 
     /// <summary>一時通信障害で認証情報を無効化しないことを検証します。</summary>

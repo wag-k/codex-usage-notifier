@@ -146,7 +146,11 @@ public enum GmailApiErrorKind
 {
     /// <summary>認証が無効です。</summary>
     Unauthorized,
-    /// <summary>権限不足またはAPI未有効です。</summary>
+    /// <summary>gmail.send権限不足など、再認証で解消できる認可エラーです。</summary>
+    AuthorizationRequired,
+    /// <summary>Google Cloud側でGmail APIが有効化されていません。</summary>
+    ApiNotEnabled,
+    /// <summary>再認証では解消しない、または理由を安全に特定できない403拒否です。</summary>
     Forbidden,
     /// <summary>一時的な通信またはサーバーエラーです。</summary>
     Transient,

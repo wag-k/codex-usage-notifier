@@ -123,6 +123,27 @@ public sealed class RateLimitGmailRetryProcessorTests
         Assert.IsFalse(result.State.GmailAuthenticationWasUsable);
     }
 
+    /// <summary>gmail.send権限不足を再試行せず再認証必要として保存することを検証します。</summary>
+    [TestMethod]
+    public async Task ProcessAsync_AuthorizationRequired_DoesNotRetryAndRequiresReauthentication()
+    {
+        TestContext context = CreateContext();
+        context.GmailSender.Exception = new GmailApiOperationException(
+            GmailApiErrorKind.AuthorizationRequired,
+            "再認証してください。",
+            new InvalidOperationException());
+
+        NotificationProcessingResult result = await context.Processor.ProcessAsync(
+            CreateSnapshot(NowUtc, [CreateFiveHourWindow("codex", NowUtc.AddHours(5), 99)]),
+            CreateSettings(windowsEnabled: false),
+            CancellationToken.None);
+
+        RateLimitNotificationState state = result.State.RateLimitNotificationStates.Single();
+        Assert.AreEqual(GmailDeliveryFailureKind.Authentication, state.GmailFailureKind);
+        Assert.IsNull(state.GmailNextRetryAtUtc);
+        Assert.IsFalse(result.State.GmailAuthenticationWasUsable);
+    }
+
     /// <summary>invalid_grant相当の認証例外を自動再試行しないことを検証します。</summary>
     [TestMethod]
     public async Task ProcessAsync_InvalidGrant_DoesNotRetry()

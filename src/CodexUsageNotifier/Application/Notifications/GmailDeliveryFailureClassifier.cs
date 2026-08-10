@@ -23,6 +23,8 @@ public static class GmailDeliveryFailureClassifier
                 GmailDeliveryFailureKind.Transient,
             GmailApiOperationException { Kind: GmailApiErrorKind.Unauthorized } =>
                 GmailDeliveryFailureKind.Authentication,
+            GmailApiOperationException { Kind: GmailApiErrorKind.AuthorizationRequired } =>
+                GmailDeliveryFailureKind.Authentication,
             TimeoutException or TaskCanceledException or HttpRequestException =>
                 GmailDeliveryFailureKind.Transient,
             InvalidOperationException => GmailDeliveryFailureKind.Authentication,

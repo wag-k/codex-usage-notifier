@@ -44,11 +44,27 @@ public sealed class GmailApiClient : IGmailApiClient
         }
         catch (GoogleApiException exception) when (exception.HttpStatusCode == HttpStatusCode.Forbidden)
         {
+            if (IsGmailAuthorizationFailure(exception))
+            {
+                authenticationService.MarkReauthenticationRequired(
+                    "Gmail送信権限を確認できません。Googleアカウントを再認証してください。");
+                throw new GmailApiOperationException(
+                    GmailApiErrorKind.AuthorizationRequired,
+                    "Gmail送信権限が不足しています。Googleアカウントを再認証してください。",
+                    exception);
+            }
+
+            if (IsGmailApiDisabled(exception))
+            {
+                throw new GmailApiOperationException(
+                    GmailApiErrorKind.ApiNotEnabled,
+                    "Google CloudプロジェクトでGmail APIが有効になっていません。有効化後に再試行してください。",
+                    exception);
+            }
+
             throw new GmailApiOperationException(
                 GmailApiErrorKind.Forbidden,
-                IsGmailApiDisabled(exception)
-                    ? "Google CloudプロジェクトでGmail APIが有効になっていません。有効化後に再試行してください。"
-                    : "Gmail APIから送信を拒否されました。gmail.send権限を許可して再認証してください。",
+                "Gmail APIから送信を拒否されました。Google Cloudまたはアカウントの設定を確認してください。",
                 exception);
         }
         catch (GoogleApiException exception) when (exception.HttpStatusCode == HttpStatusCode.TooManyRequests)
@@ -88,5 +104,15 @@ public sealed class GmailApiClient : IGmailApiClient
         return exception.Error?.Errors?.Any(error =>
             string.Equals(error.Reason, "accessNotConfigured", StringComparison.OrdinalIgnoreCase)
             || string.Equals(error.Reason, "serviceDisabled", StringComparison.OrdinalIgnoreCase)) == true;
+    }
+
+    /// <summary>403の理由が再認証で解消できる認可不足を示すか判定します。</summary>
+    private static bool IsGmailAuthorizationFailure(GoogleApiException exception)
+    {
+        ArgumentNullException.ThrowIfNull(exception);
+        return exception.Error?.Errors?.Any(error =>
+            string.Equals(error.Reason, "insufficientPermissions", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(error.Reason, "insufficientAuthenticationScopes", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(error.Reason, "authError", StringComparison.OrdinalIgnoreCase)) == true;
     }
 }
