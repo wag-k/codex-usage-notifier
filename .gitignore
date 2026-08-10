@@ -10,3 +10,6 @@ credentials*.json
 auth/
 google-oauth-client.json
 google-oauth-credentials.dat
+
+# ローカルで生成したRelease配布物はGit管理しません。
+artifacts/
