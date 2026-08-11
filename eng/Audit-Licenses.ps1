@@ -162,10 +162,10 @@ function Get-PackageNoticeFiles {
 
 function Copy-NoticeFiles {
     param(
-        [Parameter(Mandatory = $true)][System.IO.FileInfo[]]$Files,
+        [Parameter(Mandatory = $true)][AllowNull()][AllowEmptyCollection()][System.IO.FileInfo[]]$Files,
         [Parameter(Mandatory = $true)][string]$Destination
     )
-    if ($Files.Count -eq 0) {
+    if ($null -eq $Files -or $Files.Count -eq 0) {
         return
     }
     New-Item -ItemType Directory -Path $Destination -Force | Out-Null

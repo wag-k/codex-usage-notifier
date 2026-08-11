@@ -56,6 +56,26 @@ public sealed class LicenseComplianceTests
         StringAssert.Contains(result.Output, "License audit passed");
     }
 
+    /// <summary>publish先へ本体と依存元のライセンスファイルを配置できることを検証します。</summary>
+    [TestMethod]
+    public async Task AuditLicenses_PublishDirectory_CopiesRequiredLicenseFiles()
+    {
+        using TemporaryDirectory directory = new();
+
+        ProcessResult result = await RunAuditAsync(
+            Path.Combine(RepositoryRoot, "eng", "licenses-audit.json"),
+            directory.Path);
+
+        Assert.AreEqual(0, result.ExitCode, result.Output);
+        Assert.IsTrue(new FileInfo(Path.Combine(directory.Path, "LICENSE")).Length > 0);
+        Assert.IsTrue(new FileInfo(Path.Combine(directory.Path, "THIRD-PARTY-NOTICES.txt")).Length > 0);
+        Assert.IsTrue(new FileInfo(Path.Combine(directory.Path, "licenses-audit.json")).Length > 0);
+        Assert.IsTrue(Directory.EnumerateFiles(
+            Path.Combine(directory.Path, "licenses", "dotnet"),
+            "*",
+            SearchOption.AllDirectories).Any());
+    }
+
     /// <summary>不明またはレビュー必須のライセンスを監査が拒否することを検証します。</summary>
     /// <param name="license">拒否対象のライセンス表現です。</param>
     [DataTestMethod]
@@ -80,8 +100,11 @@ public sealed class LicenseComplianceTests
 
     /// <summary>指定マニフェストでPowerShellライセンス監査を実行します。</summary>
     /// <param name="manifestPath">監査対象マニフェストのパスです。</param>
+    /// <param name="publishDirectory">ライセンスファイルを配置するpublish先です。</param>
     /// <returns>終了コードと安全な標準出力です。</returns>
-    private static async Task<ProcessResult> RunAuditAsync(string manifestPath)
+    private static async Task<ProcessResult> RunAuditAsync(
+        string manifestPath,
+        string? publishDirectory = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(manifestPath);
         ProcessStartInfo startInfo = new("powershell.exe")
@@ -98,6 +121,11 @@ public sealed class LicenseComplianceTests
         startInfo.ArgumentList.Add(Path.Combine(RepositoryRoot, "eng", "Audit-Licenses.ps1"));
         startInfo.ArgumentList.Add("-ManifestPath");
         startInfo.ArgumentList.Add(manifestPath);
+        if (!string.IsNullOrWhiteSpace(publishDirectory))
+        {
+            startInfo.ArgumentList.Add("-PublishDirectory");
+            startInfo.ArgumentList.Add(publishDirectory);
+        }
         using Process process = new() { StartInfo = startInfo };
         Assert.IsTrue(process.Start());
         Task<string> standardOutput = process.StandardOutput.ReadToEndAsync();
