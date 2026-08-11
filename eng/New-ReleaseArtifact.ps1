@@ -18,6 +18,11 @@ if ($Version -notmatch '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$') {
 
 $resolvedPublishDirectory = (Resolve-Path -LiteralPath $PublishDirectory).Path
 $resolvedReleaseDirectory = [System.IO.Path]::GetFullPath($ReleaseDirectory)
+$licenseAuditScript = Join-Path $PSScriptRoot "Audit-Licenses.ps1"
+& $licenseAuditScript -PublishDirectory $resolvedPublishDirectory
+if ($LASTEXITCODE -ne 0) {
+    throw "License audit failed before Release packaging."
+}
 $executablePath = Join-Path $resolvedPublishDirectory "CodexUsageNotifier.exe"
 if (-not (Test-Path -LiteralPath $executablePath -PathType Leaf)) {
     throw "CodexUsageNotifier.exe is missing from publish output."
@@ -74,6 +79,16 @@ try {
     $entryNames = @($archive.Entries | ForEach-Object { $_.FullName.Replace('\', '/') })
     if (-not ($entryNames -contains "CodexUsageNotifier.exe")) {
         throw "CodexUsageNotifier.exe is missing from Release ZIP."
+    }
+
+    foreach ($requiredLicenseEntry in @("LICENSE", "THIRD-PARTY-NOTICES.txt", "licenses-audit.json")) {
+        $entry = @($archive.Entries | Where-Object { $_.FullName.Replace('\', '/') -eq $requiredLicenseEntry })[0]
+        if ($null -eq $entry -or $entry.Length -le 0) {
+            throw "Required license file is missing or empty in Release ZIP: $requiredLicenseEntry"
+        }
+    }
+    if (-not ($entryNames | Where-Object { $_ -like "licenses/dotnet/*" })) {
+        throw "The .NET runtime license files are missing from Release ZIP."
     }
 
     $forbiddenZipEntries = @($entryNames | Where-Object {

@@ -1,0 +1,219 @@
+Codex Usage Notifier
+Third-Party Notices
+
+Codex Usage Notifier includes third-party software components.
+Each component is licensed under its own license terms.
+
+The inclusion of a third-party component does not change the MIT License
+applicable to the Codex Usage Notifier original source code.
+
+The Release ZIP contains the exact LICENSE and NOTICE files supplied by each
+restored NuGet package under licenses/nuget/. It also contains the exact .NET
+runtime license and third-party notice files under licenses/dotnet/. Those
+files are part of these notices and must be retained with binary copies.
+
+No NOTICE file is present in the distributed Google API NuGet packages. Their
+complete Apache License 2.0 text is preserved from each package as
+licenses/nuget/<package>-<version>/LICENSE in the Release ZIP.
+
+-------------------------------------------------------------------------------
+Component: Google.Apis.Auth
+Version: 1.75.0
+Copyright: Copyright 2021 Google LLC
+License: Apache-2.0
+Project: https://github.com/googleapis/google-api-dotnet-client
+Package license source: NuGet nuspec license expression and package LICENSE
+-------------------------------------------------------------------------------
+Component: Google.Apis.Gmail.v1
+Version: 1.74.0.4162
+Copyright: Copyright 2026 Google LLC
+License: Apache-2.0
+Project: https://github.com/google/google-api-dotnet-client
+Package license source: NuGet nuspec license expression and package LICENSE
+-------------------------------------------------------------------------------
+Component: Google.Apis.Oauth2.v2
+Version: 1.74.0.1869
+Copyright: Copyright 2026 Google LLC
+License: Apache-2.0
+Project: https://github.com/google/google-api-dotnet-client
+Package license source: NuGet nuspec license expression and package LICENSE
+-------------------------------------------------------------------------------
+Component: Google.Apis
+Version: 1.75.0
+Copyright: Copyright 2021 Google LLC
+License: Apache-2.0
+Project: https://github.com/googleapis/google-api-dotnet-client
+Package license source: NuGet nuspec license expression and package LICENSE
+-------------------------------------------------------------------------------
+Component: Google.Apis.Core
+Version: 1.75.0
+Copyright: Copyright 2021 Google LLC
+License: Apache-2.0
+Project: https://github.com/googleapis/google-api-dotnet-client
+Package license source: NuGet nuspec license expression and package LICENSE
+-------------------------------------------------------------------------------
+Component: Microsoft.Extensions.DependencyInjection
+Version: 8.0.1
+Copyright: Microsoft Corporation. All rights reserved.
+License: MIT
+Project: https://github.com/dotnet/runtime
+Package license source: NuGet nuspec, LICENSE.TXT, THIRD-PARTY-NOTICES.TXT
+-------------------------------------------------------------------------------
+Component: Microsoft.Extensions.Logging
+Version: 8.0.1
+Copyright: Microsoft Corporation. All rights reserved.
+License: MIT
+Project: https://github.com/dotnet/runtime
+Package license source: NuGet nuspec, LICENSE.TXT, THIRD-PARTY-NOTICES.TXT
+-------------------------------------------------------------------------------
+Component: Microsoft.Extensions.DependencyInjection.Abstractions
+Version: 8.0.2
+Copyright: Microsoft Corporation. All rights reserved.
+License: MIT
+Project: https://github.com/dotnet/runtime
+Package license source: NuGet nuspec, LICENSE.TXT, THIRD-PARTY-NOTICES.TXT
+-------------------------------------------------------------------------------
+Component: Microsoft.Extensions.Logging.Abstractions
+Version: 8.0.2
+Copyright: Microsoft Corporation. All rights reserved.
+License: MIT
+Project: https://github.com/dotnet/runtime
+Package license source: NuGet nuspec, LICENSE.TXT, THIRD-PARTY-NOTICES.TXT
+-------------------------------------------------------------------------------
+Component: Microsoft.Extensions.Options
+Version: 8.0.2
+Copyright: Microsoft Corporation. All rights reserved.
+License: MIT
+Project: https://github.com/dotnet/runtime
+Package license source: NuGet nuspec, LICENSE.TXT, THIRD-PARTY-NOTICES.TXT
+-------------------------------------------------------------------------------
+Component: Microsoft.Extensions.Primitives
+Version: 8.0.0
+Copyright: Microsoft Corporation. All rights reserved.
+License: MIT
+Project: https://github.com/dotnet/runtime
+Package license source: NuGet nuspec, LICENSE.TXT, THIRD-PARTY-NOTICES.TXT
+-------------------------------------------------------------------------------
+Component: System.Security.Cryptography.ProtectedData
+Version: 8.0.0
+Copyright: Microsoft Corporation. All rights reserved.
+License: MIT
+Project: https://github.com/dotnet/runtime
+Package license source: NuGet nuspec, LICENSE.TXT, THIRD-PARTY-NOTICES.TXT
+-------------------------------------------------------------------------------
+Component: System.Security.Cryptography.Pkcs
+Version: 8.0.1
+Copyright: Microsoft Corporation. All rights reserved.
+License: MIT
+Project: https://github.com/dotnet/runtime
+Package license source: NuGet nuspec, LICENSE.TXT, THIRD-PARTY-NOTICES.TXT
+-------------------------------------------------------------------------------
+Component: System.CodeDom
+Version: 7.0.0
+Copyright: Microsoft Corporation. All rights reserved.
+License: MIT
+Project: https://github.com/dotnet/runtime
+Package license source: NuGet nuspec, LICENSE.TXT, THIRD-PARTY-NOTICES.TXT
+-------------------------------------------------------------------------------
+Component: System.Management
+Version: 7.0.2
+Copyright: Microsoft Corporation. All rights reserved.
+License: MIT
+Project: https://github.com/dotnet/runtime
+Package license source: NuGet nuspec, LICENSE.TXT, THIRD-PARTY-NOTICES.TXT
+-------------------------------------------------------------------------------
+Component: MimeKit
+Version: 4.17.0
+Copyright: .NET Foundation and Contributors
+License: MIT
+Project: https://github.com/jstedfast/MimeKit
+Package license source: NuGet nuspec license expression
+-------------------------------------------------------------------------------
+Component: BouncyCastle.Cryptography
+Version: 2.6.2
+Copyright: Copyright (c) Legion of the Bouncy Castle Inc. 2000-2025
+License: MIT
+Project: https://github.com/bcgit/bc-csharp
+Package license source: NuGet nuspec and package LICENSE.md
+Note: The package-supplied license text is retained in the Release ZIP.
+-------------------------------------------------------------------------------
+Component: Newtonsoft.Json
+Version: 13.0.4
+Copyright: Copyright (c) James Newton-King 2008
+License: MIT
+Project: https://github.com/JamesNK/Newtonsoft.Json
+Package license source: NuGet nuspec and package LICENSE.md
+-------------------------------------------------------------------------------
+Component: Microsoft.NETCore.App.Runtime.win-x64
+Version: 8.0.29
+Copyright: Copyright (c) .NET Foundation and Contributors
+License: MIT
+Project: https://github.com/dotnet/runtime/tree/v8.0.29
+Distribution files: licenses/dotnet/Microsoft.NETCore.App.Runtime.win-x64-8.0.29/
+Required files retained: LICENSE.TXT, THIRD-PARTY-NOTICES.TXT
+-------------------------------------------------------------------------------
+Component: Microsoft.WindowsDesktop.App.Runtime.win-x64
+Version: 8.0.29
+Copyright: Copyright (c) .NET Foundation and Contributors
+License: MIT
+Project: https://github.com/dotnet/wpf/tree/v8.0.29
+Distribution files: licenses/dotnet/Microsoft.WindowsDesktop.App.Runtime.win-x64-8.0.29/
+Required files retained: LICENSE
+Package inspection result: no separate NOTICE file was supplied by this pack.
+-------------------------------------------------------------------------------
+
+Build and test only packages (not distributed in the Release ZIP)
+
+Package: Microsoft.NET.Test.Sdk 17.12.0 | License: MIT | Distributed: No
+Package: MSTest 3.6.4 | License: MIT | Distributed: No
+Package: Microsoft.ApplicationInsights 2.22.0 | License: MIT | Distributed: No
+Package: Microsoft.CodeCoverage 17.12.0 | License: MIT | Distributed: No
+Package: Microsoft.Testing.Extensions.Telemetry 1.4.3 | License: MIT | Distributed: No
+Package: Microsoft.Testing.Extensions.TrxReport.Abstractions 1.4.3 | License: MIT | Distributed: No
+Package: Microsoft.Testing.Extensions.VSTestBridge 1.4.3 | License: MIT | Distributed: No
+Package: Microsoft.Testing.Platform 1.4.3 | License: MIT | Distributed: No
+Package: Microsoft.Testing.Platform.MSBuild 1.4.3 | License: MIT | Distributed: No
+Package: Microsoft.TestPlatform.ObjectModel 17.12.0 | License: MIT | Distributed: No
+Package: Microsoft.TestPlatform.TestHost 17.12.0 | License: MIT | Distributed: No
+Package: MSTest.Analyzers 3.6.4 | License: MIT | Distributed: No
+Package: MSTest.TestAdapter 3.6.4 | License: MIT | Distributed: No
+Package: MSTest.TestFramework 3.6.4 | License: MIT | Distributed: No
+Package: System.Diagnostics.DiagnosticSource 5.0.0 | License: MIT | Distributed: No
+Package: System.Reflection.Metadata 1.6.0 | License: MIT | Distributed: No
+Legacy license source for System.Reflection.Metadata 1.6.0:
+https://github.com/dotnet/corefx/blob/master/LICENSE.TXT
+
+-------------------------------------------------------------------------------
+MIT License text applicable to MIT-licensed components listed above
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included
+in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+-------------------------------------------------------------------------------
+Apache License 2.0 components
+
+The Google API Client Library components listed above are licensed under the
+Apache License, Version 2.0. A complete, unmodified copy of the Apache License
+2.0 supplied in each NuGet package is included next to the binary distribution
+under licenses/nuget/<component>-<version>/LICENSE. The inspected packages do
+not contain a NOTICE file. The package LICENSE files and the copyright notices
+listed above must be retained with redistributed binary copies.
+
+Official license source:
+https://github.com/googleapis/google-api-dotnet-client/blob/main/LICENSE
+-------------------------------------------------------------------------------

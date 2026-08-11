@@ -1,0 +1,77 @@
+{
+  "schemaVersion": 1,
+  "generatedForReleaseVersion": "0.5.0",
+  "licenseMetadataPolicy": {
+    "allowedExpressions": [
+      "MIT",
+      "Apache-2.0"
+    ],
+    "reviewRequiredTokens": [
+      "GPL",
+      "AGPL",
+      "LGPL",
+      "SSPL",
+      "BUSL",
+      "Commons-Clause",
+      "UNKNOWN"
+    ]
+  },
+  "runtimePackages": [
+    { "id": "Google.Apis.Auth", "version": "1.75.0", "dependencyType": "Direct", "license": "Apache-2.0", "distributedInRelease": true },
+    { "id": "Google.Apis.Gmail.v1", "version": "1.74.0.4162", "dependencyType": "Direct", "license": "Apache-2.0", "distributedInRelease": true },
+    { "id": "Google.Apis.Oauth2.v2", "version": "1.74.0.1869", "dependencyType": "Direct", "license": "Apache-2.0", "distributedInRelease": true },
+    { "id": "Microsoft.Extensions.DependencyInjection", "version": "8.0.1", "dependencyType": "Direct", "license": "MIT", "distributedInRelease": true },
+    { "id": "Microsoft.Extensions.Logging", "version": "8.0.1", "dependencyType": "Direct", "license": "MIT", "distributedInRelease": true },
+    { "id": "MimeKit", "version": "4.17.0", "dependencyType": "Direct", "license": "MIT", "distributedInRelease": true },
+    { "id": "System.Security.Cryptography.ProtectedData", "version": "8.0.0", "dependencyType": "Direct", "license": "MIT", "distributedInRelease": true },
+    { "id": "BouncyCastle.Cryptography", "version": "2.6.2", "dependencyType": "Transitive", "license": "MIT", "distributedInRelease": true },
+    { "id": "Google.Apis", "version": "1.75.0", "dependencyType": "Transitive", "license": "Apache-2.0", "distributedInRelease": true },
+    { "id": "Google.Apis.Core", "version": "1.75.0", "dependencyType": "Transitive", "license": "Apache-2.0", "distributedInRelease": true },
+    { "id": "Microsoft.Extensions.DependencyInjection.Abstractions", "version": "8.0.2", "dependencyType": "Transitive", "license": "MIT", "distributedInRelease": true },
+    { "id": "Microsoft.Extensions.Logging.Abstractions", "version": "8.0.2", "dependencyType": "Transitive", "license": "MIT", "distributedInRelease": true },
+    { "id": "Microsoft.Extensions.Options", "version": "8.0.2", "dependencyType": "Transitive", "license": "MIT", "distributedInRelease": true },
+    { "id": "Microsoft.Extensions.Primitives", "version": "8.0.0", "dependencyType": "Transitive", "license": "MIT", "distributedInRelease": true },
+    { "id": "Newtonsoft.Json", "version": "13.0.4", "dependencyType": "Transitive", "license": "MIT", "distributedInRelease": true },
+    { "id": "System.CodeDom", "version": "7.0.0", "dependencyType": "Transitive", "license": "MIT", "distributedInRelease": true },
+    { "id": "System.Management", "version": "7.0.2", "dependencyType": "Transitive", "license": "MIT", "distributedInRelease": true },
+    { "id": "System.Security.Cryptography.Pkcs", "version": "8.0.1", "dependencyType": "Transitive", "license": "MIT", "distributedInRelease": true }
+  ],
+  "buildAndTestOnlyPackages": [
+    { "id": "Microsoft.NET.Test.Sdk", "version": "17.12.0", "dependencyType": "Direct", "license": "MIT", "distributedInRelease": false },
+    { "id": "MSTest", "version": "3.6.4", "dependencyType": "Direct", "license": "MIT", "distributedInRelease": false },
+    { "id": "Microsoft.ApplicationInsights", "version": "2.22.0", "dependencyType": "Transitive", "license": "MIT", "distributedInRelease": false },
+    { "id": "Microsoft.CodeCoverage", "version": "17.12.0", "dependencyType": "Transitive", "license": "MIT", "distributedInRelease": false },
+    { "id": "Microsoft.Testing.Extensions.Telemetry", "version": "1.4.3", "dependencyType": "Transitive", "license": "MIT", "distributedInRelease": false },
+    { "id": "Microsoft.Testing.Extensions.TrxReport.Abstractions", "version": "1.4.3", "dependencyType": "Transitive", "license": "MIT", "distributedInRelease": false },
+    { "id": "Microsoft.Testing.Extensions.VSTestBridge", "version": "1.4.3", "dependencyType": "Transitive", "license": "MIT", "distributedInRelease": false },
+    { "id": "Microsoft.Testing.Platform", "version": "1.4.3", "dependencyType": "Transitive", "license": "MIT", "distributedInRelease": false },
+    { "id": "Microsoft.Testing.Platform.MSBuild", "version": "1.4.3", "dependencyType": "Transitive", "license": "MIT", "distributedInRelease": false },
+    { "id": "Microsoft.TestPlatform.ObjectModel", "version": "17.12.0", "dependencyType": "Transitive", "license": "MIT", "distributedInRelease": false },
+    { "id": "Microsoft.TestPlatform.TestHost", "version": "17.12.0", "dependencyType": "Transitive", "license": "MIT", "distributedInRelease": false },
+    { "id": "MSTest.Analyzers", "version": "3.6.4", "dependencyType": "Transitive", "license": "MIT", "distributedInRelease": false },
+    { "id": "MSTest.TestAdapter", "version": "3.6.4", "dependencyType": "Transitive", "license": "MIT", "distributedInRelease": false },
+    { "id": "MSTest.TestFramework", "version": "3.6.4", "dependencyType": "Transitive", "license": "MIT", "distributedInRelease": false },
+    { "id": "System.Diagnostics.DiagnosticSource", "version": "5.0.0", "dependencyType": "Transitive", "license": "MIT", "distributedInRelease": false },
+    { "id": "System.Reflection.Metadata", "version": "1.6.0", "dependencyType": "Transitive", "license": "MIT", "distributedInRelease": false, "legacyLicenseUrl": "https://github.com/dotnet/corefx/blob/master/LICENSE.TXT" }
+  ],
+  "runtimeFrameworks": [
+    {
+      "id": "Microsoft.NETCore.App.Runtime.win-x64",
+      "version": "8.0.29",
+      "license": "MIT",
+      "distributedInRelease": true,
+      "project": "https://github.com/dotnet/runtime/tree/v8.0.29",
+      "requiredLicenseFile": "LICENSE.TXT",
+      "requiredNoticeFile": "THIRD-PARTY-NOTICES.TXT"
+    },
+    {
+      "id": "Microsoft.WindowsDesktop.App.Runtime.win-x64",
+      "version": "8.0.29",
+      "license": "MIT",
+      "distributedInRelease": true,
+      "project": "https://github.com/dotnet/wpf/tree/v8.0.29",
+      "requiredLicenseFile": "LICENSE",
+      "requiredNoticeFile": null
+    }
+  ]
+}
