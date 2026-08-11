@@ -340,19 +340,22 @@ Windowsのサインアウト／再ログインを伴う確認は自動テスト�
 
 既定Release Versionはルートの`Directory.Build.props`にある`VersionPrefix=0.5.0`を単一情報源とします。状態画面は`Version 0.5.0`を表示し、Codex App Serverの`initialize.clientInfo.version`もAssemblyのInformationalVersionから同じRelease Versionを取得します。手動Release workflowの入力値はAssembly/Product Version、配布物名、SHA-256ファイル名へ反映されます。
 
-`.github/workflows/ci.yml`は`main`へのpush、pull request、手動実行でWindows Release buildと全テストを実行します。`.github/workflows/release-build.yml`は`workflow_dispatch`で厳密な`MAJOR.MINOR.PATCH`を受け取り、locked restore、Release build、全テスト、direct/transitive NuGet脆弱性確認を通過した場合だけ次を生成します。GitHub Releaseやタグは作成せず、Actions artifactとして14日保持します。
+`.github/workflows/ci.yml`は`main`へのpush、pull request、手動実行でWindows Release buildと全テストを実行します。`.github/workflows/release-build.yml`は`workflow_dispatch`で厳密な`MAJOR.MINOR.PATCH`を受け取り、locked restore、ライセンス監査、Release build、全テスト、direct/transitive NuGet脆弱性確認を通過した場合だけ次を生成します。GitHub Releaseやタグは作成せず、Actions artifactとして14日保持します。
 
 ```text
 CodexUsageNotifier-v0.5.0-win-x64.zip
 CodexUsageNotifier-v0.5.0-win-x64.zip.sha256
 ```
 
-publish方式は`win-x64`、`Release`、self-containedです。利用者による.NET Runtimeの別途導入を前提とせず、trimming、Single File、AOTは無効です。一般配布ZIPからPDBを除外します。ZIPにはpublishされた実行ファイル群だけを含め、`settings.json`、`state.json`、履歴、ログ、OAuthクライアント設定、DPAPI認証情報、テスト、ソース、`.git`を検査して除外します。コード署名、インストーラー、自動更新、正式アイコン、GitHub Release自動公開は未実装です。
+publish方式は`win-x64`、`Release`、self-containedです。利用者による.NET Runtimeの別途導入を前提とせず、trimming、Single File、AOTは無効です。一般配布ZIPからPDBを除外します。ZIPにはpublishされた実行ファイル群に加え、`LICENSE`、`THIRD-PARTY-NOTICES.txt`、監査結果`licenses-audit.json`、および`licenses/nuget`と`licenses/dotnet`配下の配布対象ライセンス原文を含めます。`settings.json`、`state.json`、履歴、ログ、OAuthクライアント設定、DPAPI認証情報、テスト、ソース、`.git`は検査して除外します。コード署名、インストーラー、自動更新、正式アイコン、GitHub Release自動公開は未実装です。
+
+`eng/Audit-Licenses.ps1`はアプリとテストのlock file、およびself-contained publishが使用するruntime packを監査します。配布依存のライセンスが未解決、許可一覧外、強いコピーレフトなどの要確認ライセンス、必須ライセンス／NOTICEファイル不足、または`THIRD-PARTY-NOTICES.txt`未反映の場合はCIとRelease生成を失敗させます。Release ZIP生成スクリプト自身も同じ監査を呼び出すため、手動生成で監査を迂回できません。
 
 ローカルで同等の品質ゲートを確認する例：
 
 ```powershell
 dotnet restore CodexUsageNotifier.sln --locked-mode
+.\eng\Audit-Licenses.ps1
 dotnet build CodexUsageNotifier.sln -c Release --no-restore -warnaserror
 dotnet test CodexUsageNotifier.sln -c Release --no-build
 .\eng\Test-NuGetVulnerabilities.ps1
@@ -379,7 +382,7 @@ dotnet test CodexUsageNotifier.sln -c Release --no-build
 
 ### Release smoke test
 
-1. Actions artifactをダウンロードし、SHA-256を確認して新しい空フォルダへ展開します。
+1. Actions artifactをダウンロードし、SHA-256を確認して新しい空フォルダへ展開します。`LICENSE`、`THIRD-PARTY-NOTICES.txt`、`licenses`フォルダが存在することも確認します。
 2. exeを起動し、状態画面、Version、タスクトレイ、Codex App Server接続、利用枠取得、設定保存を確認します。
 3. 同じWindowsユーザーの既存Gmail認証が維持され、Gmailテストメールを送信できることを確認します。
 4. 自動起動を有効にし、Runキーが展開先exeを指すことを確認します。
@@ -591,6 +594,14 @@ Codexへ作業を投入
 - 認証情報や個人情報をGitへコミットしない
 - 各クラス、メソッド、プロパティに日本語コメントを付ける
 - 通知判定、重複防止、禁止時間、再試行処理には単体テストを付ける
+
+## ライセンス
+
+Codex Usage Notifierの自作ソースコードとバイナリは、[MIT License](./LICENSE)で無償公開・配布します。ソースリポジトリとRelease ZIPの双方に、著作権表示を含むMIT License全文を同梱します。
+
+本ソフトにはGoogle API Client Libraries、MimeKit、Microsoft .NET関連などの第三者ソフトウェアが含まれます。第三者コンポーネントには各著作権者のライセンスが適用され、Codex Usage Notifier本体のMIT Licenseがそれらを上書きすることはありません。コンポーネント、バージョン、配布有無、ライセンス、および一次情報は[THIRD-PARTY-NOTICES.txt](./THIRD-PARTY-NOTICES.txt)を確認してください。Release ZIPには、監査対象の各NuGetパッケージと.NET runtime packから取得したライセンス／NOTICE原文も`licenses`配下へ同梱します。
+
+現在の直接依存、推移依存、およびwin-x64 self-contained runtimeに、GPL、LGPL、AGPLなど初版配布を阻害する未解決の強いコピーレフト依存は確認されていません。依存更新時はlock fileとruntime packに対するライセンス監査を必須とし、Unknownまたは要レビューのライセンスが残る場合はReleaseを作成しません。
 
 ## 推奨実装順
 

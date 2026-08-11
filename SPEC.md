@@ -7,7 +7,7 @@
 | 文書名 | Codex Usage Notifier 仕様書 |
 | 対象バージョン | 初版（MVP） |
 | 作成日 | 2026-08-04 |
-| 最終更新日 | 2026-08-11（Phase 5B） |
+| 最終更新日 | 2026-08-12（Phase 5Bライセンス整備） |
 | 対象OS | Windows 11 |
 | 開発基盤 | .NET 8 / WPF |
 | 主目的 | 任意のCodex利用枠を監視し、期間に応じた回復・リセット前・リセット完了をWindowsとGmailへ通知する |
@@ -755,6 +755,16 @@ Weeklyなどの長期枠について、新しい利用期間の開始を`LongWin
 
 時刻、外部プロセス、通知、ファイルI/Oを抽象化し、単体テストで差し替え可能にする。
 
+### NFR-006 Releaseライセンス
+
+- Codex Usage Notifierの自作ソースコードとバイナリをMIT Licenseで公開・配布する。
+- OSI標準のMIT License全文と`Copyright (c) 2026 Kenta Kawaguchi`を、リポジトリとRelease ZIPの両方へ保持する。
+- 第三者コンポーネントには各権利者のライセンスが適用され、本体のMIT Licenseで上書きしない。
+- direct dependency、transitive dependency、およびwin-x64 self-contained publishへ含まれるruntime componentを、lock file、assets file、NuGet metadata、パッケージ内ライセンス原文に基づいて監査する。
+- 配布対象のUnknown license、必須NOTICE不足、`THIRD-PARTY-NOTICES.txt`未反映、または強いcopyleft／source-available系の要確認ライセンスを検出した場合はReleaseをBlockingとする。
+- NuGetパッケージおよび.NET runtime packに含まれる必要なLICENSE／NOTICE原文をRelease ZIPの`licenses`配下へ保持する。
+- OAuthクライアント設定、OAuthトークン、DPAPI認証情報、ユーザー設定、状態、履歴、ログをライセンス成果物へ混入させない。
+
 ## 8. データモデル案
 
 ### 8.1 UsageSnapshot
@@ -1233,6 +1243,24 @@ Weeklyなどの長期枠について、新しい利用期間の開始を`LongWin
 - `Directory.Build.props`のRelease VersionをAssembly/Product Version、状態画面、App Server `clientInfo.version`の既定値として共有する。
 - Release workflow入力値をexe、ZIP名、SHA-256ファイル名へ反映し、exeのProductVersion／FileVersionを生成後に検証する。
 
+### AC-035 MIT License
+
+- リポジトリルートの`LICENSE`が標準MIT License本文を改変せず保持し、`Copyright (c) 2026 Kenta Kawaguchi`を含む。
+- ソースリポジトリとRelease ZIPの双方に、空でない同一の`LICENSE`を含む。
+
+### AC-036 Third-party license notices
+
+- `THIRD-PARTY-NOTICES.txt`にruntime配布依存とbuild/test-only依存を区別し、各コンポーネントの名前、バージョン、著作権、ライセンス、公式プロジェクト、配布有無を記録する。
+- Release ZIPに空でない`THIRD-PARTY-NOTICES.txt`と、配布対象のNuGet／.NET runtimeの必要なLICENSE・NOTICE原文を含む。
+- 本体のMIT Licenseが第三者ライセンスを上書きしないことを明記する。
+
+### AC-037 Release license audit
+
+- locked restore後、build前にdirect、transitive、self-contained runtime依存と監査manifestの完全一致を検証する。
+- Unknown、要確認ライセンス、必須NOTICE不足、通知一覧未反映を検出した場合はCIとRelease workflowを失敗させる。
+- Release ZIP生成処理自身が同じ監査を必須実行し、手動実行でも監査を迂回できない。
+- ZIP生成後に`LICENSE`、`THIRD-PARTY-NOTICES.txt`、監査結果、およびruntime licenseディレクトリの存在と非ゼロサイズを検証する。
+
 ## 11. 単体テスト対象
 
 最低限、次を単体テストする。
@@ -1388,6 +1416,11 @@ Weeklyなどの長期枠について、新しい利用期間の開始を`LongWin
 149. App Server initializeの`clientInfo.version`が共通Release Versionと一致すること
 150. InformationalVersionのビルドメタデータを除いたRelease Version解決
 151. ReleaseスクリプトのSemVer検証、禁止ファイル検出、exeバージョン検証、SHA-256再照合
+152. `LICENSE`の標準MIT本文、著作権表示、および`THIRD-PARTY-NOTICES.txt`の存在・非空
+153. runtime direct／transitive依存とbuild/test-only依存の監査manifest上の分離
+154. Unknown licenseと要確認ライセンスを検出した場合の監査失敗
+155. Release ZIPへの`LICENSE`、`THIRD-PARTY-NOTICES.txt`、NuGet／.NET runtimeライセンス原文の同梱
+156. Release ZIPからのOAuth設定、認証情報、設定、状態、履歴、ログの除外
 
 ## 12. 実装上の設計方針
 
@@ -1452,6 +1485,8 @@ Phase 5Bの手動テスト用配布は次とする。
 - 初期開発中はVisual Studioまたは`dotnet run`で起動
 - OAuthクライアント設定は利用者自身のGoogle Cloudプロジェクトで作成
 - PDB、シークレット、ユーザー設定、状態、履歴、ログ、OAuth設定、認証ファイル、ソース、テスト、Git管理情報は配布物に含めない
+- 本体の`LICENSE`、`THIRD-PARTY-NOTICES.txt`、`licenses-audit.json`、配布対象NuGet／.NET runtimeのLICENSE・NOTICE原文を含める
+- Unknown、要確認ライセンス、必須NOTICE不足、第三者通知未反映がある場合は配布物を生成しない
 - ZIPは安定したフォルダへ展開してから自動起動を設定し、アップグレード時はトレイ終了後にpublishファイルだけを置換する
 - LocalAppDataの設定・状態・履歴・ログ・認証情報は通常アップグレードで削除せず、future schema保護を維持する
 
@@ -1683,8 +1718,9 @@ Phase 5Aではインストーラー、MSIX、MSI、ClickOnce、GitHub Actions、
 - アプリ・テストの`packages.lock.json`とlocked restore
 - 最小`contents: read`権限、公式Action完全長SHA固定のWindows GitHub Actions CI
 - direct/transitive NuGet脆弱性JSON検査を含むRelease品質ゲート
+- direct/transitive NuGet依存とself-contained runtimeを対象とするライセンス監査、およびUnknown／要確認ライセンスのRelease Blocking
 - `workflow_dispatch`のSemVer入力によるwin-x64 self-contained、non-trimmed、non-single-file publish
-- PDBと禁止ファイルを除外したRelease ZIP、SHA-256、14日保持のActions artifact
+- PDBと禁止ファイルを除外し、MIT License、第三者通知、依存元のLICENSE／NOTICE原文を同梱したRelease ZIP、SHA-256、14日保持のActions artifact
 - exe ProductVersion／FileVersion、ZIP内容、SHA-256の生成後検証
 
 Phase 5BではGitHub Release、タグpush、MSI／MSIX／ClickOnce、コード署名、自動更新、正式アイコン、Single File、trimming、AOTを実装しない。
