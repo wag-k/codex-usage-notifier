@@ -35,6 +35,10 @@ jobs:
       - name: Restore locked dependencies
         run: dotnet restore CodexUsageNotifier.sln --locked-mode
 
+      - name: Audit third-party licenses
+        shell: pwsh
+        run: ./eng/Audit-Licenses.ps1
+
       - name: Build Release
         shell: pwsh
         run: |
