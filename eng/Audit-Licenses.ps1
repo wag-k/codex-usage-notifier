@@ -75,6 +75,25 @@ function Assert-LicenseAllowed {
     }
 }
 
+function Assert-NoticeDocumented {
+    param(
+        [Parameter(Mandatory = $true)]$Entry,
+        [Parameter(Mandatory = $true)][string]$NoticeContent
+    )
+    $component = [regex]::Escape([string]$Entry.id)
+    $version = [regex]::Escape([string]$Entry.version)
+    $license = [regex]::Escape([string]$Entry.license)
+    if ($Entry.distributedInRelease) {
+        $pattern = "(?m)^Component:[ \t]*$component[ \t]*\r?\n^Version:[ \t]*$version[ \t]*\r?\n^Copyright:.*\r?\n^License:[ \t]*$license[ \t]*\r?$"
+    }
+    else {
+        $pattern = "(?m)^Package:[ \t]*$component[ \t]+$version[ \t]+\|[ \t]+License:[ \t]*$license[ \t]+\|[ \t]+Distributed:[ \t]*No[ \t]*\r?$"
+    }
+    if (-not [regex]::IsMatch($NoticeContent, $pattern)) {
+        throw "Third-party notice is missing or stale for $($Entry.id) $($Entry.version)."
+    }
+}
+
 function Assert-PackageSet {
     param(
         [Parameter(Mandatory = $true)][hashtable]$Actual,
@@ -184,6 +203,7 @@ foreach ($requiredFile in @($licensePath, $thirdPartyPath)) {
         throw "Required repository license file is missing or empty: $requiredFile"
     }
 }
+$thirdPartyContent = Get-Content -LiteralPath $thirdPartyPath -Raw
 
 $manifest = Read-JsonFile -Path $ManifestPath
 if ($manifest.schemaVersion -ne 1) {
@@ -205,6 +225,7 @@ $globalPackages = Get-GlobalPackagesDirectory
 $allEntries = @($manifest.runtimePackages) + @($manifest.buildAndTestOnlyPackages)
 foreach ($entry in $allEntries) {
     Assert-LicenseAllowed -Entry $entry -Policy $manifest.licenseMetadataPolicy
+    Assert-NoticeDocumented -Entry $entry -NoticeContent $thirdPartyContent
     if ($entry.distributedInRelease -ne ($manifest.runtimePackages -contains $entry)) {
         throw "Distributed flag is inconsistent for $($entry.id)."
     }
@@ -239,6 +260,7 @@ foreach ($frameworkName in $frameworkReferenceNames) {
 $expectedFrameworks = @{}
 foreach ($framework in @($manifest.runtimeFrameworks)) {
     Assert-LicenseAllowed -Entry $framework -Policy $manifest.licenseMetadataPolicy
+    Assert-NoticeDocumented -Entry $framework -NoticeContent $thirdPartyContent
     $expectedFrameworks[([string]$framework.id).ToLowerInvariant()] = $framework
 }
 foreach ($key in $actualFrameworks.Keys) {

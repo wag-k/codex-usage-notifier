@@ -31,6 +31,7 @@ public sealed class LicenseComplianceTests
         FileInfo notice = new(noticePath);
         Assert.IsTrue(notice.Exists);
         Assert.IsTrue(notice.Length > 0);
+        string noticeContent = File.ReadAllText(noticePath);
 
         using JsonDocument document = JsonDocument.Parse(File.ReadAllText(
             Path.Combine(RepositoryRoot, "eng", "licenses-audit.json")));
@@ -43,6 +44,23 @@ public sealed class LicenseComplianceTests
         Assert.IsTrue(testPackages.All(item => !item.GetProperty("distributedInRelease").GetBoolean()));
         Assert.IsTrue(runtimePackages.Any(item => item.GetProperty("dependencyType").GetString() == "Direct"));
         Assert.IsTrue(runtimePackages.Any(item => item.GetProperty("dependencyType").GetString() == "Transitive"));
+        JsonElement[] frameworks = root.GetProperty("runtimeFrameworks").EnumerateArray().ToArray();
+        foreach (JsonElement item in runtimePackages.Concat(testPackages).Concat(frameworks))
+        {
+            string id = item.GetProperty("id").GetString()
+                ?? throw new InvalidOperationException("監査対象IDがありません。");
+            string version = item.GetProperty("version").GetString()
+                ?? throw new InvalidOperationException("監査対象バージョンがありません。");
+            if (item.GetProperty("distributedInRelease").GetBoolean())
+            {
+                StringAssert.Contains(noticeContent, $"Component: {id}");
+                StringAssert.Contains(noticeContent, $"Version: {version}");
+            }
+            else
+            {
+                StringAssert.Contains(noticeContent, $"Package: {id} {version}");
+            }
+        }
     }
 
     /// <summary>現在のlock file、NuGet metadata、runtime packが監査マニフェストと一致することを検証します。</summary>
