@@ -73,7 +73,13 @@ public sealed class ApplicationInstanceGuardTests
             ownerProcess.Kill(entireProcessTree: true);
             await ownerProcess.WaitForExitAsync(timeout.Token);
 
-            Assert.IsTrue(ApplicationInstanceGuard.TryAcquire(lockPath, out ApplicationInstanceGuard? recovered));
+            using CancellationTokenSource lockReleaseTimeout =
+                CancellationTokenSource.CreateLinkedTokenSource(timeout.Token);
+            lockReleaseTimeout.CancelAfter(TimeSpan.FromSeconds(5));
+            ApplicationInstanceGuard? recovered = await TryAcquireEventuallyAsync(
+                lockPath,
+                lockReleaseTimeout.Token);
+            Assert.IsNotNull(recovered, "終了した子プロセスのロックが期限内に解放されませんでした。");
             recovered!.Dispose();
         }
         finally
@@ -84,6 +90,35 @@ public sealed class ApplicationInstanceGuardTests
                 await ownerProcess.WaitForExitAsync();
             }
         }
+    }
+
+    /// <summary>Windowsによる終了済みプロセスのハンドル解放を待ちながら、排他所有権を再取得します。</summary>
+    /// <param name="lockPath">再取得するロックファイルのパスです。</param>
+    /// <param name="cancellationToken">ロック解放を待機できる期限を表します。</param>
+    /// <returns>期限内に取得できたガード。取得できなかった場合はnullです。</returns>
+    private static async Task<ApplicationInstanceGuard?> TryAcquireEventuallyAsync(
+        string lockPath,
+        CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(lockPath);
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            if (ApplicationInstanceGuard.TryAcquire(lockPath, out ApplicationInstanceGuard? guard))
+            {
+                return guard;
+            }
+
+            try
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(100), cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                return null;
+            }
+        }
+
+        return null;
     }
 
     /// <summary>二重起動側が監視・App Server・状態書込みの起動経路へ進まないことを検証します。</summary>
