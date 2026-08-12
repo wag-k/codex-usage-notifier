@@ -27,9 +27,29 @@ internal sealed class TemporaryDirectory : IDisposable
     /// </summary>
     public void Dispose()
     {
-        if (Directory.Exists(Path))
+        const int maximumAttempts = 10;
+        for (int attempt = 1; attempt <= maximumAttempts; attempt++)
         {
-            Directory.Delete(Path, recursive: true);
+            if (!Directory.Exists(Path))
+            {
+                return;
+            }
+
+            try
+            {
+                Directory.Delete(Path, recursive: true);
+                return;
+            }
+            catch (IOException) when (attempt < maximumAttempts)
+            {
+                // Windowsでは終了直後の子プロセスがファイルハンドルを解放するまで短い遅延が生じる場合があります。
+                Thread.Sleep(TimeSpan.FromMilliseconds(100));
+            }
+            catch (UnauthorizedAccessException) when (attempt < maximumAttempts)
+            {
+                // ウイルス対策ソフトなどによる一時的な走査中も、短時間だけ削除を再試行します。
+                Thread.Sleep(TimeSpan.FromMilliseconds(100));
+            }
         }
     }
 }
