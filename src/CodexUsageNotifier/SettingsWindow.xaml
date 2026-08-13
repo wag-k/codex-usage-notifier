@@ -105,7 +105,7 @@
                     </Grid>
                 </GroupBox>
 
-                <GroupBox Header="短期枠（FiveHour既定設定）">
+                <GroupBox Header="短期枠（5時間枠候補の既定設定）">
                     <Grid>
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="250" />
@@ -127,7 +127,7 @@
                     </Grid>
                 </GroupBox>
 
-                <GroupBox Header="長期枠（Weekly既定設定）">
+                <GroupBox Header="長期枠（週間枠の既定設定）">
                     <Grid>
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="180" />
@@ -147,7 +147,7 @@
                         <TextBlock Grid.Row="0" Grid.Column="2" FontWeight="SemiBold" Text="残り時間（時間）" />
                         <TextBlock Grid.Row="0" Grid.Column="3" FontWeight="SemiBold" Text="残量閾値（%）" />
 
-                        <TextBlock Grid.Row="1" Style="{StaticResource SectionLabel}" Text="Early" />
+                        <TextBlock Grid.Row="1" Style="{StaticResource SectionLabel}" Text="早期警告" />
                         <CheckBox Grid.Row="1" Grid.Column="1" VerticalAlignment="Center" IsChecked="{Binding LongWindowEarlyWarningEnabled}" />
                         <StackPanel Grid.Row="1" Grid.Column="2">
                             <TextBox Margin="4" Padding="6,4" Text="{Binding LongWindowEarlyWarningHours, UpdateSourceTrigger=PropertyChanged}" />
@@ -158,7 +158,7 @@
                             <TextBlock Style="{StaticResource ErrorText}" Text="{Binding EarlyThresholdError}" />
                         </StackPanel>
 
-                        <TextBlock Grid.Row="2" Style="{StaticResource SectionLabel}" Text="Standard" />
+                        <TextBlock Grid.Row="2" Style="{StaticResource SectionLabel}" Text="通常警告" />
                         <CheckBox Grid.Row="2" Grid.Column="1" VerticalAlignment="Center" IsChecked="{Binding LongWindowStandardWarningEnabled}" />
                         <StackPanel Grid.Row="2" Grid.Column="2">
                             <TextBox Margin="4" Padding="6,4" Text="{Binding LongWindowStandardWarningHours, UpdateSourceTrigger=PropertyChanged}" />
@@ -169,7 +169,7 @@
                             <TextBlock Style="{StaticResource ErrorText}" Text="{Binding StandardThresholdError}" />
                         </StackPanel>
 
-                        <TextBlock Grid.Row="3" Style="{StaticResource SectionLabel}" Text="Final" />
+                        <TextBlock Grid.Row="3" Style="{StaticResource SectionLabel}" Text="最終警告" />
                         <CheckBox Grid.Row="3" Grid.Column="1" VerticalAlignment="Center" IsChecked="{Binding LongWindowFinalWarningEnabled}" />
                         <StackPanel Grid.Row="3" Grid.Column="2">
                             <TextBox Margin="4" Padding="6,4" Text="{Binding LongWindowFinalWarningHours, UpdateSourceTrigger=PropertyChanged}" />
@@ -186,74 +186,88 @@
                     </Grid>
                 </GroupBox>
 
-                <GroupBox Header="Gmail認証とテスト送信（Phase 4B）">
-                    <Grid>
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="250" />
-                            <ColumnDefinition Width="*" />
-                        </Grid.ColumnDefinitions>
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                        </Grid.RowDefinitions>
-                        <TextBlock Grid.Row="0" Style="{StaticResource SectionLabel}" Text="OAuthクライアント設定" />
-                        <StackPanel Grid.Row="0" Grid.Column="1">
-                            <TextBlock Text="{Binding OAuthClientConfigurationStatus}" TextWrapping="Wrap" />
-                            <TextBlock Margin="0,4,0,0" Foreground="#5B6573" Text="{Binding OAuthClientConfigurationPath}" TextWrapping="Wrap" />
-                            <Button Margin="0,8,0,0" Padding="12,6" HorizontalAlignment="Left"
-                                    Content="OAuthクライアント設定ファイルを選択" Click="OnSelectGoogleOAuthClient" />
-                        </StackPanel>
-                        <TextBlock Grid.Row="1" Style="{StaticResource SectionLabel}" Text="認証状態" />
-                        <StackPanel Grid.Row="1" Grid.Column="1">
-                            <TextBlock Text="{Binding GmailAuthenticationStatus}" />
-                            <TextBlock Margin="0,4,0,0"><Run Text="アカウント: " /><Run Text="{Binding AuthenticatedGmailAddress, Mode=OneWay}" /></TextBlock>
-                            <TextBlock Margin="0,4,0,0"><Run Text="最終認証成功: " /><Run Text="{Binding LastGmailAuthenticationAt, Mode=OneWay}" /></TextBlock>
-                            <TextBlock Margin="0,4,0,0" Text="{Binding GmailReauthenticationStatus}" TextWrapping="Wrap" />
-                        </StackPanel>
-                        <TextBlock Grid.Row="2" Style="{StaticResource SectionLabel}" Text="認証操作" />
-                        <WrapPanel Grid.Row="2" Grid.Column="1" Margin="0,4,0,4">
-                            <Button Margin="0,0,10,0" Padding="12,6" Content="Googleアカウントで認証する"
-                                    IsEnabled="{Binding IsGmailAuthenticationAvailable}" Click="OnAuthenticateGmail" />
-                            <Button Margin="0,0,10,0" Padding="12,6" Content="再認証"
-                                    IsEnabled="{Binding IsGmailReauthenticationAvailable}" Click="OnReauthenticateGmail" />
-                            <Button Padding="12,6" Content="認証解除"
-                                    IsEnabled="{Binding IsGmailDisconnectAvailable}" Click="OnDisconnectGmail" />
-                        </WrapPanel>
-                        <TextBlock Grid.Row="3" Style="{StaticResource SectionLabel}" Text="送信先メールアドレス" />
-                        <StackPanel Grid.Row="3" Grid.Column="1">
-                            <TextBox Style="{StaticResource InputBox}" Text="{Binding GmailRecipient, UpdateSourceTrigger=PropertyChanged}" />
-                            <TextBlock Style="{StaticResource ErrorText}" Text="{Binding GmailRecipientError}" />
-                        </StackPanel>
-                        <TextBlock Grid.Row="4" Style="{StaticResource SectionLabel}" Text="テストメール" />
-                        <StackPanel Grid.Row="4" Grid.Column="1">
-                            <Button Padding="12,6" HorizontalAlignment="Left" Content="テストメール送信"
-                                    IsEnabled="{Binding IsTestEmailAvailable}" Click="OnSendGmailTestMail" />
-                            <TextBlock Margin="0,6,0,0" Text="{Binding LastTestMailResult}" TextWrapping="Wrap" />
-                        </StackPanel>
-                        <TextBlock Grid.Row="5" Style="{StaticResource SectionLabel}" Text="Gmail通知" />
-                        <StackPanel Grid.Row="5" Grid.Column="1">
-                            <CheckBox Content="Gmail通知を有効にする" IsEnabled="{Binding CanEnableGmailNotification}"
-                                      IsChecked="{Binding GmailNotificationEnabled}" />
-                            <TextBlock Style="{StaticResource ErrorText}" Text="{Binding GmailNotificationError}" />
-                        </StackPanel>
-                        <Border Grid.Row="6" Grid.Column="1" Margin="0,8,0,0" Padding="10" Background="#FFF8E1" CornerRadius="4">
-                            <TextBlock TextWrapping="Wrap"
-                                       Text="Google認証、テストメール、本番の利用枠通知を利用できます。一時的なGmail送信失敗は60分後以降の正常監視で1回だけ再試行します。" />
+                <GroupBox Header="Gmail通知とGoogle認証">
+                    <StackPanel>
+                        <Border Padding="12" Background="#E8F0FE" CornerRadius="4">
+                            <TextBlock Foreground="#244A7C" FontWeight="SemiBold"
+                                       Text="{Binding GmailOptionalDescription}" TextWrapping="Wrap" />
                         </Border>
-                    </Grid>
+
+                        <TextBlock Margin="0,14,0,6" FontWeight="SemiBold" Text="Gmail通知の設定" />
+                        <TextBlock Text="{Binding OAuthClientRequirementDescription}" TextWrapping="Wrap" />
+                        <TextBlock Margin="0,10,0,0" Text="{Binding GmailSetupSteps}" TextWrapping="Wrap" />
+                        <Button Margin="0,10,0,14" Padding="12,6" HorizontalAlignment="Left"
+                                Content="Gmail通知の設定手順を見る" Click="OnOpenGmailOAuthSetup" />
+
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="250" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+                            <TextBlock Grid.Row="0" Style="{StaticResource SectionLabel}" Text="OAuthクライアント" />
+                            <StackPanel Grid.Row="0" Grid.Column="1">
+                                <TextBlock Text="{Binding OAuthClientConfigurationStatus, StringFormat=状態：{0}}" TextWrapping="Wrap" />
+                                <TextBlock Margin="0,4,0,0" Foreground="#5B6573" Text="{Binding OAuthClientConfigurationPath}" TextWrapping="Wrap" />
+                                <Button Margin="0,8,0,0" Padding="12,6" HorizontalAlignment="Left"
+                                        Content="OAuthクライアントJSONを選択" Click="OnSelectGoogleOAuthClient" />
+                            </StackPanel>
+                            <TextBlock Grid.Row="1" Style="{StaticResource SectionLabel}" Text="Google認証" />
+                            <StackPanel Grid.Row="1" Grid.Column="1">
+                                <TextBlock Text="{Binding GmailAuthenticationStatus, StringFormat=状態：{0}}" />
+                                <TextBlock Margin="0,4,0,0"><Run Text="アカウント：" /><Run Text="{Binding AuthenticatedGmailAddress, Mode=OneWay}" /></TextBlock>
+                                <TextBlock Margin="0,4,0,0"><Run Text="最終認証成功：" /><Run Text="{Binding LastGmailAuthenticationAt, Mode=OneWay}" /></TextBlock>
+                                <TextBlock Margin="0,4,0,0"><Run Text="再認証：" /><Run Text="{Binding GmailReauthenticationStatus, Mode=OneWay}" /></TextBlock>
+                                <TextBlock Margin="0,6,0,0" Foreground="#5B6573"
+                                           Text="{Binding GmailAvailabilityDescription}" TextWrapping="Wrap" />
+                                <WrapPanel Margin="0,8,0,4">
+                                    <Button Margin="0,0,10,0" Padding="12,6" Content="Googleアカウントで認証"
+                                            IsEnabled="{Binding IsGmailAuthenticationAvailable}" Click="OnAuthenticateGmail" />
+                                    <Button Margin="0,0,10,0" Padding="12,6" Content="再認証"
+                                            IsEnabled="{Binding IsGmailReauthenticationAvailable}" Click="OnReauthenticateGmail" />
+                                    <Button Padding="12,6" Content="認証解除"
+                                            IsEnabled="{Binding IsGmailDisconnectAvailable}" Click="OnDisconnectGmail" />
+                                </WrapPanel>
+                            </StackPanel>
+                            <TextBlock Grid.Row="2" Style="{StaticResource SectionLabel}" Text="送信先メールアドレス" />
+                            <StackPanel Grid.Row="2" Grid.Column="1">
+                                <TextBox Style="{StaticResource InputBox}" Text="{Binding GmailRecipient, UpdateSourceTrigger=PropertyChanged}" />
+                                <TextBlock Style="{StaticResource ErrorText}" Text="{Binding GmailRecipientError}" />
+                            </StackPanel>
+                            <TextBlock Grid.Row="3" Style="{StaticResource SectionLabel}" Text="テストメール" />
+                            <StackPanel Grid.Row="3" Grid.Column="1">
+                                <Button Padding="12,6" HorizontalAlignment="Left" Content="テストメールを送信"
+                                        IsEnabled="{Binding IsTestEmailAvailable}" Click="OnSendGmailTestMail" />
+                                <TextBlock Margin="0,6,0,0" Text="{Binding LastTestMailResult}" TextWrapping="Wrap" />
+                            </StackPanel>
+                            <TextBlock Grid.Row="4" Style="{StaticResource SectionLabel}" Text="Gmail通知" />
+                            <StackPanel Grid.Row="4" Grid.Column="1">
+                                <CheckBox Content="Gmail通知を有効にする" IsEnabled="{Binding CanEnableGmailNotification}"
+                                          IsChecked="{Binding GmailNotificationEnabled}" />
+                                <TextBlock Style="{StaticResource ErrorText}" Text="{Binding GmailNotificationError}" />
+                            </StackPanel>
+                            <Border Grid.Row="5" Grid.Column="1" Margin="0,8,0,0" Padding="10" Background="#FFF8E1" CornerRadius="4">
+                                <TextBlock TextWrapping="Wrap"
+                                           Text="Google認証と送信先の設定後、Gmailで利用枠通知を受け取れます。一時的な送信失敗は60分後以降の正常監視で1回だけ再試行します。" />
+                            </Border>
+                        </Grid>
+
+                        <TextBlock Margin="0,16,0,6" FontWeight="SemiBold" Text="プライバシーとGoogle認証" />
+                        <TextBlock Text="{Binding GmailPrivacyDescription}" TextWrapping="Wrap" />
+                    </StackPanel>
                 </GroupBox>
 
                 <GroupBox Header="取得済み利用枠">
                     <StackPanel>
                         <TextBlock Margin="0,0,0,10" Foreground="#5B6573"
-                                   Text="FiveHourとWeeklyには上の既定設定が適用されます。Unknownはこの画面から有効化できません。"
+                                   Text="短期枠と週間枠には上の既定設定が適用されます。期間を識別できない枠はこの画面から有効化できません。"
                                    TextWrapping="Wrap" />
                         <ItemsControl ItemsSource="{Binding RateLimits}">
                             <ItemsControl.ItemTemplate>
@@ -262,11 +276,11 @@
                                         <StackPanel>
                                             <TextBlock FontWeight="SemiBold">
                                                 <Run Text="LimitId: " /><Run Text="{Binding LimitId}" />
-                                                <Run Text=" / Position: " /><Run Text="{Binding Position}" />
+                                                <Run Text=" / 位置: " /><Run Text="{Binding PositionDisplay}" />
                                                 <Run Text=" / 期間: " /><Run Text="{Binding WindowDurationMinutes}" /><Run Text="分" />
                                             </TextBlock>
                                             <TextBlock Margin="0,4,0,0">
-                                                <Run Text="Classification: " /><Run Text="{Binding Classification}" />
+                                                <Run Text="分類: " /><Run Text="{Binding ClassificationDisplay}" />
                                                 <Run Text=" / 適用通知: " /><Run Text="{Binding AppliedNotifications}" />
                                             </TextBlock>
                                             <TextBlock Margin="0,4,0,0" Text="{Binding NotificationStatus}" TextWrapping="Wrap" />

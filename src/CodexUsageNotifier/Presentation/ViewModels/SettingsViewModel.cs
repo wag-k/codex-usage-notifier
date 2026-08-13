@@ -13,7 +13,7 @@ using Microsoft.Extensions.Logging;
 namespace CodexUsageNotifier.Presentation.ViewModels;
 
 /// <summary>
-/// Phase 4A設定画面の編集値、入力検証、保存、および変更破棄を管理します。
+/// 設定画面の編集値、入力検証、保存、および変更破棄を管理します。
 /// </summary>
 public sealed partial class SettingsViewModel : INotifyPropertyChanged
 {
@@ -718,23 +718,23 @@ public sealed partial class SettingsViewModel : INotifyPropertyChanged
             : "回復通知閾値は1～100%で入力してください。";
         EarlyThresholdError = TryParseRange(LongWindowEarlyWarningThresholdPercent, 1, 100, out _)
             ? string.Empty
-            : "Early残量閾値は1～100%で入力してください。";
+            : "早期警告の残量閾値は1～100%で入力してください。";
         StandardThresholdError = TryParseRange(LongWindowStandardWarningThresholdPercent, 1, 100, out _)
             ? string.Empty
-            : "Standard残量閾値は1～100%で入力してください。";
+            : "通常警告の残量閾値は1～100%で入力してください。";
         FinalThresholdError = TryParseRange(LongWindowFinalWarningThresholdPercent, 1, 100, out _)
             ? string.Empty
-            : "Final残量閾値は1～100%で入力してください。";
+            : "最終警告の残量閾値は1～100%で入力してください。";
 
         bool earlyValid = TryParsePositive(LongWindowEarlyWarningHours, out int earlyHours);
         bool standardValid = TryParsePositive(LongWindowStandardWarningHours, out int standardHours);
         bool finalValid = TryParsePositive(LongWindowFinalWarningHours, out int finalHours);
-        EarlyHoursError = earlyValid ? string.Empty : "Early残り時間は正の整数で入力してください。";
-        StandardHoursError = standardValid ? string.Empty : "Standard残り時間は正の整数で入力してください。";
-        FinalHoursError = finalValid ? string.Empty : "Final残り時間は正の整数で入力してください。";
+        EarlyHoursError = earlyValid ? string.Empty : "早期警告の残り時間は正の整数で入力してください。";
+        StandardHoursError = standardValid ? string.Empty : "通常警告の残り時間は正の整数で入力してください。";
+        FinalHoursError = finalValid ? string.Empty : "最終警告の残り時間は正の整数で入力してください。";
         if (earlyValid && standardValid && finalValid && !(earlyHours > standardHours && standardHours > finalHours))
         {
-            const string orderError = "残り時間はEarly > Standard > Finalの順にしてください。";
+            const string orderError = "残り時間は早期警告 > 通常警告 > 最終警告の順にしてください。";
             EarlyHoursError = orderError;
             StandardHoursError = orderError;
             FinalHoursError = orderError;
@@ -857,8 +857,10 @@ public sealed partial class SettingsViewModel : INotifyPropertyChanged
             {
                 LimitId = window.LimitId ?? "不明",
                 Position = window.Position,
+                PositionDisplay = RateLimitDisplayFormatter.FormatPosition(window.Position),
                 WindowDurationMinutes = window.WindowDurationMinutes ?? 0,
                 Classification = window.Classification,
+                ClassificationDisplay = RateLimitDisplayFormatter.FormatClassification(window.Classification),
                 AppliedNotifications = FormatNotifications(applied),
                 IsNotificationEnabled = applied.IsAnyEnabled,
                 NotificationStatus = window.Classification == RateLimitClassification.Unknown
@@ -878,9 +880,9 @@ public sealed partial class SettingsViewModel : INotifyPropertyChanged
         ArgumentNullException.ThrowIfNull(setting);
         List<string> values = [];
         if (setting.ShortWindowRecoveryEnabled) values.Add("短期回復");
-        if (setting.LongWindowEarlyWarningEnabled) values.Add("Early");
-        if (setting.LongWindowStandardWarningEnabled) values.Add("Standard");
-        if (setting.LongWindowFinalWarningEnabled) values.Add("Final");
+        if (setting.LongWindowEarlyWarningEnabled) values.Add("早期警告");
+        if (setting.LongWindowStandardWarningEnabled) values.Add("通常警告");
+        if (setting.LongWindowFinalWarningEnabled) values.Add("最終警告");
         if (setting.LongWindowResetCompletedEnabled) values.Add("リセット完了");
         return values.Count == 0 ? "なし" : string.Join(" / ", values);
     }

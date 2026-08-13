@@ -9,7 +9,7 @@ using Forms = System.Windows.Forms;
 namespace CodexUsageNotifier.Presentation.Tray;
 
 /// <summary>
-/// タスクトレイアイコン、監視操作、およびPhase 3.1のテスト通知メニューを管理します。
+/// タスクトレイアイコン、監視操作、およびテスト通知メニューを管理します。
 /// </summary>
 public sealed class TrayIconService : IDisposable
 {
@@ -103,9 +103,9 @@ public sealed class TrayIconService : IDisposable
     {
         Forms.ToolStripMenuItem menu = new("テスト通知");
         AddTestNotificationItem(menu, "短期枠回復通知", RateLimitNotificationType.ShortWindowRecovered);
-        AddTestNotificationItem(menu, "Early通知", RateLimitNotificationType.LongWindowEarlyWarning);
-        AddTestNotificationItem(menu, "Standard通知", RateLimitNotificationType.LongWindowStandardWarning);
-        AddTestNotificationItem(menu, "Final通知", RateLimitNotificationType.LongWindowFinalWarning);
+        AddTestNotificationItem(menu, "早期警告通知", RateLimitNotificationType.LongWindowEarlyWarning);
+        AddTestNotificationItem(menu, "通常警告通知", RateLimitNotificationType.LongWindowStandardWarning);
+        AddTestNotificationItem(menu, "最終警告通知", RateLimitNotificationType.LongWindowFinalWarning);
         AddTestNotificationItem(menu, "リセット完了通知", RateLimitNotificationType.LongWindowResetCompleted);
         AddTestNotificationItem(menu, "監視障害通知", RateLimitNotificationType.MonitoringFailure);
         return menu;

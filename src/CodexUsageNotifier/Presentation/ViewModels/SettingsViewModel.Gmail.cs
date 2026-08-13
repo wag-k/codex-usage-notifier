@@ -1,5 +1,6 @@
 using CodexUsageNotifier.Application.Gmail;
 using CodexUsageNotifier.Domain.Models;
+using CodexUsageNotifier.Presentation;
 using System.Globalization;
 
 namespace CodexUsageNotifier.Presentation.ViewModels;
@@ -16,11 +17,32 @@ public sealed partial class SettingsViewModel
     private string lastGmailAuthenticationAt = "なし";
     private string lastTestMailResult = "未実行";
     private string gmailReauthenticationStatus = "不要";
+    private string gmailAvailabilityDescription =
+        "OAuthクライアントを登録するとGoogle認証を開始できます。Windows通知は引き続き利用できます。";
     private bool isGmailAuthenticationAvailable;
     private bool isGmailReauthenticationAvailable;
     private bool isGmailDisconnectAvailable;
     private bool isTestEmailAvailable;
     private GmailAuthenticationStatus gmailStatus = new() { State = GmailAuthenticationState.Unauthenticated };
+
+    /// <summary>Gmail通知が任意であることを示す説明を取得します。</summary>
+    public string GmailOptionalDescription => GmailOnboardingContent.OptionalDescription;
+
+    /// <summary>利用者自身のOAuthクライアントが必要であることを示す説明を取得します。</summary>
+    public string OAuthClientRequirementDescription => GmailOnboardingContent.OAuthClientRequirementDescription;
+
+    /// <summary>Gmail通知を設定する概要手順を取得します。</summary>
+    public string GmailSetupSteps => GmailOnboardingContent.SetupSteps;
+
+    /// <summary>Google認証とGmail権限に関するプライバシー説明を取得します。</summary>
+    public string GmailPrivacyDescription => GmailOnboardingContent.PrivacyDescription;
+
+    /// <summary>現在の状態で利用できないGmail操作と、その理由を取得します。</summary>
+    public string GmailAvailabilityDescription
+    {
+        get => gmailAvailabilityDescription;
+        private set => SetProperty(ref gmailAvailabilityDescription, value);
+    }
 
     /// <summary>OAuthクライアント設定の状態を取得します。</summary>
     public string OAuthClientConfigurationStatus
@@ -210,7 +232,11 @@ public sealed partial class SettingsViewModel
                 },
                 cancellationToken);
         gmailStatus = authentication;
-        OAuthClientConfigurationStatus = configuration.Message;
+        OAuthClientConfigurationStatus = !configuration.Exists
+            ? "未設定"
+            : configuration.IsValid
+                ? "設定済み"
+                : $"設定エラー：{configuration.Message}";
         OAuthClientConfigurationPath = configuration.StandardPath;
         GmailAuthenticationStatus = FormatAuthenticationState(gmailStatus.State);
         AuthenticatedGmailAddress = gmailStatus.AuthenticatedEmailAddress ?? "未認証";
@@ -220,6 +246,7 @@ public sealed partial class SettingsViewModel
         GmailReauthenticationStatus = gmailStatus.RequiresReauthentication
             ? $"必要：{gmailStatus.LastErrorSummary}"
             : "不要";
+        GmailAvailabilityDescription = FormatGmailAvailability(gmailStatus.State);
         UpdateGmailActionAvailability();
         OnPropertyChanged(nameof(CanEnableGmailNotification));
     }
@@ -277,7 +304,7 @@ public sealed partial class SettingsViewModel
     {
         return state switch
         {
-            GmailAuthenticationState.NotConfigured => "未設定",
+            GmailAuthenticationState.NotConfigured => "利用不可（OAuthクライアント未設定）",
             GmailAuthenticationState.Unauthenticated => "未認証",
             GmailAuthenticationState.Authenticating => "認証中",
             GmailAuthenticationState.Authenticated => "認証済み",
@@ -285,6 +312,28 @@ public sealed partial class SettingsViewModel
             GmailAuthenticationState.ReauthenticationRequired => "再認証が必要",
             GmailAuthenticationState.Error => "エラー",
             _ => "不明",
+        };
+    }
+
+    /// <summary>現在の認証状態に対応する操作案内を日本語へ変換します。</summary>
+    /// <param name="state">トークンを含まない認証状態です。</param>
+    /// <returns>利用可能な次の操作、または操作できない理由です。</returns>
+    private static string FormatGmailAvailability(GmailAuthenticationState state)
+    {
+        return state switch
+        {
+            GmailAuthenticationState.NotConfigured =>
+                "OAuthクライアントを登録するとGoogle認証を開始できます。Google認証とGmail通知は現在利用できませんが、Windows通知は利用できます。",
+            GmailAuthenticationState.Unauthenticated =>
+                "Googleアカウントで認証すると、テストメールとGmail通知を利用できます。",
+            GmailAuthenticationState.Authenticating => "Google認証の完了を待っています。",
+            GmailAuthenticationState.Authenticated or GmailAuthenticationState.RefreshRequired =>
+                "Google認証済みです。有効な送信先を入力するとテストメールとGmail通知を利用できます。",
+            GmailAuthenticationState.ReauthenticationRequired =>
+                "Googleアカウントの再認証が必要です。再認証まではGmail通知を利用できません。Windows通知は継続します。",
+            GmailAuthenticationState.Error =>
+                "Google認証状態を確認できません。設定内容を確認してください。Windows通知は継続します。",
+            _ => "Google認証状態を確認できません。Windows通知は継続します。",
         };
     }
 

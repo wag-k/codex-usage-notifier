@@ -29,6 +29,7 @@ public sealed class StatusViewModel : INotifyPropertyChanged, IUsageStatusSink
     private string lastWindowsNotification = "通知実績なし";
     private string lastGmailNotification = "通知実績なし";
     private string consecutiveFailures = "0回";
+    private bool gmailNotificationEnabled;
 
     /// <summary>Gmail認証状態の安全な提供元と実行Assemblyのバージョンを受け取ります。</summary>
     /// <param name="gmailAuthenticationStatusProvider">トークンを公開しない認証状態の提供元です。</param>
@@ -198,7 +199,8 @@ public sealed class StatusViewModel : INotifyPropertyChanged, IUsageStatusSink
             state,
             settings);
         LastSuccessfulFetch = FormatLocalDateTime(state.LastSuccessfulFetchAtUtc, "未取得");
-        GmailNotificationStatus = settings.GmailNotificationEnabled ? "有効" : "無効";
+        gmailNotificationEnabled = settings.GmailNotificationEnabled;
+        GmailNotificationStatus = gmailNotificationEnabled ? "有効" : "未設定（任意）";
         GmailAuthenticationStatus = gmailAuthenticationStatusProvider is null ? "未確認" : "確認中…";
         GmailAuthenticatedAccount = "未認証";
         LastWindowsNotification = FormatDeliveryResult(state.WindowsDeliveryResult);
@@ -225,6 +227,7 @@ public sealed class StatusViewModel : INotifyPropertyChanged, IUsageStatusSink
             RunOnUiThread(() =>
             {
                 GmailAuthenticationStatus = FormatGmailAuthenticationStatus(status);
+                GmailNotificationStatus = FormatGmailNotificationStatus(status);
                 GmailAuthenticatedAccount = string.IsNullOrWhiteSpace(status.AuthenticatedEmailAddress)
                     ? "未認証"
                     : status.AuthenticatedEmailAddress;
@@ -270,7 +273,8 @@ public sealed class StatusViewModel : INotifyPropertyChanged, IUsageStatusSink
         {
             ApplyUsageSnapshot(snapshot, state, settings);
             LastSuccessfulFetch = FormatLocalDateTime(snapshot.CapturedAtUtc, "未取得");
-            GmailNotificationStatus = settings.GmailNotificationEnabled ? "有効" : "無効";
+            gmailNotificationEnabled = settings.GmailNotificationEnabled;
+            GmailNotificationStatus = gmailNotificationEnabled ? "有効" : "無効（任意）";
             LastWindowsNotification = FormatDeliveryResult(state.WindowsDeliveryResult);
             LastGmailNotification = FormatDeliveryResult(state.GmailDeliveryResult);
             MonitoringStatus = "監視中（App Server接続済み）";
@@ -389,7 +393,7 @@ public sealed class StatusViewModel : INotifyPropertyChanged, IUsageStatusSink
                 string resetReason = FormatLastResetCompletionReason(window, state.RateLimitNotificationStates);
                 string recoverySequence = FormatRecoverySequence(window, state.RateLimitRecoveryStates);
                 string resetStatus = window.ResetsAtUtc is null ? "リセット時刻未取得" : "取得済み";
-                return $"LimitId={window.LimitId ?? "不明"}, Name={window.LimitName ?? "不明"}, Position={window.Position}, Classification={window.Classification}, Duration={window.WindowDurationMinutes?.ToString(System.Globalization.CultureInfo.CurrentCulture) ?? "不明"}分, 残り{window.RemainingPercent:0.#}%, 使用{window.UsedPercent:0.#}%, 通知設定={(windowSetting.IsAnyEnabled ? "有効" : "通知対象外")}, 有効通知={enabledTypes}, resetsAt={resetStatus}, Reset={FormatLocalDateTime(window.ResetsAtUtc, "リセット時刻未取得")}, リセットまで={FormatRemainingTime(window.ResetsAtUtc, snapshot.CapturedAtUtc)}, 最終Windows通知={lastWindowsNotification}, 最終Gmail通知={lastGmailNotification}, 最終リセット判定={resetReason}, 回復連番={recoverySequence}, Plan={window.PlanType ?? "不明"}, Reached={window.RateLimitReachedType ?? "なし"}";
+                return $"LimitId={window.LimitId ?? "不明"}, 名前={window.LimitName ?? "不明"}, 位置={RateLimitDisplayFormatter.FormatPosition(window.Position)}, 分類={RateLimitDisplayFormatter.FormatClassification(window.Classification)}, 期間={window.WindowDurationMinutes?.ToString(System.Globalization.CultureInfo.CurrentCulture) ?? "不明"}分, 残り{window.RemainingPercent:0.#}%, 使用{window.UsedPercent:0.#}%, 通知設定={(windowSetting.IsAnyEnabled ? "有効" : "通知対象外")}, 有効通知={enabledTypes}, リセット時刻の取得={resetStatus}, 次回リセット={FormatLocalDateTime(window.ResetsAtUtc, "リセット時刻未取得")}, リセットまで={FormatRemainingTime(window.ResetsAtUtc, snapshot.CapturedAtUtc)}, 最終Windows通知={lastWindowsNotification}, 最終Gmail通知={lastGmailNotification}, 最終リセット判定={resetReason}, 回復連番={recoverySequence}, プラン={window.PlanType ?? "不明"}, 制限状態={window.RateLimitReachedType ?? "なし"}";
             }));
     }
 
@@ -430,27 +434,27 @@ public sealed class StatusViewModel : INotifyPropertyChanged, IUsageStatusSink
         List<string> types = [];
         if (setting.ShortWindowRecoveryEnabled)
         {
-            types.Add("ShortWindowRecovered");
+            types.Add("短期枠回復");
         }
 
         if (setting.LongWindowEarlyWarningEnabled)
         {
-            types.Add("Early");
+            types.Add("早期警告");
         }
 
         if (setting.LongWindowStandardWarningEnabled)
         {
-            types.Add("Standard");
+            types.Add("通常警告");
         }
 
         if (setting.LongWindowFinalWarningEnabled)
         {
-            types.Add("Final");
+            types.Add("最終警告");
         }
 
         if (setting.LongWindowResetCompletedEnabled)
         {
-            types.Add("LongWindowResetCompleted");
+            types.Add("新しい利用期間の開始");
         }
 
         return types.Count == 0 ? "なし" : string.Join("/", types);
@@ -487,7 +491,7 @@ public sealed class StatusViewModel : INotifyPropertyChanged, IUsageStatusSink
                 : latest.GmailLastAttemptedAtUtc;
         return latest is null
             ? "なし"
-            : $"{latest.NotificationType}/{latest.NotificationStage} {FormatLocalDateTime(attemptedAtUtc, "時刻不明")}";
+            : $"{RateLimitDisplayFormatter.FormatNotificationType(latest.NotificationType)}/{RateLimitDisplayFormatter.FormatNotificationStage(latest.NotificationStage)} {FormatLocalDateTime(attemptedAtUtc, "時刻不明")}";
     }
 
     /// <summary>
@@ -508,7 +512,7 @@ public sealed class StatusViewModel : INotifyPropertyChanged, IUsageStatusSink
                 && state.ResetCompletionReason is not null
                 && HasSameIdentity(state, window))
             .OrderByDescending(state => state.ConditionMetAtUtc)
-            .Select(state => state.ResetCompletionReason!.Value.ToString())
+            .Select(state => RateLimitDisplayFormatter.FormatResetCompletionReason(state.ResetCompletionReason!.Value))
             .FirstOrDefault() ?? "なし";
     }
 
@@ -556,7 +560,7 @@ public sealed class StatusViewModel : INotifyPropertyChanged, IUsageStatusSink
                 RateLimitNotificationSetting windowSetting = RateLimitNotificationSettingsResolver.Resolve(
                     window,
                     settings);
-                return $"LimitId={window.LimitId ?? "不明"}, Position={window.Position}, Duration={window.WindowDurationMinutes?.ToString(System.Globalization.CultureInfo.CurrentCulture) ?? "不明"}分：{(windowSetting.IsAnyEnabled ? FormatEnabledNotificationTypes(windowSetting) : "通知対象外")}";
+                return $"LimitId={window.LimitId ?? "不明"}, 位置={RateLimitDisplayFormatter.FormatPosition(window.Position)}, 期間={window.WindowDurationMinutes?.ToString(System.Globalization.CultureInfo.CurrentCulture) ?? "不明"}分：{(windowSetting.IsAnyEnabled ? FormatEnabledNotificationTypes(windowSetting) : "通知対象外")}";
             }));
     }
 
@@ -612,7 +616,7 @@ public sealed class StatusViewModel : INotifyPropertyChanged, IUsageStatusSink
         ArgumentNullException.ThrowIfNull(status);
         string stateText = status.State switch
         {
-            GmailAuthenticationState.NotConfigured => "OAuth設定なし",
+            GmailAuthenticationState.NotConfigured => "利用不可（OAuthクライアント未設定）",
             GmailAuthenticationState.Unauthenticated => "未認証",
             GmailAuthenticationState.Authenticating => "認証中",
             GmailAuthenticationState.Authenticated => "認証済み",
@@ -622,6 +626,20 @@ public sealed class StatusViewModel : INotifyPropertyChanged, IUsageStatusSink
             _ => "不明",
         };
         return stateText;
+    }
+
+    /// <summary>Gmailの認証状態と現在設定から任意チャネルの利用状態を表示します。</summary>
+    /// <param name="status">トークンを含まない認証状態です。</param>
+    /// <returns>有効、無効、または未設定（任意）です。</returns>
+    private string FormatGmailNotificationStatus(GmailAuthenticationStatus status)
+    {
+        ArgumentNullException.ThrowIfNull(status);
+        if (status.State == GmailAuthenticationState.NotConfigured)
+        {
+            return "未設定（任意）";
+        }
+
+        return gmailNotificationEnabled ? "有効" : "無効（任意）";
     }
 
     /// <summary>通知チャネルごとの直近配送結果を表示用に整形します。</summary>

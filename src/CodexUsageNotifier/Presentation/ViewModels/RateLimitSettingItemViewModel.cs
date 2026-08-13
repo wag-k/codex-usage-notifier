@@ -18,6 +18,11 @@ public sealed class RateLimitSettingItemViewModel
     public RateLimitPosition Position { get; init; }
 
     /// <summary>
+    /// App Serverレスポンス内の位置を一般利用者向けの日本語で取得します。
+    /// </summary>
+    public string PositionDisplay { get; init; } = string.Empty;
+
+    /// <summary>
     /// 利用枠の期間を分単位で取得します。
     /// </summary>
     public int WindowDurationMinutes { get; init; }
@@ -26,6 +31,11 @@ public sealed class RateLimitSettingItemViewModel
     /// 利用枠の分類を取得します。
     /// </summary>
     public RateLimitClassification Classification { get; init; }
+
+    /// <summary>
+    /// 利用枠の分類を一般利用者向けの日本語で取得します。
+    /// </summary>
+    public string ClassificationDisplay { get; init; } = string.Empty;
 
     /// <summary>
     /// 現在適用される通知種類の表示を取得します。

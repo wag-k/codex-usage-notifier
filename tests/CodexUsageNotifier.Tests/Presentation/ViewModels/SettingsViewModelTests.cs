@@ -34,6 +34,73 @@ public sealed class SettingsViewModelTests
         Assert.IsFalse(context.ViewModel.CanSave);
     }
 
+    /// <summary>Gmailが未設定でもGmailを無効のまま一般設定を保存できることを検証します。</summary>
+    [TestMethod]
+    public async Task SaveAsync_GmailNotConfigured_AllowsSavingGeneralSettings()
+    {
+        TestContext context = CreateContext(AppSettings.CreateDefault());
+        SetGmailNotConfigured(context);
+        await context.ViewModel.LoadAsync(CancellationToken.None);
+        context.ViewModel.FallbackPollingMinutes = "30";
+
+        bool saved = await context.ViewModel.SaveAsync(CancellationToken.None);
+
+        Assert.IsTrue(saved);
+        Assert.AreEqual(30, context.SettingsRepository.Settings.FallbackPollingMinutes);
+        Assert.IsFalse(context.SettingsRepository.Settings.GmailNotificationEnabled);
+    }
+
+    /// <summary>Gmailが未設定でもWindows通知を有効なまま利用できることを検証します。</summary>
+    [TestMethod]
+    public async Task LoadAsync_GmailNotConfigured_KeepsWindowsNotificationsAvailable()
+    {
+        TestContext context = CreateContext(AppSettings.CreateDefault());
+        SetGmailNotConfigured(context);
+
+        await context.ViewModel.LoadAsync(CancellationToken.None);
+
+        Assert.IsTrue(context.ViewModel.WindowsNotificationEnabled);
+        StringAssert.Contains(context.ViewModel.GmailAvailabilityDescription, "Windows通知は利用できます");
+    }
+
+    /// <summary>Gmail未設定の案内に任意機能であることが明記されることを検証します。</summary>
+    [TestMethod]
+    public async Task LoadAsync_GmailNotConfigured_ShowsOptionalDescription()
+    {
+        TestContext context = CreateContext(AppSettings.CreateDefault());
+        SetGmailNotConfigured(context);
+
+        await context.ViewModel.LoadAsync(CancellationToken.None);
+
+        StringAssert.Contains(context.ViewModel.GmailOptionalDescription, "任意");
+        Assert.AreEqual("未設定", context.ViewModel.OAuthClientConfigurationStatus);
+    }
+
+    /// <summary>OAuth未設定時は認証操作を無効にし、その理由を表示することを検証します。</summary>
+    [TestMethod]
+    public async Task LoadAsync_OAuthNotConfigured_DisablesAuthenticationWithReason()
+    {
+        TestContext context = CreateContext(AppSettings.CreateDefault());
+        SetGmailNotConfigured(context);
+
+        await context.ViewModel.LoadAsync(CancellationToken.None);
+
+        Assert.IsFalse(context.ViewModel.IsGmailAuthenticationAvailable);
+        StringAssert.Contains(context.ViewModel.GmailAvailabilityDescription, "OAuthクライアントを登録");
+    }
+
+    /// <summary>有効なOAuthクライアント設定がある未認証状態では認証操作を有効にすることを検証します。</summary>
+    [TestMethod]
+    public async Task LoadAsync_OAuthConfigured_EnablesAuthentication()
+    {
+        TestContext context = CreateContext(AppSettings.CreateDefault());
+
+        await context.ViewModel.LoadAsync(CancellationToken.None);
+
+        Assert.IsTrue(context.ViewModel.IsGmailAuthenticationAvailable);
+        Assert.AreEqual("設定済み", context.ViewModel.OAuthClientConfigurationStatus);
+    }
+
     /// <summary>
     /// 編集値を保存するとJSON保存先と監視反映先へ同じ設定が渡ることを検証します。
     /// </summary>
@@ -185,7 +252,7 @@ public sealed class SettingsViewModelTests
         context.ViewModel.LongWindowStandardWarningHours = "24";
 
         Assert.IsFalse(context.ViewModel.CanSave);
-        StringAssert.Contains(context.ViewModel.EarlyHoursError, "Early > Standard > Final");
+        StringAssert.Contains(context.ViewModel.EarlyHoursError, "早期警告 > 通常警告 > 最終警告");
     }
 
     /// <summary>
@@ -448,9 +515,29 @@ public sealed class SettingsViewModelTests
             settingsRepository,
             stateStore,
             settingsSink,
+            configurationService,
             authenticationService,
             testMailSender,
             autoStartManager);
+    }
+
+    /// <summary>テスト対象をOAuthクライアント未設定状態へ変更します。</summary>
+    /// <param name="context">変更するテストコンテキストです。</param>
+    private static void SetGmailNotConfigured(TestContext context)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        context.ConfigurationService.Status = new GoogleOAuthClientConfigurationStatus
+        {
+            Exists = false,
+            IsValid = false,
+            StandardPath = "C:\\test\\auth\\google-oauth-client.json",
+            Message = "OAuthクライアント設定がありません。",
+        };
+        context.AuthenticationService.Status = new GmailAuthenticationStatus
+        {
+            State = GmailAuthenticationState.NotConfigured,
+            HasClientConfiguration = false,
+        };
     }
 
     /// <summary>固定UTC時刻を返すテスト用時刻提供元です。</summary>
@@ -549,6 +636,7 @@ public sealed class SettingsViewModelTests
             InMemorySettingsRepository settingsRepository,
             ApplicationStateStore stateStore,
             RecordingSettingsChangeSink settingsSink,
+            StubGoogleOAuthClientConfigurationService configurationService,
             StubGmailAuthenticationService authenticationService,
             StubGmailTestMailSender testMailSender,
             StubAutoStartManager autoStartManager)
@@ -557,6 +645,7 @@ public sealed class SettingsViewModelTests
             SettingsRepository = settingsRepository;
             StateStore = stateStore;
             SettingsSink = settingsSink;
+            ConfigurationService = configurationService;
             AuthenticationService = authenticationService;
             TestMailSender = testMailSender;
             AutoStartManager = autoStartManager;
@@ -581,6 +670,11 @@ public sealed class SettingsViewModelTests
         /// 監視反映の記録先を取得します。
         /// </summary>
         public RecordingSettingsChangeSink SettingsSink { get; }
+
+        /// <summary>
+        /// OAuthクライアント設定状態を制御するテスト用サービスを取得します。
+        /// </summary>
+        public StubGoogleOAuthClientConfigurationService ConfigurationService { get; }
 
         /// <summary>
         /// Gmail認証状態を制御するテスト用サービスを取得します。

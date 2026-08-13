@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Windows;
 using CodexUsageNotifier.Presentation;
 using CodexUsageNotifier.Presentation.ViewModels;
@@ -7,7 +8,7 @@ using Microsoft.Win32;
 namespace CodexUsageNotifier;
 
 /// <summary>
-/// Phase 4Aのアプリケーション設定を編集するWPFウィンドウです。
+/// アプリケーション設定を編集するWPFウィンドウです。
 /// </summary>
 public partial class SettingsWindow : Window
 {
@@ -93,6 +94,31 @@ public partial class SettingsWindow : Window
         if (dialog.ShowDialog(this) == true)
         {
             await viewModel.ImportGoogleOAuthClientAsync(dialog.FileName, CancellationToken.None);
+        }
+    }
+
+    /// <summary>固定された信頼済みURLを既定ブラウザーで開き、Gmail OAuth設定手順を表示します。</summary>
+    /// <param name="sender">設定手順ボタンです。</param>
+    /// <param name="e">クリックイベントです。</param>
+    private void OnOpenGmailOAuthSetup(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = PublicDocumentationLinks.GmailOAuthSetupUri.AbsoluteUri,
+                UseShellExecute = true,
+            });
+        }
+        catch (Exception exception) when (
+            exception is InvalidOperationException or System.ComponentModel.Win32Exception)
+        {
+            System.Windows.MessageBox.Show(
+                this,
+                "Gmail通知の設定手順をブラウザーで開けませんでした。READMEから設定手順を確認してください。",
+                "設定手順を開けません",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
         }
     }
 

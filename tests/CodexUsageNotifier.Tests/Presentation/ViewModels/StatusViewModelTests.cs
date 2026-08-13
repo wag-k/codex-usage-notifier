@@ -40,11 +40,11 @@ public sealed class StatusViewModelTests
 
         Assert.AreEqual("5時間枠：未観測", viewModel.FiveHourRateLimit);
         StringAssert.Contains(viewModel.WeeklyRateLimit, "残り 65%");
-        StringAssert.Contains(viewModel.AllRateLimits, "Position=Primary");
-        StringAssert.Contains(viewModel.AllRateLimits, "Classification=Weekly");
-        StringAssert.Contains(viewModel.NotificationTarget, "Duration=10080分");
+        StringAssert.Contains(viewModel.AllRateLimits, "位置=第1枠");
+        StringAssert.Contains(viewModel.AllRateLimits, "分類=週間枠");
+        StringAssert.Contains(viewModel.NotificationTarget, "期間=10080分");
         StringAssert.Contains(viewModel.AllRateLimits, "通知設定=有効");
-        StringAssert.Contains(viewModel.AllRateLimits, "有効通知=Early/Standard/Final/LongWindowResetCompleted");
+        StringAssert.Contains(viewModel.AllRateLimits, "有効通知=早期警告/通常警告/最終警告/新しい利用期間の開始");
         StringAssert.Contains(viewModel.AllRateLimits, "リセット時刻未取得");
         StringAssert.Contains(viewModel.AllRateLimits, "回復連番=0");
     }
@@ -77,7 +77,7 @@ public sealed class StatusViewModelTests
                 },
             });
 
-        StringAssert.Contains(viewModel.AllRateLimits, "Classification=Unknown");
+        StringAssert.Contains(viewModel.AllRateLimits, "分類=期間不明");
         StringAssert.Contains(viewModel.AllRateLimits, "通知設定=通知対象外");
         StringAssert.Contains(viewModel.NotificationTarget, "通知対象外");
     }
@@ -114,7 +114,7 @@ public sealed class StatusViewModelTests
 
         viewModel.Initialize(AppSettings.CreateDefault(), new ApplicationState());
 
-        Assert.AreEqual("無効", viewModel.GmailNotificationStatus);
+        Assert.AreEqual("未設定（任意）", viewModel.GmailNotificationStatus);
     }
 
     /// <summary>WindowsとGmailの直近配送結果を互いに混同せず表示することを検証します。</summary>
@@ -188,7 +188,7 @@ public sealed class StatusViewModelTests
         viewModel.Initialize(AppSettings.CreateDefault(), state);
 
         StringAssert.Contains(viewModel.AllRateLimits, "最終Windows通知=なし");
-        StringAssert.Contains(viewModel.AllRateLimits, "最終Gmail通知=ShortWindowRecovered/Recovered");
+        StringAssert.Contains(viewModel.AllRateLimits, "最終Gmail通知=短期枠回復/回復");
         StringAssert.Contains(viewModel.AllRateLimits, "2026/08/10");
     }
 
