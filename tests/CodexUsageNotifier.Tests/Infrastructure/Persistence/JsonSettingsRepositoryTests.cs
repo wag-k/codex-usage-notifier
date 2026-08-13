@@ -26,8 +26,8 @@ public sealed class JsonSettingsRepositoryTests
         Assert.AreEqual("codex", settings.CodexExecutablePath);
         Assert.AreEqual(0, settings.RateLimitNotifications.Count);
         Assert.IsTrue(settings.ShortWindowRecoveryEnabled);
-        Assert.AreEqual(50, settings.LongWindowEarlyWarningThresholdPercent);
-        Assert.AreEqual(48, settings.LongWindowEarlyWarningHours);
+        Assert.AreEqual(75, settings.LongWindowEarlyWarningThresholdPercent);
+        Assert.AreEqual(120, settings.LongWindowEarlyWarningHours);
         Assert.AreEqual(20, settings.LongWindowStandardWarningThresholdPercent);
         Assert.AreEqual(24, settings.LongWindowStandardWarningHours);
         Assert.AreEqual(10, settings.LongWindowFinalWarningThresholdPercent);

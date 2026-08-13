@@ -48,8 +48,8 @@ public sealed partial class SettingsViewModel : INotifyPropertyChanged
     private bool shortWindowRecoveryEnabled;
     private string shortWindowRecoveryThresholdPercent = "99";
     private bool longWindowEarlyWarningEnabled;
-    private string longWindowEarlyWarningHours = "48";
-    private string longWindowEarlyWarningThresholdPercent = "50";
+    private string longWindowEarlyWarningHours = "120";
+    private string longWindowEarlyWarningThresholdPercent = "75";
     private bool longWindowStandardWarningEnabled;
     private string longWindowStandardWarningHours = "24";
     private string longWindowStandardWarningThresholdPercent = "20";

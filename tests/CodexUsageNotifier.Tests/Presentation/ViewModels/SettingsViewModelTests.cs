@@ -27,7 +27,8 @@ public sealed class SettingsViewModelTests
 
         Assert.IsTrue(context.ViewModel.WindowsNotificationEnabled);
         Assert.AreEqual("99", context.ViewModel.ShortWindowRecoveryThresholdPercent);
-        Assert.AreEqual("48", context.ViewModel.LongWindowEarlyWarningHours);
+        Assert.AreEqual("120", context.ViewModel.LongWindowEarlyWarningHours);
+        Assert.AreEqual("75", context.ViewModel.LongWindowEarlyWarningThresholdPercent);
         Assert.IsFalse(context.ViewModel.GmailNotificationEnabled);
         Assert.IsFalse(context.ViewModel.HasUnsavedChanges);
         Assert.IsFalse(context.ViewModel.CanSave);

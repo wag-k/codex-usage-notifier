@@ -55,12 +55,12 @@ public sealed record AppSettings
     /// <summary>
     /// 長期枠の早期通知に使用する残量閾値を取得または設定します。
     /// </summary>
-    public int LongWindowEarlyWarningThresholdPercent { get; init; } = 50;
+    public int LongWindowEarlyWarningThresholdPercent { get; init; } = 75;
 
     /// <summary>
     /// 長期枠の早期通知を開始する残り時間を時間単位で取得または設定します。
     /// </summary>
-    public int LongWindowEarlyWarningHours { get; init; } = 48;
+    public int LongWindowEarlyWarningHours { get; init; } = 120;
 
     /// <summary>
     /// Weekly枠のStandard通知を既定で有効にするかどうかを取得または設定します。

@@ -268,7 +268,7 @@ Phase 4BはGoogle認証と設定画面からのテストメール送信を提供
    - 初期値：00:00～07:00
 8. 長期枠リセット前通知
    - 初期表示：有効
-   - 早期通知：48時間以内かつ残量50%以上
+   - 早期通知：120時間以内かつ残量75%以上
    - 通常通知：24時間以内かつ残量20%以上
    - 最終通知：6時間以内かつ残量10%以上
 9. 長期枠リセット完了通知
@@ -471,7 +471,7 @@ Weeklyなどの長期枠について、リセット前通知を有効にでき�
 
 | 通知種別 | 通知段階 | 有効な残り時間 | 残量条件 |
 |---|---|---:|---:|
-| LongWindowEarlyWarning | Early | 48時間以内、24時間より前 | 50%以上 |
+| LongWindowEarlyWarning | Early | 120時間以内、24時間より前 | 75%以上 |
 | LongWindowStandardWarning | Standard | 24時間以内、6時間より前 | 20%以上 |
 | LongWindowFinalWarning | Final | 6時間以内、リセット時刻より前 | 10%以上 |
 
@@ -575,7 +575,7 @@ Phase 4Bでは、OAuthクライアント設定の状態と標準配置先、認�
 
 1. 短期・長期の残量閾値は1～100%とする。
 2. Early、Standard、Finalの残り時間は正の整数とする。
-3. 残り時間は`Early > Standard > Final`の順とする。初期値は48時間、24時間、6時間とする。
+3. 残り時間は`Early > Standard > Final`の順とする。初期値は120時間、24時間、6時間とする。
 4. Gmail送信先は、入力されている場合だけメールアドレス形式とする。
 5. 補助確認間隔は1～1440分とする。
 6. 通知禁止時間は`HH:mm`形式とし、開始時刻が終了時刻より後の日付をまたぐ設定を許容する。
@@ -865,8 +865,8 @@ Weeklyなどの長期枠について、新しい利用期間の開始を`LongWin
 | ShortWindowRecoveryEnabled | true |
 | ShortWindowRecoveryThresholdPercent | 99 |
 | LongWindowEarlyWarningEnabled | true |
-| LongWindowEarlyWarningThresholdPercent | 50 |
-| LongWindowEarlyWarningHours | 48 |
+| LongWindowEarlyWarningThresholdPercent | 75 |
+| LongWindowEarlyWarningHours | 120 |
 | LongWindowStandardWarningEnabled | true |
 | LongWindowStandardWarningThresholdPercent | 20 |
 | LongWindowStandardWarningHours | 24 |
@@ -938,7 +938,7 @@ Weeklyなどの長期枠について、新しい利用期間の開始を`LongWin
    │      └─ resetsAtなし：閾値未満→以上の遷移ごとに回復連番を増加
    │
    ├─ 長期枠通知が有効な各枠
-   │      ├─ resetsAtあり：48～24時間前・残量50%以上ならEarly候補
+   │      ├─ resetsAtあり：120～24時間前・残量75%以上ならEarly候補
    │      ├─ resetsAtあり：24～6時間前・残量20%以上ならStandard候補
    │      ├─ resetsAtあり：6時間前～リセット前・残量10%以上ならFinal候補
    │      ├─ resetsAtなし：リセット前通知は候補にしない
@@ -1007,7 +1007,7 @@ Weeklyなどの長期枠について、新しい利用期間の開始を`LongWin
 
 ### AC-006 長期枠リセット前通知
 
-- リセットまで48時間以内かつ残量50%以上のWeekly枠が早期通知候補になる。
+- リセットまで120時間以内かつ残量75%以上のWeekly枠が早期通知候補になる。
 - リセットまで24時間以内かつ残量20%以上のWeekly枠が通常通知候補になる。
 - リセットまで6時間以内かつ残量10%以上のWeekly枠が最終通知候補になる。
 - 同じ利用枠・リセット期間・通知段階について複数回送られない。
@@ -1273,7 +1273,7 @@ Weeklyなどの長期枠について、新しい利用期間の開始を`LongWin
 6. 起動時通知判定
 7. 日付をまたぐ通知禁止時間
 8. 保留通知終了時の再取得と再判定
-9. 長期枠の48時間・50%以上の早期通知判定
+9. 長期枠の120時間・75%以上の早期通知判定
 10. 長期枠の24時間・20%以上の通常通知判定
 11. 長期枠の6時間・10%以上の最終通知判定
 12. 期限切れのリセット前通知の破棄

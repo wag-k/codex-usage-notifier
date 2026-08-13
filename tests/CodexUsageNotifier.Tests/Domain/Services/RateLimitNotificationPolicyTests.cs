@@ -29,7 +29,7 @@ public sealed class RateLimitNotificationPolicyTests
             RateLimitPosition.Secondary,
             RateLimitClassification.Weekly,
             10080,
-            50,
+            75,
             NowUtc.AddHours(47));
 
         RateLimitNotificationEvaluation result = Evaluate([shortWindow, weeklyWindow]);
@@ -294,13 +294,13 @@ public sealed class RateLimitNotificationPolicyTests
     }
 
     /// <summary>
-    /// Weeklyの48時間、24時間、6時間の各段階を設定どおり判定できることを検証します。
+    /// Weeklyの120時間、24時間、6時間の各段階を設定どおり判定できることを検証します。
     /// </summary>
     [TestMethod]
     public void Evaluate_WeeklyWarningBands_ReturnExpectedStages()
     {
         RateLimitNotificationCandidate early = Evaluate([
-            CreateWindow("early", RateLimitPosition.Primary, RateLimitClassification.Weekly, 10080, 50, NowUtc.AddHours(47))
+            CreateWindow("early", RateLimitPosition.Primary, RateLimitClassification.Weekly, 10080, 75, NowUtc.AddHours(119))
         ]).Candidates.Single();
         RateLimitNotificationCandidate standard = Evaluate([
             CreateWindow("standard", RateLimitPosition.Primary, RateLimitClassification.Weekly, 10080, 20, NowUtc.AddHours(23))
@@ -368,7 +368,7 @@ public sealed class RateLimitNotificationPolicyTests
             RateLimitPosition.Secondary,
             RateLimitClassification.Weekly,
             10080,
-            50,
+            75,
             NowUtc.AddHours(47));
         RateLimitNotificationState delivered = new()
         {
