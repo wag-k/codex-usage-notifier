@@ -7,7 +7,7 @@
 | 文書名 | Codex Usage Notifier 仕様書 |
 | 対象バージョン | 初版（MVP） |
 | 作成日 | 2026-08-04 |
-| 最終更新日 | 2026-08-12（Phase 5Bライセンス整備） |
+| 最終更新日 | 2026-08-14（Phase 5C Public Beta Readiness） |
 | 対象OS | Windows 11 |
 | 開発基盤 | .NET 8 / WPF |
 | 主目的 | 任意のCodex利用枠を監視し、期間に応じた回復・リセット前・リセット完了をWindowsとGmailへ通知する |
@@ -711,6 +711,19 @@ Weeklyなどの長期枠について、新しい利用期間の開始を`LongWin
 7. 保守中のアプリ終了はCancellationTokenで中止し、バックグラウンドTaskを放置しない。
 8. 保守結果は件数だけをログへ記録し、履歴内容をログへ出力しない。
 
+### FR-023 Public Beta向けGmailオンボーディング
+
+1. Gmail通知は任意機能とし、OAuthクライアント、Googleアカウント、Gmail送信先が未設定でもCodex監視、Windows通知、設定保存を利用できる。
+2. Gmail未設定はエラーではなく「未設定（任意）」と表示し、Windows通知だけでも利用できることをGmail設定セクション上部へ常時表示する。
+3. 現在の公開版はBring Your Own OAuth Client方式とし、利用者自身のGoogle Cloudプロジェクトでデスクトップアプリ用OAuthクライアントを作成する必要があること、共通OAuthクライアントを提供しないことを表示する。
+4. OAuth未設定時は、Google Cloudプロジェクト作成、Gmail API有効化、デスクトップアプリ用クライアント作成、JSON登録、Google認証、テスト送信、Gmail通知有効化までの簡易手順をアプリ内に表示する。
+5. 認証、テスト送信、Gmail通知を無効にする場合は、OAuth未設定、未認証、無効な送信先等の理由を色だけに依存せず文字で表示する。
+6. 詳細手順は`docs/gmail-oauth-setup.md`に記載し、アプリから固定HTTPS URL `https://github.com/wag-k/codex-usage-notifier/blob/main/docs/gmail-oauth-setup.md`だけをシステム既定ブラウザーで開く。ユーザー入力URLは実行しない。
+7. Gmailのパスワードを取得しないこと、システム既定ブラウザーを使用すること、DPAPI CurrentUserでPC内へ保存すること、開発者のサーバーへ認証情報を送信しないこと、受信メールを読み取らないこと、送信に必要な権限だけを使うことを設定画面へ表示する。
+8. Public UIには`Phase 4B`等の開発フェーズ名を表示せず、内部enumの認証状態、利用枠分類、通知種別、通知段階、リセット完了判定理由を一般ユーザー向け日本語へ変換する。
+9. `Early`、`Standard`、`Final`の画面表示は、それぞれ「早期警告」「通常警告」「最終警告」とする。Domain enumと永続化値は変更しない。
+10. 本要件は表示と導線だけを対象とし、通知判定、再試行、Quiet Hours、OAuth方式、OAuthスコープ、DPAPI方式、state/settings schemaを変更しない。
+
 ## 7. 非機能要件
 
 ### NFR-001 信頼性
@@ -1261,6 +1274,18 @@ Weeklyなどの長期枠について、新しい利用期間の開始を`LongWin
 - Release ZIP生成処理自身が同じ監査を必須実行し、手動実行でも監査を迂回できない。
 - ZIP生成後に`LICENSE`、`THIRD-PARTY-NOTICES.txt`、監査結果、およびruntime licenseディレクトリの存在と非ゼロサイズを検証する。
 
+### AC-038 Public Beta user experience
+
+- Gmailを完全に未設定のまま、Windows通知を有効にして一般設定を保存し、Codex監視を継続できる。
+- Gmail未設定を「未設定（任意）」と表示し、Windows通知だけでも利用可能であることを設定画面だけで理解できる。
+- OAuthクライアント未設定時はGoogle認証操作を無効にし、登録すると利用可能になる理由と8段階の簡易手順を表示できる。
+- 有効なデスクトップアプリ用OAuthクライアント設定後は、Google認証操作を有効にできる。
+- Gmailの受信メールを読み取らないこと、送信用権限だけを使うこと、DPAPI CurrentUserで保護すること、開発者サーバーへ認証情報を送らないことをアプリ内で確認できる。
+- 詳細手順ボタンは固定されたGitHubのHTTPS URLだけを既定ブラウザーで開く。
+- MainWindow、SettingsWindow、トレイ、MessageBox、Windows通知、Gmail通知、状態画面、操作結果へ番号付きPhase名を表示しない。
+- 内部認証状態enum、Classification、通知種別、通知段階、リセット完了判定理由をそのまま表示しない。
+- 本対応によりstate schema、settings schema、通知判定、Windows／Gmail再試行、および週間枠リセット完了通知が変化しない。
+
 ## 11. 単体テスト対象
 
 最低限、次を単体テストする。
@@ -1421,6 +1446,18 @@ Weeklyなどの長期枠について、新しい利用期間の開始を`LongWin
 154. Unknown licenseと要確認ライセンスを検出した場合の監査失敗
 155. Release ZIPへの`LICENSE`、`THIRD-PARTY-NOTICES.txt`、NuGet／.NET runtimeライセンス原文の同梱
 156. Release ZIPからのOAuth設定、認証情報、設定、状態、履歴、ログの除外
+157. Gmail未設定状態での一般設定保存
+158. Gmail未設定状態でのWindows通知有効化維持
+159. Gmail未設定表示に「任意」が含まれること
+160. OAuthクライアント未設定理由の表示
+161. OAuthクライアント設定後のGoogle認証操作有効化
+162. Gmail受信メールを読み取らない説明の存在
+163. Windows通知だけでも利用可能という説明の存在
+164. Public UIに`Phase 4B`が含まれないこと
+165. Public UIに`Phase 4C`が含まれないこと
+166. Public UIにその他の番号付きPhase名が含まれないこと
+167. Gmail設定手順リンクが固定された信頼済みHTTPS URLであること
+168. Gmail認証状態の内部enum名を画面へ直接表示しないこと
 
 ## 12. 実装上の設計方針
 
@@ -1725,6 +1762,18 @@ Phase 5Aではインストーラー、MSIX、MSI、ClickOnce、GitHub Actions、
 
 Phase 5BではGitHub Release、タグpush、MSI／MSIX／ClickOnce、コード署名、自動更新、正式アイコン、Single File、trimming、AOTを実装しない。
 
+### Phase 5C：Public Beta Readiness
+
+- Gmail通知が任意であり、Windows-onlyで利用できる案内
+- 利用者自身のGoogle Cloudプロジェクトを使うOAuthクライアント準備案内
+- アプリ内の8段階簡易手順、無効理由、プライバシーと権限説明
+- 固定GitHub URLで開く詳細Gmail OAuth設定ドキュメント
+- Public UIからの開発Phase名と内部enum表示の除去
+- `Early`、`Standard`、`Final`の「早期警告」「通常警告」「最終警告」への表示変換
+- Public Beta向けUI回帰テストとRelease品質ゲート再確認
+
+Phase 5Cは表示と利用者向け文書だけを対象とする。state/settings schema、OAuth方式、OAuthスコープ、DPAPI保存、通知判定、週間枠リセット完了判定、Windows／Gmail再試行、Release workflowは変更しない。
+
 ## 16. 未決事項
 
 以下は実装開始後、実機確認を踏まえて決定してよい。
@@ -1755,3 +1804,6 @@ Phase 5BではGitHub Release、タグpush、MSI／MSIX／ClickOnce、コード�
   https://developers.google.com/api-client-library/dotnet/guide/aaa_oauth
 - Google Workspace: Create access credentials  
   https://developers.google.com/workspace/guides/create-credentials
+- [Gmail API OAuth scopes](https://developers.google.com/workspace/gmail/api/auth/scopes)
+- [Google Auth Platform: Manage App Audience](https://support.google.com/cloud/answer/15549945)
+- [OAuth 2.0 security best practices](https://developers.google.com/identity/protocols/oauth2/resources/best-practices)
