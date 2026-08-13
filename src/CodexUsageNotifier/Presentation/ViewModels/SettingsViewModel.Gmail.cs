@@ -26,16 +26,16 @@ public sealed partial class SettingsViewModel
     private GmailAuthenticationStatus gmailStatus = new() { State = GmailAuthenticationState.Unauthenticated };
 
     /// <summary>Gmail通知が任意であることを示す説明を取得します。</summary>
-    public string GmailOptionalDescription => GmailOnboardingContent.OptionalDescription;
+    public string GmailOptionalDescription { get; } = GmailOnboardingContent.OptionalDescription;
 
     /// <summary>利用者自身のOAuthクライアントが必要であることを示す説明を取得します。</summary>
-    public string OAuthClientRequirementDescription => GmailOnboardingContent.OAuthClientRequirementDescription;
+    public string OAuthClientRequirementDescription { get; } = GmailOnboardingContent.OAuthClientRequirementDescription;
 
     /// <summary>Gmail通知を設定する概要手順を取得します。</summary>
-    public string GmailSetupSteps => GmailOnboardingContent.SetupSteps;
+    public string GmailSetupSteps { get; } = GmailOnboardingContent.SetupSteps;
 
     /// <summary>Google認証とGmail権限に関するプライバシー説明を取得します。</summary>
-    public string GmailPrivacyDescription => GmailOnboardingContent.PrivacyDescription;
+    public string GmailPrivacyDescription { get; } = GmailOnboardingContent.PrivacyDescription;
 
     /// <summary>現在の状態で利用できないGmail操作と、その理由を取得します。</summary>
     public string GmailAvailabilityDescription
