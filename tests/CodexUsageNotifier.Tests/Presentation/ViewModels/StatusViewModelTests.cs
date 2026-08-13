@@ -146,6 +146,27 @@ public sealed class StatusViewModelTests
         StringAssert.Contains(viewModel.LastGmailNotification, "一時的な送信失敗です。");
     }
 
+    /// <summary>保存済みの監視障害enum名を状態画面へそのまま表示しないことを検証します。</summary>
+    [TestMethod]
+    public void Initialize_MonitoringFailureSummary_ShowsJapaneseText()
+    {
+        StatusViewModel viewModel = new();
+        ApplicationState state = new()
+        {
+            WindowsDeliveryResult = new DeliveryResultState
+            {
+                Status = DeliveryStatus.Succeeded,
+                AttemptedAtUtc = DateTimeOffset.UnixEpoch,
+                Summary = nameof(RateLimitNotificationType.MonitoringFailure),
+            },
+        };
+
+        viewModel.Initialize(AppSettings.CreateDefault(), state);
+
+        StringAssert.Contains(viewModel.LastWindowsNotification, "監視障害通知");
+        Assert.IsFalse(viewModel.LastWindowsNotification.Contains("MonitoringFailure", StringComparison.Ordinal));
+    }
+
     /// <summary>Gmailだけが成功した利用枠でもGmail最終通知を表示することを検証します。</summary>
     [TestMethod]
     public void Initialize_GmailOnlyWindowSuccess_ShowsGmailNotificationWithOwnTimestamp()

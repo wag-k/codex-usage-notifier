@@ -660,8 +660,21 @@ public sealed class StatusViewModel : INotifyPropertyChanged, IUsageStatusSink
             DeliveryStatus.Expired => "期限切れ",
             _ => "未実行",
         };
-        string summary = string.IsNullOrWhiteSpace(result.Summary) ? string.Empty : $" / {result.Summary}";
+        string summary = string.IsNullOrWhiteSpace(result.Summary)
+            ? string.Empty
+            : $" / {FormatDeliverySummary(result.Summary)}";
         return $"{FormatLocalDateTime(result.AttemptedAtUtc, "時刻不明")} / {statusText}{summary}";
+    }
+
+    /// <summary>保存済み配送概要に含まれる既知の内部用語を画面向け表示へ変換します。</summary>
+    /// <param name="summary">通知処理が保存した機密情報を含まない概要です。</param>
+    /// <returns>一般ユーザー向けの日本語概要です。</returns>
+    private static string FormatDeliverySummary(string summary)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(summary);
+        return string.Equals(summary, nameof(RateLimitNotificationType.MonitoringFailure), StringComparison.Ordinal)
+            ? "監視障害通知"
+            : summary;
     }
 
     /// <summary>
