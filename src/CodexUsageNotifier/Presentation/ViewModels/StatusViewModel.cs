@@ -22,13 +22,25 @@ public sealed class StatusViewModel : INotifyPropertyChanged, IUsageStatusSink
     private string resetCredits = "未取得";
     private string monitoringStatus = "開始待ち";
     private string lastSuccessfulFetch = "未取得";
+    private string lastSuccessfulFetchShort = "未取得";
     private string nextCheck = "未設定";
+    private string nextCheckShort = "未設定";
     private string gmailNotificationStatus = "無効";
     private string gmailAuthenticationStatus = "未確認";
     private string gmailAuthenticatedAccount = "未認証";
     private string lastWindowsNotification = "通知実績なし";
     private string lastGmailNotification = "通知実績なし";
+    private string lastWindowsNotificationSummary = "通知実績なし";
+    private string lastGmailNotificationSummary = "通知実績なし";
     private string consecutiveFailures = "0回";
+    private RateLimitCardViewModel fiveHourCard = RateLimitCardViewModel.CreateUnobserved("5時間枠（短期枠）");
+    private RateLimitCardViewModel weeklyCard = RateLimitCardViewModel.CreateUnobserved("週間枠");
+    private string monitoringHeadline = "開始待ち";
+    private string monitoringDetail = "監視サービスを準備しています";
+    private DashboardVisualState monitoringVisualState = DashboardVisualState.Unobserved;
+    private string windowsNotificationStatus = "有効";
+    private string maskedGmailAccount = "未認証";
+    private IReadOnlyList<RecentNotificationViewModel> recentNotifications = Array.Empty<RecentNotificationViewModel>();
     private bool gmailNotificationEnabled;
 
     /// <summary>Gmail認証状態の安全な提供元と実行Assemblyのバージョンを受け取ります。</summary>
@@ -63,6 +75,77 @@ public sealed class StatusViewModel : INotifyPropertyChanged, IUsageStatusSink
 
     /// <summary>状態画面に表示するRelease Versionを取得します。</summary>
     public string ApplicationVersion => $"Version {applicationVersionProvider.Version}";
+
+    /// <summary>5時間枠をグラフィカルに表示するカードを取得します。</summary>
+    public RateLimitCardViewModel FiveHourCard
+    {
+        get => fiveHourCard;
+        private set => SetProperty(ref fiveHourCard, value);
+    }
+
+    /// <summary>週間枠をグラフィカルに表示するカードを取得します。</summary>
+    public RateLimitCardViewModel WeeklyCard
+    {
+        get => weeklyCard;
+        private set => SetProperty(ref weeklyCard, value);
+    }
+
+    /// <summary>監視状態の短い見出しを取得します。</summary>
+    public string MonitoringHeadline
+    {
+        get => monitoringHeadline;
+        private set => SetProperty(ref monitoringHeadline, value);
+    }
+
+    /// <summary>監視状態の補足を取得します。</summary>
+    public string MonitoringDetail
+    {
+        get => monitoringDetail;
+        private set => SetProperty(ref monitoringDetail, value);
+    }
+
+    /// <summary>監視状態に応じた表示状態を取得します。</summary>
+    public DashboardVisualState MonitoringVisualState
+    {
+        get => monitoringVisualState;
+        private set => SetProperty(ref monitoringVisualState, value);
+    }
+
+    /// <summary>Windows通知設定の短い表示を取得します。</summary>
+    public string WindowsNotificationStatus
+    {
+        get => windowsNotificationStatus;
+        private set => SetProperty(ref windowsNotificationStatus, value);
+    }
+
+    /// <summary>概要画面向けにマスクしたGmailアカウントを取得します。</summary>
+    public string MaskedGmailAccount
+    {
+        get => maskedGmailAccount;
+        private set => SetProperty(ref maskedGmailAccount, value);
+    }
+
+    /// <summary>直近のWindows通知とGmail通知を新しい順で取得します。</summary>
+    public IReadOnlyList<RecentNotificationViewModel> RecentNotifications
+    {
+        get => recentNotifications;
+        private set
+        {
+            if (EqualityComparer<IReadOnlyList<RecentNotificationViewModel>>.Default.Equals(
+                recentNotifications,
+                value))
+            {
+                return;
+            }
+
+            recentNotifications = value;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(RecentNotifications)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(HasRecentNotifications)));
+        }
+    }
+
+    /// <summary>表示できる直近通知があるかを取得します。</summary>
+    public bool HasRecentNotifications => RecentNotifications.Count > 0;
 
     /// <summary>
     /// 5時間枠の表示文字列を取得します。
@@ -127,6 +210,13 @@ public sealed class StatusViewModel : INotifyPropertyChanged, IUsageStatusSink
         private set => SetProperty(ref lastSuccessfulFetch, value);
     }
 
+    /// <summary>秒を省いた最終取得時刻を取得します。</summary>
+    public string LastSuccessfulFetchShort
+    {
+        get => lastSuccessfulFetchShort;
+        private set => SetProperty(ref lastSuccessfulFetchShort, value);
+    }
+
     /// <summary>
     /// 次回確認時刻の表示文字列を取得します。
     /// </summary>
@@ -134,6 +224,13 @@ public sealed class StatusViewModel : INotifyPropertyChanged, IUsageStatusSink
     {
         get => nextCheck;
         private set => SetProperty(ref nextCheck, value);
+    }
+
+    /// <summary>秒を省いた次回確認時刻を取得します。</summary>
+    public string NextCheckShort
+    {
+        get => nextCheckShort;
+        private set => SetProperty(ref nextCheckShort, value);
     }
 
     /// <summary>
@@ -175,6 +272,20 @@ public sealed class StatusViewModel : INotifyPropertyChanged, IUsageStatusSink
         private set => SetProperty(ref lastGmailNotification, value);
     }
 
+    /// <summary>Windowsチャネルの直近配送結果をカード用に取得します。</summary>
+    public string LastWindowsNotificationSummary
+    {
+        get => lastWindowsNotificationSummary;
+        private set => SetProperty(ref lastWindowsNotificationSummary, value);
+    }
+
+    /// <summary>Gmailチャネルの直近配送結果をカード用に取得します。</summary>
+    public string LastGmailNotificationSummary
+    {
+        get => lastGmailNotificationSummary;
+        private set => SetProperty(ref lastGmailNotificationSummary, value);
+    }
+
     /// <summary>
     /// 連続失敗回数の表示文字列を取得します。
     /// </summary>
@@ -199,13 +310,22 @@ public sealed class StatusViewModel : INotifyPropertyChanged, IUsageStatusSink
             state,
             settings);
         LastSuccessfulFetch = FormatLocalDateTime(state.LastSuccessfulFetchAtUtc, "未取得");
+        LastSuccessfulFetchShort = FormatShortLocalDateTime(state.LastSuccessfulFetchAtUtc, "未取得");
         gmailNotificationEnabled = settings.GmailNotificationEnabled;
         GmailNotificationStatus = gmailNotificationEnabled ? "有効" : "未設定（任意）";
+        WindowsNotificationStatus = settings.WindowsNotificationEnabled ? "有効" : "無効";
         GmailAuthenticationStatus = gmailAuthenticationStatusProvider is null ? "未確認" : "確認中…";
         GmailAuthenticatedAccount = "未認証";
-        LastWindowsNotification = FormatDeliveryResult(state.WindowsDeliveryResult);
-        LastGmailNotification = FormatDeliveryResult(state.GmailDeliveryResult);
+        MaskedGmailAccount = "未認証";
+        UpdateDeliveryResults(state);
         ConsecutiveFailures = $"{state.ConsecutiveFailures}回";
+        if (state.ConsecutiveFailures > 0)
+        {
+            SetMonitoringPresentation(
+                "再接続待ち",
+                $"連続失敗 {state.ConsecutiveFailures}回",
+                DashboardVisualState.Danger);
+        }
     }
 
     /// <summary>
@@ -231,6 +351,7 @@ public sealed class StatusViewModel : INotifyPropertyChanged, IUsageStatusSink
                 GmailAuthenticatedAccount = string.IsNullOrWhiteSpace(status.AuthenticatedEmailAddress)
                     ? "未認証"
                     : status.AuthenticatedEmailAddress;
+                MaskedGmailAccount = EmailAddressMaskFormatter.Mask(status.AuthenticatedEmailAddress);
             });
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -243,6 +364,7 @@ public sealed class StatusViewModel : INotifyPropertyChanged, IUsageStatusSink
             {
                 GmailAuthenticationStatus = "状態取得エラー";
                 GmailAuthenticatedAccount = "確認できません";
+                MaskedGmailAccount = "確認できません";
             });
         }
     }
@@ -252,7 +374,14 @@ public sealed class StatusViewModel : INotifyPropertyChanged, IUsageStatusSink
     /// </summary>
     public void SetChecking()
     {
-        RunOnUiThread(() => MonitoringStatus = "利用枠を確認中…");
+        RunOnUiThread(() =>
+        {
+            MonitoringStatus = "利用枠を確認中…";
+            SetMonitoringPresentation(
+                "確認中",
+                "Codex App Serverから最新情報を取得しています",
+                DashboardVisualState.Checking);
+        });
     }
 
     /// <summary>
@@ -273,11 +402,16 @@ public sealed class StatusViewModel : INotifyPropertyChanged, IUsageStatusSink
         {
             ApplyUsageSnapshot(snapshot, state, settings);
             LastSuccessfulFetch = FormatLocalDateTime(snapshot.CapturedAtUtc, "未取得");
+            LastSuccessfulFetchShort = FormatShortLocalDateTime(snapshot.CapturedAtUtc, "未取得");
             gmailNotificationEnabled = settings.GmailNotificationEnabled;
             GmailNotificationStatus = gmailNotificationEnabled ? "有効" : "無効（任意）";
-            LastWindowsNotification = FormatDeliveryResult(state.WindowsDeliveryResult);
-            LastGmailNotification = FormatDeliveryResult(state.GmailDeliveryResult);
+            WindowsNotificationStatus = settings.WindowsNotificationEnabled ? "有効" : "無効";
+            UpdateDeliveryResults(state);
             MonitoringStatus = "監視中（App Server接続済み）";
+            SetMonitoringPresentation(
+                "正常に監視中",
+                "Codex App Server 接続済み",
+                DashboardVisualState.Normal);
             ConsecutiveFailures = "0回";
         });
     }
@@ -288,7 +422,11 @@ public sealed class StatusViewModel : INotifyPropertyChanged, IUsageStatusSink
     /// <param name="nextCheckAtUtc">次回確認UTC時刻です。予約がなければnullです。</param>
     public void SetNextCheck(DateTimeOffset? nextCheckAtUtc)
     {
-        RunOnUiThread(() => NextCheck = FormatLocalDateTime(nextCheckAtUtc, "未設定"));
+        RunOnUiThread(() =>
+        {
+            NextCheck = FormatLocalDateTime(nextCheckAtUtc, "未設定");
+            NextCheckShort = FormatShortLocalDateTime(nextCheckAtUtc, "未設定");
+        });
     }
 
     /// <summary>
@@ -302,6 +440,10 @@ public sealed class StatusViewModel : INotifyPropertyChanged, IUsageStatusSink
         RunOnUiThread(() =>
         {
             MonitoringStatus = $"再接続待ち：{message}";
+            SetMonitoringPresentation(
+                "再接続待ち",
+                message,
+                DashboardVisualState.Danger);
             ConsecutiveFailures = $"{consecutiveFailures}回";
         });
     }
@@ -326,6 +468,14 @@ public sealed class StatusViewModel : INotifyPropertyChanged, IUsageStatusSink
 
         FiveHourRateLimit = FormatRateLimit(snapshot.FiveHourCandidate, "5時間枠：未観測", snapshot.CapturedAtUtc);
         WeeklyRateLimit = FormatRateLimit(snapshot.WeeklyCandidate, "週間枠：未観測", snapshot.CapturedAtUtc);
+        FiveHourCard = RateLimitCardViewModel.Create(
+            "5時間枠（短期枠）",
+            snapshot.FiveHourCandidate,
+            snapshot.CapturedAtUtc);
+        WeeklyCard = RateLimitCardViewModel.Create(
+            "週間枠",
+            snapshot.WeeklyCandidate,
+            snapshot.CapturedAtUtc);
         AllRateLimits = FormatAllRateLimits(
             snapshot,
             state,
@@ -578,6 +728,77 @@ public sealed class StatusViewModel : INotifyPropertyChanged, IUsageStatusSink
     }
 
     /// <summary>
+    /// 監視状態の構造化表示を更新します。
+    /// </summary>
+    /// <param name="headline">短い状態見出しです。</param>
+    /// <param name="detail">状態の補足です。</param>
+    /// <param name="visualState">色分けに使用する表示状態です。</param>
+    private void SetMonitoringPresentation(
+        string headline,
+        string detail,
+        DashboardVisualState visualState)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(headline);
+        ArgumentException.ThrowIfNullOrWhiteSpace(detail);
+        MonitoringHeadline = headline;
+        MonitoringDetail = detail;
+        MonitoringVisualState = visualState;
+    }
+
+    /// <summary>
+    /// チャネル別配送結果と直近通知一覧を構造化表示へ反映します。
+    /// </summary>
+    /// <param name="state">永続化済みのアプリケーション状態です。</param>
+    private void UpdateDeliveryResults(ApplicationState state)
+    {
+        ArgumentNullException.ThrowIfNull(state);
+        LastWindowsNotification = FormatDeliveryResult(state.WindowsDeliveryResult);
+        LastGmailNotification = FormatDeliveryResult(state.GmailDeliveryResult);
+        LastWindowsNotificationSummary = FormatDeliveryCardText(state.WindowsDeliveryResult);
+        LastGmailNotificationSummary = FormatDeliveryCardText(state.GmailDeliveryResult);
+
+        List<(string Channel, DeliveryResultState Result)> results = [];
+        if (state.WindowsDeliveryResult?.AttemptedAtUtc is not null)
+        {
+            results.Add(("Windows", state.WindowsDeliveryResult));
+        }
+
+        if (state.GmailDeliveryResult?.AttemptedAtUtc is not null)
+        {
+            results.Add(("Gmail", state.GmailDeliveryResult));
+        }
+
+        RecentNotifications = results
+            .OrderByDescending(item => item.Result.AttemptedAtUtc)
+            .Take(3)
+            .Select(item => new RecentNotificationViewModel
+            {
+                Channel = item.Channel,
+                Summary = string.IsNullOrWhiteSpace(item.Result.Summary)
+                    ? "通知を処理しました"
+                    : FormatDeliverySummary(item.Result.Summary),
+                AttemptedAtText = item.Result.AttemptedAtUtc!.Value
+                    .ToLocalTime()
+                    .ToString("MM/dd HH:mm", System.Globalization.CultureInfo.CurrentCulture),
+                StatusText = FormatDeliveryStatus(item.Result.Status),
+                IsSucceeded = item.Result.Status == DeliveryStatus.Succeeded,
+            })
+            .ToArray();
+    }
+
+    /// <summary>配送状態を短い日本語表示へ変換します。</summary>
+    /// <param name="status">変換する配送状態です。</param>
+    /// <returns>配送状態の日本語表示です。</returns>
+    private static string FormatDeliveryStatus(DeliveryStatus status) => status switch
+    {
+        DeliveryStatus.Succeeded => "成功",
+        DeliveryStatus.Failed => "失敗",
+        DeliveryStatus.InProgress => "送信中",
+        DeliveryStatus.Expired => "期限切れ",
+        _ => "未実行",
+    };
+
+    /// <summary>
     /// WPFのUIスレッド上で表示更新処理を実行します。
     /// </summary>
     /// <param name="action">実行する表示更新処理です。</param>
@@ -603,6 +824,16 @@ public sealed class StatusViewModel : INotifyPropertyChanged, IUsageStatusSink
     private static string FormatLocalDateTime(DateTimeOffset? value, string emptyText)
     {
         return value?.ToLocalTime().ToString("yyyy/MM/dd HH:mm:ss", System.Globalization.CultureInfo.CurrentCulture)
+            ?? emptyText;
+    }
+
+    /// <summary>UTC時刻を秒なしのカード表示へ変換します。</summary>
+    /// <param name="value">UTCとして保存された時刻です。</param>
+    /// <param name="emptyText">値がない場合の表示です。</param>
+    /// <returns>月日と時分によるローカル時刻です。</returns>
+    private static string FormatShortLocalDateTime(DateTimeOffset? value, string emptyText)
+    {
+        return value?.ToLocalTime().ToString("MM/dd HH:mm", System.Globalization.CultureInfo.CurrentCulture)
             ?? emptyText;
     }
 
@@ -664,6 +895,22 @@ public sealed class StatusViewModel : INotifyPropertyChanged, IUsageStatusSink
             ? string.Empty
             : $" / {FormatDeliverySummary(result.Summary)}";
         return $"{FormatLocalDateTime(result.AttemptedAtUtc, "時刻不明")} / {statusText}{summary}";
+    }
+
+    /// <summary>配送結果を小カード向けの簡潔な表示へ変換します。</summary>
+    /// <param name="result">チャネル専用の配送結果です。</param>
+    /// <returns>状態、概要、時分を含む短い表示です。</returns>
+    private static string FormatDeliveryCardText(DeliveryResultState? result)
+    {
+        if (result?.AttemptedAtUtc is null)
+        {
+            return "通知実績なし";
+        }
+
+        string summary = string.IsNullOrWhiteSpace(result.Summary)
+            ? FormatDeliveryStatus(result.Status)
+            : FormatDeliverySummary(result.Summary);
+        return $"{summary} ・ {FormatShortLocalDateTime(result.AttemptedAtUtc, "時刻不明")}";
     }
 
     /// <summary>保存済み配送概要に含まれる既知の内部用語を画面向け表示へ変換します。</summary>
