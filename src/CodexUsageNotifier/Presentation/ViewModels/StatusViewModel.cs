@@ -919,9 +919,35 @@ public sealed class StatusViewModel : INotifyPropertyChanged, IUsageStatusSink
     private static string FormatDeliverySummary(string summary)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(summary);
-        return string.Equals(summary, nameof(RateLimitNotificationType.MonitoringFailure), StringComparison.Ordinal)
-            ? "監視障害通知"
-            : summary;
+        return summary
+            .Replace(
+                $"{nameof(RateLimitNotificationType.ShortWindowRecovered)}/{nameof(RateLimitNotificationStage.Recovered)}",
+                "短期枠の回復",
+                StringComparison.Ordinal)
+            .Replace(
+                $"{nameof(RateLimitNotificationType.LongWindowEarlyWarning)}/{nameof(RateLimitNotificationStage.Early)}",
+                "週間枠の早期警告",
+                StringComparison.Ordinal)
+            .Replace(
+                $"{nameof(RateLimitNotificationType.LongWindowStandardWarning)}/{nameof(RateLimitNotificationStage.Standard)}",
+                "週間枠の通常警告",
+                StringComparison.Ordinal)
+            .Replace(
+                $"{nameof(RateLimitNotificationType.LongWindowFinalWarning)}/{nameof(RateLimitNotificationStage.Final)}",
+                "週間枠の最終警告",
+                StringComparison.Ordinal)
+            .Replace(
+                $"{nameof(RateLimitNotificationType.LongWindowResetCompleted)}/{nameof(RateLimitNotificationStage.Completed)}",
+                "週間枠の新しい利用期間を確認",
+                StringComparison.Ordinal)
+            .Replace(
+                nameof(RateLimitNotificationType.NewRateLimitDetected),
+                "新しい利用枠を検出",
+                StringComparison.Ordinal)
+            .Replace(
+                nameof(RateLimitNotificationType.MonitoringFailure),
+                "監視障害通知",
+                StringComparison.Ordinal);
     }
 
     /// <summary>

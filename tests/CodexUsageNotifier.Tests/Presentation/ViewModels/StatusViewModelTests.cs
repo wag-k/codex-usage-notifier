@@ -171,6 +171,30 @@ public sealed class StatusViewModelTests
         Assert.IsFalse(viewModel.LastWindowsNotification.Contains("MonitoringFailure", StringComparison.Ordinal));
     }
 
+    /// <summary>保存済みのリセット完了概要をダッシュボード上で日本語化することを検証します。</summary>
+    [TestMethod]
+    public void Initialize_ResetCompletedSummary_DoesNotExposeInternalEnumNames()
+    {
+        StatusViewModel viewModel = new();
+        ApplicationState state = new()
+        {
+            GmailDeliveryResult = new DeliveryResultState
+            {
+                Status = DeliveryStatus.Succeeded,
+                AttemptedAtUtc = DateTimeOffset.UnixEpoch,
+                Summary = "1件: LongWindowResetCompleted/Completed",
+            },
+        };
+
+        viewModel.Initialize(AppSettings.CreateDefault(), state);
+
+        StringAssert.Contains(viewModel.LastGmailNotificationSummary, "週間枠の新しい利用期間を確認");
+        StringAssert.Contains(viewModel.RecentNotifications[0].Summary, "週間枠の新しい利用期間を確認");
+        Assert.IsFalse(viewModel.LastGmailNotificationSummary.Contains(
+            nameof(RateLimitNotificationType.LongWindowResetCompleted),
+            StringComparison.Ordinal));
+    }
+
     /// <summary>Gmailだけが成功した利用枠でもGmail最終通知を表示することを検証します。</summary>
     [TestMethod]
     public void Initialize_GmailOnlyWindowSuccess_ShowsGmailNotificationWithOwnTimestamp()
