@@ -13,6 +13,12 @@ Codex App Serverが返す任意の利用枠をWindows上で観測し、利用枠
 
 Gmail通知は任意です。GoogleアカウントやGoogle Cloudを設定しなくても、Windows通知だけでCodex Usage Notifierを利用できます。Gmailを使う場合、現在の公開版では利用者自身のデスクトップアプリ用OAuthクライアントが必要です。
 
+## スクリーンショット
+
+![Codex Usage Notifierの利用枠ダッシュボード](./docs/images/dashboard-overview.jpg)
+
+5時間枠が未観測で、週間枠だけを取得できた場合の表示例です。利用率や時刻は撮影時点の値で、Googleアカウントは概要画面上でマスクしています。
+
 ## 主な機能
 
 - タスクトレイに常駐
