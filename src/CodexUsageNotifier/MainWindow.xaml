@@ -1,87 +1,407 @@
 <Window x:Class="CodexUsageNotifier.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:controls="clr-namespace:CodexUsageNotifier.Presentation.Controls"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         mc:Ignorable="d"
         Title="Codex Usage Notifier"
-        Width="720"
-        Height="700"
-        MinWidth="620"
-        MinHeight="520"
-        WindowStartupLocation="CenterScreen">
-    <Grid Background="#F3F5F7">
-        <ScrollViewer VerticalScrollBarVisibility="Auto">
-            <StackPanel Margin="28">
-                <DockPanel>
-                    <Button DockPanel.Dock="Right" Padding="14,7" Content="設定を開く" Click="OnOpenSettings" />
-                    <StackPanel>
-                        <TextBlock VerticalAlignment="Center" FontSize="26" FontWeight="SemiBold" Text="Codex Usage Notifier" />
-                        <TextBlock Foreground="#5B6573" Text="{Binding ApplicationVersion}" />
-                    </StackPanel>
-                </DockPanel>
-                <TextBlock Margin="0,6,0,24"
-                           Foreground="#5B6573"
-                           Text="Codexの利用枠を監視し、Windows通知と任意のGmail通知でお知らせします。" />
+        Width="960"
+        Height="740"
+        MinWidth="700"
+        MinHeight="460"
+        WindowStartupLocation="CenterScreen"
+        Background="#F5F7FB"
+        FontFamily="Segoe UI"
+        Foreground="#172033"
+        SnapsToDevicePixels="True"
+        UseLayoutRounding="True">
+    <Window.Resources>
+        <SolidColorBrush x:Key="PrimaryBrush" Color="#2563EB" />
+        <SolidColorBrush x:Key="SuccessBrush" Color="#16A34A" />
+        <SolidColorBrush x:Key="WarningBrush" Color="#D97706" />
+        <SolidColorBrush x:Key="DangerBrush" Color="#DC2626" />
+        <SolidColorBrush x:Key="MutedBrush" Color="#667085" />
+        <SolidColorBrush x:Key="UnobservedBrush" Color="#98A2B3" />
 
-                <Border Padding="22" Background="White" CornerRadius="10">
+        <Style x:Key="CardStyle" TargetType="Border">
+            <Setter Property="Background" Value="White" />
+            <Setter Property="BorderBrush" Value="#E5EAF2" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="12" />
+            <Setter Property="Padding" Value="18" />
+        </Style>
+
+        <Style x:Key="SectionTitleStyle" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="17" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Foreground" Value="#172033" />
+        </Style>
+
+        <Style x:Key="SecondaryTextStyle" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{StaticResource MutedBrush}" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+        </Style>
+
+        <Style x:Key="PrimaryButtonStyle" TargetType="Button">
+            <Setter Property="MinHeight" Value="36" />
+            <Setter Property="Padding" Value="15,6" />
+            <Setter Property="Background" Value="{StaticResource PrimaryBrush}" />
+            <Setter Property="Foreground" Value="White" />
+            <Setter Property="BorderBrush" Value="{StaticResource PrimaryBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="ButtonBorder"
+                                Padding="{TemplateBinding Padding}"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="8">
+                            <ContentPresenter HorizontalAlignment="Center"
+                                              VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="ButtonBorder" Property="Opacity" Value="0.9" />
+                            </Trigger>
+                            <Trigger Property="IsKeyboardFocused" Value="True">
+                                <Setter TargetName="ButtonBorder" Property="BorderBrush" Value="#BFDBFE" />
+                                <Setter TargetName="ButtonBorder" Property="BorderThickness" Value="2" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="UsageRingStyle" TargetType="controls:UsageRing">
+            <Setter Property="RingBrush" Value="{StaticResource PrimaryBrush}" />
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding VisualState}" Value="Warning">
+                    <Setter Property="RingBrush" Value="{StaticResource WarningBrush}" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding VisualState}" Value="Danger">
+                    <Setter Property="RingBrush" Value="{StaticResource DangerBrush}" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding VisualState}" Value="Unobserved">
+                    <Setter Property="RingBrush" Value="{StaticResource UnobservedBrush}" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+
+        <DataTemplate x:Key="RateLimitCardTemplate">
+            <Border Style="{StaticResource CardStyle}">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="118" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <controls:UsageRing Width="108"
+                                        Height="108"
+                                        Margin="0,4,10,4"
+                                        HorizontalAlignment="Left"
+                                        IsObserved="{Binding IsObserved}"
+                                        Percentage="{Binding RemainingPercent}"
+                                        Style="{StaticResource UsageRingStyle}" />
+                    <StackPanel Grid.Column="1"
+                                Margin="10,0,0,0"
+                                VerticalAlignment="Center">
+                        <TextBlock FontSize="16"
+                                   FontWeight="SemiBold"
+                                   Text="{Binding Title}" />
+                        <TextBlock Margin="0,2,0,9"
+                                   FontSize="12"
+                                   Foreground="{StaticResource MutedBrush}"
+                                   Text="{Binding ClassificationText}" />
+                        <TextBlock FontSize="14"
+                                   FontWeight="SemiBold"
+                                   Text="{Binding UsedPercentText}" />
+                        <TextBlock Margin="0,7,0,0"
+                                   Foreground="#344054"
+                                   Text="{Binding ResetAtText}"
+                                   TextWrapping="Wrap" />
+                        <TextBlock Margin="0,2,0,0"
+                                   Foreground="{StaticResource PrimaryBrush}"
+                                   FontWeight="SemiBold"
+                                   Text="{Binding RemainingTimeText}"
+                                   TextWrapping="Wrap" />
+                    </StackPanel>
+                </Grid>
+            </Border>
+        </DataTemplate>
+    </Window.Resources>
+
+    <Grid>
+        <ScrollViewer Padding="28,24,28,28"
+                      HorizontalScrollBarVisibility="Disabled"
+                      VerticalScrollBarVisibility="Auto">
+            <StackPanel MaxWidth="1040">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel>
+                        <TextBlock FontSize="27"
+                                   FontWeight="SemiBold"
+                                   Text="Codex Usage Notifier" />
+                        <TextBlock Margin="0,2,0,0"
+                                   FontSize="12"
+                                   Foreground="{StaticResource MutedBrush}"
+                                   Text="{Binding ApplicationVersion}" />
+                        <TextBlock Margin="0,5,0,0"
+                                   Foreground="{StaticResource MutedBrush}"
+                                   Text="Codexの利用枠と通知状態をひと目で確認できます。" />
+                    </StackPanel>
+                    <Button Grid.Column="1"
+                            Margin="16,0,0,0"
+                            VerticalAlignment="Center"
+                            Click="OnOpenSettings"
+                            Style="{StaticResource PrimaryButtonStyle}"
+                            ToolTip="通知や監視の設定を開きます">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Margin="0,0,7,0"
+                                       FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
+                                       FontSize="15"
+                                       Text="&#xE713;" />
+                            <TextBlock Text="設定" />
+                        </StackPanel>
+                    </Button>
+                </Grid>
+
+                <Border Margin="0,22,0,0"
+                        Padding="22"
+                        Background="#EAF1FF"
+                        BorderBrush="#D7E4FF"
+                        BorderThickness="1"
+                        CornerRadius="14">
                     <Grid>
                         <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="190" />
+                            <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                        </Grid.RowDefinitions>
-
-                        <TextBlock Grid.Row="0" FontWeight="SemiBold" Text="5時間枠" />
-                        <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding FiveHourRateLimit}" />
-                        <TextBlock Grid.Row="1" Margin="0,14,0,0" FontWeight="SemiBold" Text="週間枠" />
-                        <TextBlock Grid.Row="1" Grid.Column="1" Margin="0,14,0,0" Text="{Binding WeeklyRateLimit}" />
-                        <TextBlock Grid.Row="2" Margin="0,14,0,0" FontWeight="SemiBold" Text="利用可能リセットクレジット数" TextWrapping="Wrap" />
-                        <TextBlock Grid.Row="2" Grid.Column="1" Margin="0,14,0,0" Text="{Binding ResetCredits}" />
-                        <TextBlock Grid.Row="3" Margin="0,14,0,0" FontWeight="SemiBold" Text="すべての利用枠" />
-                        <TextBlock Grid.Row="3" Grid.Column="1" Margin="0,14,0,0" Text="{Binding AllRateLimits}" TextWrapping="Wrap" />
-                        <TextBlock Grid.Row="4" Margin="0,14,0,0" FontWeight="SemiBold" Text="利用枠別通知設定" />
-                        <TextBlock Grid.Row="4" Grid.Column="1" Margin="0,14,0,0" Text="{Binding NotificationTarget}" TextWrapping="Wrap" />
-                        <TextBlock Grid.Row="5" Margin="0,14,0,0" FontWeight="SemiBold" Text="監視状態" />
-                        <TextBlock Grid.Row="5" Grid.Column="1" Margin="0,14,0,0" Text="{Binding MonitoringStatus}" TextWrapping="Wrap" />
-                        <TextBlock Grid.Row="6" Margin="0,14,0,0" FontWeight="SemiBold" Text="最終取得" />
-                        <TextBlock Grid.Row="6" Grid.Column="1" Margin="0,14,0,0" Text="{Binding LastSuccessfulFetch}" />
-                        <TextBlock Grid.Row="7" Margin="0,14,0,0" FontWeight="SemiBold" Text="次回確認" />
-                        <TextBlock Grid.Row="7" Grid.Column="1" Margin="0,14,0,0" Text="{Binding NextCheck}" />
-                        <TextBlock Grid.Row="8" Margin="0,14,0,0" FontWeight="SemiBold" Text="Gmail通知" />
-                        <TextBlock Grid.Row="8" Grid.Column="1" Margin="0,14,0,0" Text="{Binding GmailNotificationStatus}" />
-                        <TextBlock Grid.Row="9" Margin="0,14,0,0" FontWeight="SemiBold" Text="Gmail認証" />
-                        <TextBlock Grid.Row="9" Grid.Column="1" Margin="0,14,0,0" Text="{Binding GmailAuthenticationStatus}" TextWrapping="Wrap" />
-                        <TextBlock Grid.Row="10" Margin="0,14,0,0" FontWeight="SemiBold" Text="Googleアカウント" />
-                        <TextBlock Grid.Row="10" Grid.Column="1" Margin="0,14,0,0" Text="{Binding GmailAuthenticatedAccount}" />
-                        <TextBlock Grid.Row="11" Margin="0,14,0,0" FontWeight="SemiBold" Text="最終Windows通知" />
-                        <TextBlock Grid.Row="11" Grid.Column="1" Margin="0,14,0,0" Text="{Binding LastWindowsNotification}" TextWrapping="Wrap" />
-                        <TextBlock Grid.Row="12" Margin="0,14,0,0" FontWeight="SemiBold" Text="最終Gmail通知" />
-                        <TextBlock Grid.Row="12" Grid.Column="1" Margin="0,14,0,0" Text="{Binding LastGmailNotification}" TextWrapping="Wrap" />
-                        <TextBlock Grid.Row="13" Margin="0,14,0,0" FontWeight="SemiBold" Text="連続失敗" />
-                        <TextBlock Grid.Row="13" Grid.Column="1" Margin="0,14,0,0" Text="{Binding ConsecutiveFailures}" />
+                        <Border Width="48"
+                                Height="48"
+                                Background="{StaticResource PrimaryBrush}"
+                                CornerRadius="12">
+                            <TextBlock HorizontalAlignment="Center"
+                                       VerticalAlignment="Center"
+                                       FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
+                                       FontSize="24"
+                                       Foreground="White"
+                                       Text="&#xE7BA;" />
+                        </Border>
+                        <StackPanel Grid.Column="1"
+                                    Margin="15,0,18,0"
+                                    VerticalAlignment="Center">
+                            <TextBlock FontSize="17"
+                                       FontWeight="SemiBold"
+                                       Text="利用枠をバックグラウンドで監視しています" />
+                            <TextBlock Margin="0,3,0,0"
+                                       Foreground="#365789"
+                                       Text="回復やリセットのタイミングをWindows通知とGmail通知でお知らせします。"
+                                       TextWrapping="Wrap" />
+                        </StackPanel>
+                        <Border Grid.Column="2"
+                                Padding="10,6"
+                                VerticalAlignment="Center"
+                                Background="White"
+                                CornerRadius="14">
+                            <StackPanel Orientation="Horizontal">
+                                <Ellipse Width="8" Height="8" Margin="0,0,7,0">
+                                    <Ellipse.Style>
+                                        <Style TargetType="Ellipse">
+                                            <Setter Property="Fill" Value="{StaticResource UnobservedBrush}" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding MonitoringVisualState}" Value="Normal">
+                                                    <Setter Property="Fill" Value="{StaticResource SuccessBrush}" />
+                                                </DataTrigger>
+                                                <DataTrigger Binding="{Binding MonitoringVisualState}" Value="Checking">
+                                                    <Setter Property="Fill" Value="{StaticResource PrimaryBrush}" />
+                                                </DataTrigger>
+                                                <DataTrigger Binding="{Binding MonitoringVisualState}" Value="Danger">
+                                                    <Setter Property="Fill" Value="{StaticResource DangerBrush}" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Ellipse.Style>
+                                </Ellipse>
+                                <TextBlock FontWeight="SemiBold" Text="{Binding MonitoringHeadline}" />
+                            </StackPanel>
+                        </Border>
                     </Grid>
                 </Border>
 
-                <Border Margin="0,18,0,0" Padding="18" Background="#E8F0FE" CornerRadius="8">
-                    <TextBlock Foreground="#244A7C"
-                               Text="この画面を閉じてもアプリは終了せず、タスクトレイに常駐します。終了はトレイメニューから行ってください。"
-                               TextWrapping="Wrap" />
+                <TextBlock Margin="0,24,0,12"
+                           Style="{StaticResource SectionTitleStyle}"
+                           Text="利用状況" />
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <ContentControl Margin="0,0,7,0"
+                                    Content="{Binding FiveHourCard}"
+                                    ContentTemplate="{StaticResource RateLimitCardTemplate}" />
+                    <ContentControl Grid.Column="1"
+                                    Margin="7,0,0,0"
+                                    Content="{Binding WeeklyCard}"
+                                    ContentTemplate="{StaticResource RateLimitCardTemplate}" />
+                </Grid>
+
+                <TextBlock Margin="0,24,0,12"
+                           Style="{StaticResource SectionTitleStyle}"
+                           Text="通知と監視" />
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <Border Margin="0,0,7,0" Style="{StaticResource CardStyle}">
+                        <StackPanel>
+                            <TextBlock FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
+                                       FontSize="21"
+                                       Foreground="{StaticResource SuccessBrush}"
+                                       Text="&#xE73E;" />
+                            <TextBlock Margin="0,9,0,0" FontWeight="SemiBold" Text="監視状態" />
+                            <TextBlock Margin="0,3,0,0" FontSize="15" FontWeight="SemiBold" Text="{Binding MonitoringHeadline}" />
+                            <TextBlock Margin="0,3,0,0" Style="{StaticResource SecondaryTextStyle}" Text="{Binding MonitoringDetail}" />
+                            <TextBlock Margin="0,8,0,0" Style="{StaticResource SecondaryTextStyle}" Text="{Binding LastSuccessfulFetchShort, StringFormat=最終取得 {0}}" />
+                            <TextBlock Margin="0,2,0,0" Style="{StaticResource SecondaryTextStyle}" Text="{Binding NextCheckShort, StringFormat=次回確認 {0}}" />
+                        </StackPanel>
+                    </Border>
+                    <Border Grid.Column="1" Margin="7,0" Style="{StaticResource CardStyle}">
+                        <StackPanel>
+                            <TextBlock FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="21" Foreground="{StaticResource PrimaryBrush}" Text="&#xEA8F;" />
+                            <TextBlock Margin="0,9,0,0" FontWeight="SemiBold" Text="Windows通知" />
+                            <TextBlock Margin="0,3,0,0" FontSize="15" FontWeight="SemiBold" Text="{Binding WindowsNotificationStatus}" />
+                            <TextBlock Margin="0,5,0,0" Style="{StaticResource SecondaryTextStyle}" Text="{Binding LastWindowsNotificationSummary}" />
+                        </StackPanel>
+                    </Border>
+                    <Border Grid.Column="2" Margin="7,0,0,0" Style="{StaticResource CardStyle}">
+                        <StackPanel>
+                            <TextBlock FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="21" Foreground="#C5221F" Text="&#xE715;" />
+                            <TextBlock Margin="0,9,0,0" FontWeight="SemiBold" Text="Gmail通知" />
+                            <TextBlock Margin="0,3,0,0" FontSize="15" FontWeight="SemiBold" Text="{Binding GmailNotificationStatus}" />
+                            <TextBlock Margin="0,3,0,0" Style="{StaticResource SecondaryTextStyle}" Text="{Binding GmailAuthenticationStatus}" />
+                            <TextBlock Margin="0,3,0,0" Style="{StaticResource SecondaryTextStyle}" Text="{Binding MaskedGmailAccount}" />
+                            <TextBlock Margin="0,5,0,0" Style="{StaticResource SecondaryTextStyle}" Text="{Binding LastGmailNotificationSummary}" />
+                        </StackPanel>
+                    </Border>
+                </Grid>
+
+                <Grid Margin="0,24,0,12">
+                    <TextBlock Style="{StaticResource SectionTitleStyle}" Text="最近の通知" />
+                    <TextBlock HorizontalAlignment="Right" Foreground="{StaticResource MutedBrush}" Text="最新3件まで" />
+                </Grid>
+                <Border Padding="4" Style="{StaticResource CardStyle}">
+                    <Grid>
+                        <TextBlock Margin="14"
+                                   HorizontalAlignment="Center"
+                                   Foreground="{StaticResource MutedBrush}"
+                                   Text="通知実績はまだありません">
+                            <TextBlock.Style>
+                                <Style TargetType="TextBlock">
+                                    <Setter Property="Visibility" Value="Collapsed" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding HasRecentNotifications}" Value="False">
+                                            <Setter Property="Visibility" Value="Visible" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </TextBlock.Style>
+                        </TextBlock>
+                        <ItemsControl ItemsSource="{Binding RecentNotifications}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Border Padding="13,10" BorderBrush="#EDF0F5" BorderThickness="0,0,0,1">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <Border Width="30" Height="30" Background="#EEF4FF" CornerRadius="15">
+                                                <TextBlock HorizontalAlignment="Center"
+                                                           VerticalAlignment="Center"
+                                                           FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
+                                                           Foreground="{StaticResource PrimaryBrush}"
+                                                           Text="&#xE7F4;" />
+                                            </Border>
+                                            <TextBlock Grid.Column="1" Margin="11,0,12,0" VerticalAlignment="Center" FontWeight="SemiBold" Text="{Binding Summary}" TextTrimming="CharacterEllipsis" />
+                                            <TextBlock Grid.Column="2" Margin="0,0,14,0" VerticalAlignment="Center" Foreground="{StaticResource MutedBrush}" Text="{Binding AttemptedAtText}" />
+                                            <Border Grid.Column="3" Padding="9,4" VerticalAlignment="Center" Background="#EEF4FF" CornerRadius="10">
+                                                <TextBlock Foreground="{StaticResource PrimaryBrush}" Text="{Binding Channel}" />
+                                            </Border>
+                                        </Grid>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </Grid>
+                </Border>
+
+                <Expander Margin="0,20,0,0" Padding="2" Header="詳細・診断情報">
+                    <Border Margin="0,10,0,0" Style="{StaticResource CardStyle}">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="180" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+                            <TextBlock FontWeight="SemiBold" Text="リセットクレジット" />
+                            <TextBlock Grid.Column="1" Text="{Binding ResetCredits}" />
+                            <TextBlock Grid.Row="1" Margin="0,10,0,0" FontWeight="SemiBold" Text="すべての利用枠" />
+                            <TextBlock Grid.Row="1" Grid.Column="1" Margin="0,10,0,0" Text="{Binding AllRateLimits}" TextWrapping="Wrap" />
+                            <TextBlock Grid.Row="2" Margin="0,10,0,0" FontWeight="SemiBold" Text="利用枠別通知設定" />
+                            <TextBlock Grid.Row="2" Grid.Column="1" Margin="0,10,0,0" Text="{Binding NotificationTarget}" TextWrapping="Wrap" />
+                            <TextBlock Grid.Row="3" Margin="0,10,0,0" FontWeight="SemiBold" Text="監視状態" />
+                            <TextBlock Grid.Row="3" Grid.Column="1" Margin="0,10,0,0" Text="{Binding MonitoringStatus}" TextWrapping="Wrap" />
+                            <TextBlock Grid.Row="4" Margin="0,10,0,0" FontWeight="SemiBold" Text="最終取得" />
+                            <TextBlock Grid.Row="4" Grid.Column="1" Margin="0,10,0,0" Text="{Binding LastSuccessfulFetch}" />
+                            <TextBlock Grid.Row="5" Margin="0,10,0,0" FontWeight="SemiBold" Text="次回確認" />
+                            <TextBlock Grid.Row="5" Grid.Column="1" Margin="0,10,0,0" Text="{Binding NextCheck}" />
+                            <TextBlock Grid.Row="6" Margin="0,10,0,0" FontWeight="SemiBold" Text="Gmail認証" />
+                            <TextBlock Grid.Row="6" Grid.Column="1" Margin="0,10,0,0" Text="{Binding GmailAuthenticationStatus}" TextWrapping="Wrap" />
+                            <TextBlock Grid.Row="7" Margin="0,10,0,0" FontWeight="SemiBold" Text="最終Windows通知" />
+                            <TextBlock Grid.Row="7" Grid.Column="1" Margin="0,10,0,0" Text="{Binding LastWindowsNotification}" TextWrapping="Wrap" />
+                            <TextBlock Grid.Row="8" Margin="0,10,0,0" FontWeight="SemiBold" Text="最終Gmail通知" />
+                            <TextBlock Grid.Row="8" Grid.Column="1" Margin="0,10,0,0" Text="{Binding LastGmailNotification}" TextWrapping="Wrap" />
+                            <TextBlock Grid.Row="9" Margin="0,10,0,0" FontWeight="SemiBold" Text="連続失敗" />
+                            <TextBlock Grid.Row="9" Grid.Column="1" Margin="0,10,0,0" Text="{Binding ConsecutiveFailures}" />
+                        </Grid>
+                    </Border>
+                </Expander>
+
+                <Border Margin="0,18,0,0" Padding="14" Background="#EEF4FF" BorderBrush="#D7E4FF" BorderThickness="1" CornerRadius="9">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" Foreground="{StaticResource PrimaryBrush}" Text="&#xE946;" />
+                        <TextBlock Grid.Column="1" Margin="9,0" Foreground="#365789" Text="閉じても監視は続きます。終了はタスクトレイメニューから行ってください。" TextWrapping="Wrap" />
+                        <TextBlock Grid.Column="2" Foreground="{StaticResource MutedBrush}" Text="{Binding ApplicationVersion}" />
+                    </Grid>
                 </Border>
             </StackPanel>
         </ScrollViewer>

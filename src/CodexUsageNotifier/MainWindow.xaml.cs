@@ -29,12 +29,24 @@ public partial class MainWindow : System.Windows.Window
         ArgumentNullException.ThrowIfNull(settingsWindow);
 
         InitializeComponent();
+        ConfigureInitialBounds();
         DataContext = viewModel;
         this.viewModel = viewModel;
         this.applicationLifetime = applicationLifetime;
         this.settingsWindow = settingsWindow;
         Closing += OnClosing;
         Activated += OnActivated;
+    }
+
+    /// <summary>
+    /// 高DPI環境でも初期表示が作業領域からはみ出さない大きさへ調整します。
+    /// </summary>
+    private void ConfigureInitialBounds()
+    {
+        const double workAreaMargin = 32D;
+        System.Windows.Rect workArea = System.Windows.SystemParameters.WorkArea;
+        Width = Math.Max(MinWidth, Math.Min(Width, workArea.Width - workAreaMargin));
+        Height = Math.Max(MinHeight, Math.Min(Height, workArea.Height - workAreaMargin));
     }
 
     /// <summary>
