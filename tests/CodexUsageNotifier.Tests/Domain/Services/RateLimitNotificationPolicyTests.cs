@@ -17,13 +17,15 @@ public sealed class RateLimitNotificationPolicyTests
     [TestMethod]
     public void Evaluate_FiveHourAndWeekly_ReturnsBothCandidates()
     {
-        RateLimitWindow shortWindow = CreateWindow(
+        RateLimitWindow shortWindowBeforeRecovery = CreateWindow(
             "codex",
             RateLimitPosition.Primary,
             RateLimitClassification.FiveHour,
             300,
-            99,
+            98,
             NowUtc.AddHours(5));
+        RateLimitNotificationEvaluation beforeRecovery = Evaluate([shortWindowBeforeRecovery]);
+        RateLimitWindow shortWindow = WithRemaining(shortWindowBeforeRecovery, 99);
         RateLimitWindow weeklyWindow = CreateWindow(
             "codex",
             RateLimitPosition.Secondary,
@@ -32,7 +34,11 @@ public sealed class RateLimitNotificationPolicyTests
             75,
             NowUtc.AddHours(47));
 
-        RateLimitNotificationEvaluation result = Evaluate([shortWindow, weeklyWindow]);
+        RateLimitNotificationEvaluation result = Evaluate(
+            [shortWindow, weeklyWindow],
+            CreateSnapshot([shortWindowBeforeRecovery], NowUtc),
+            recoveryStates: beforeRecovery.RecoveryStates,
+            capturedAtUtc: NowUtc.AddMinutes(1));
 
         Assert.AreEqual(2, result.Candidates.Count);
         CollectionAssert.AreEquivalent(
@@ -92,10 +98,10 @@ public sealed class RateLimitNotificationPolicyTests
     }
 
     /// <summary>
-    /// リセット時刻のない短期枠が閾値以上のままなら回復通知を重複候補化しないことを検証します。
+    /// 初回観測から閾値以上の短期枠は回復通知を候補化しないことを検証します。
     /// </summary>
     [TestMethod]
-    public void Evaluate_NoResetShortWindow_RemainingAboveDoesNotDuplicate()
+    public void Evaluate_NoResetShortWindow_InitiallyAboveDoesNotNotify()
     {
         RateLimitWindow window = CreateWindow(
             "codex",
@@ -112,9 +118,9 @@ public sealed class RateLimitNotificationPolicyTests
             recoveryStates: first.RecoveryStates,
             capturedAtUtc: NowUtc.AddMinutes(1));
 
-        Assert.AreEqual(1, first.Candidates.Count);
+        Assert.AreEqual(0, first.Candidates.Count);
         Assert.AreEqual(0, second.Candidates.Count);
-        Assert.AreEqual(1, second.RecoveryStates.Single().RecoverySequence);
+        Assert.AreEqual(0, second.RecoveryStates.Single().RecoverySequence);
     }
 
     /// <summary>
@@ -143,8 +149,105 @@ public sealed class RateLimitNotificationPolicyTests
             recoveryStates: second.RecoveryStates,
             capturedAtUtc: NowUtc.AddMinutes(2));
 
-        Assert.AreEqual(2, third.RecoveryStates.Single().RecoverySequence);
-        StringAssert.EndsWith(third.Candidates.Single().RecoveryWindowId, "recovery-sequence-2");
+        Assert.AreEqual(1, third.RecoveryStates.Single().RecoverySequence);
+        StringAssert.EndsWith(third.Candidates.Single().RecoveryWindowId, "recovery-sequence-1");
+    }
+
+    /// <summary>
+    /// リセット時刻がある短期枠でも100%の初回観測と継続観測では通知しないことを検証します。
+    /// </summary>
+    [TestMethod]
+    public void Evaluate_ResetShortWindow_RemainingAtOneHundredDoesNotNotifyRepeatedly()
+    {
+        RateLimitWindow window = CreateWindow(
+            "codex",
+            RateLimitPosition.Primary,
+            RateLimitClassification.FiveHour,
+            300,
+            100,
+            NowUtc.AddHours(5));
+        RateLimitNotificationEvaluation first = Evaluate([window]);
+
+        RateLimitNotificationEvaluation second = Evaluate(
+            [window],
+            CreateSnapshot([window], NowUtc),
+            recoveryStates: first.RecoveryStates,
+            capturedAtUtc: NowUtc.AddMinutes(1));
+
+        Assert.AreEqual(0, first.Candidates.Count);
+        Assert.AreEqual(0, second.Candidates.Count);
+        Assert.AreEqual(0, second.RecoveryStates.Single().RecoverySequence);
+    }
+
+    /// <summary>
+    /// リセット時刻がある短期枠でも1ポイント低い状態からの回復だけを通知することを検証します。
+    /// </summary>
+    [TestMethod]
+    public void Evaluate_ResetShortWindow_OnePointRecoveryCreatesCandidate()
+    {
+        RateLimitWindow full = CreateWindow(
+            "codex",
+            RateLimitPosition.Primary,
+            RateLimitClassification.FiveHour,
+            300,
+            100,
+            NowUtc.AddHours(5));
+        RateLimitNotificationEvaluation initial = Evaluate([full]);
+        RateLimitWindow reduced = WithRemaining(full, 99);
+        RateLimitNotificationEvaluation afterReduction = Evaluate(
+            [reduced],
+            CreateSnapshot([full], NowUtc),
+            recoveryStates: initial.RecoveryStates,
+            capturedAtUtc: NowUtc.AddMinutes(1));
+
+        RateLimitNotificationEvaluation recovered = Evaluate(
+            [full],
+            CreateSnapshot([reduced], NowUtc.AddMinutes(1)),
+            recoveryStates: afterReduction.RecoveryStates,
+            capturedAtUtc: NowUtc.AddMinutes(2));
+
+        Assert.AreEqual(0, afterReduction.Candidates.Count);
+        Assert.AreEqual(RateLimitNotificationType.ShortWindowRecovered, recovered.Candidates.Single().NotificationType);
+        Assert.AreEqual(1, recovered.RecoveryStates.Single().RecoverySequence);
+    }
+
+    /// <summary>
+    /// 1ポイント未満の回復では通知せず、同じ低下基準から合計1ポイント以上回復した時点で通知することを検証します。
+    /// </summary>
+    [TestMethod]
+    public void Evaluate_ShortWindow_RecoveryBelowOnePointWaitsForEnoughIncrease()
+    {
+        RateLimitWindow initialWindow = CreateWindow(
+            "codex",
+            RateLimitPosition.Primary,
+            RateLimitClassification.FiveHour,
+            300,
+            100,
+            resetsAtUtc: null);
+        RateLimitNotificationEvaluation initial = Evaluate([initialWindow]);
+        RateLimitWindow reduced = WithRemaining(initialWindow, 98.5);
+        RateLimitNotificationEvaluation afterReduction = Evaluate(
+            [reduced],
+            CreateSnapshot([initialWindow], NowUtc),
+            recoveryStates: initial.RecoveryStates,
+            capturedAtUtc: NowUtc.AddMinutes(1));
+        RateLimitWindow partialRecovery = WithRemaining(initialWindow, 99);
+        RateLimitNotificationEvaluation partial = Evaluate(
+            [partialRecovery],
+            CreateSnapshot([reduced], NowUtc.AddMinutes(1)),
+            recoveryStates: afterReduction.RecoveryStates,
+            capturedAtUtc: NowUtc.AddMinutes(2));
+        RateLimitWindow enoughRecovery = WithRemaining(initialWindow, 99.5);
+
+        RateLimitNotificationEvaluation enough = Evaluate(
+            [enoughRecovery],
+            CreateSnapshot([partialRecovery], NowUtc.AddMinutes(2)),
+            recoveryStates: partial.RecoveryStates,
+            capturedAtUtc: NowUtc.AddMinutes(3));
+
+        Assert.AreEqual(0, partial.Candidates.Count);
+        Assert.AreEqual(RateLimitNotificationType.ShortWindowRecovered, enough.Candidates.Single().NotificationType);
+        Assert.AreEqual(1, enough.RecoveryStates.Single().RecoverySequence);
     }
 
     /// <summary>

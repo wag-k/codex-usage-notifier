@@ -712,8 +712,12 @@ public sealed class RateLimitGmailRetryProcessorTests
         DateTimeOffset? nowUtc = null,
         MutableTimeProvider? timeProvider = null)
     {
+        ApplicationState seededState = WithShortWindowRecoveryBaselines(
+            initialState ?? new ApplicationState { InitialSetupCompleted = true },
+            "codex",
+            "new");
         ApplicationStateStore stateStore = new(new InMemoryStateRepository(
-            initialState ?? new ApplicationState { InitialSetupCompleted = true }));
+            seededState));
         RecordingWindowsNotificationSender windowsSender = new();
         StubGmailNotificationSender gmailSender = new();
         MutableTimeProvider actualTimeProvider = timeProvider ?? new MutableTimeProvider(nowUtc ?? NowUtc);
@@ -735,6 +739,36 @@ public sealed class RateLimitGmailRetryProcessorTests
             actualTimeProvider,
             logger);
         return new TestContext(processor, stateStore, windowsSender, gmailSender, authentication, logger);
+    }
+
+    /// <summary>指定した短期枠が98%から回復する直前の状態を補います。</summary>
+    private static ApplicationState WithShortWindowRecoveryBaselines(
+        ApplicationState state,
+        params string[] limitIds)
+    {
+        ArgumentNullException.ThrowIfNull(state);
+        ArgumentNullException.ThrowIfNull(limitIds);
+        List<RateLimitRecoveryState> recoveryStates = state.RateLimitRecoveryStates.ToList();
+        foreach (string limitId in limitIds.Where(limitId => !string.IsNullOrWhiteSpace(limitId)))
+        {
+            if (recoveryStates.Any(candidate => string.Equals(candidate.LimitId, limitId, StringComparison.Ordinal)))
+            {
+                continue;
+            }
+
+            recoveryStates.Add(new RateLimitRecoveryState
+            {
+                LimitId = limitId,
+                Position = RateLimitPosition.Primary,
+                WindowDurationMinutes = 300,
+                HasObservation = true,
+                WasBelowThreshold = true,
+                LastRemainingPercent = 98,
+                RecoveryBaselineRemainingPercent = 98,
+            });
+        }
+
+        return state with { RateLimitRecoveryStates = recoveryStates };
     }
 
     /// <summary>Gmailと任意のWindows設定を有効にした設定を生成します。</summary>

@@ -315,7 +315,7 @@ public sealed class RateLimitNotificationProcessorTests
     }
 
     /// <summary>
-    /// 前の利用期間の保留を期限切れにし、現在期間の通知とは別状態として扱うことを検証します。
+    /// 前の利用期間の保留を期限切れにし、回復遷移のない現在期間では新規通知しないことを検証します。
     /// </summary>
     [TestMethod]
     public async Task ProcessAsync_DeferredFromPreviousRecoveryWindow_ExpiresOldState()
@@ -351,14 +351,14 @@ public sealed class RateLimitNotificationProcessorTests
             AppSettings.CreateDefault() with { QuietHoursEnabled = false },
             CancellationToken.None);
 
-        Assert.AreEqual(1, sender.SendCount);
-        Assert.AreEqual(2, result.State.RateLimitNotificationStates.Count);
+        Assert.AreEqual(0, sender.SendCount);
+        Assert.AreEqual(1, result.State.RateLimitNotificationStates.Count);
         Assert.AreEqual(
             1,
             result.State.RateLimitNotificationStates.Count(
                 state => state.WindowsDeliveryStatus == DeliveryStatus.Expired));
         Assert.AreEqual(
-            1,
+            0,
             result.State.RateLimitNotificationStates.Count(
                 state => state.WindowsDeliveryStatus == DeliveryStatus.Succeeded));
     }
@@ -555,11 +555,36 @@ public sealed class RateLimitNotificationProcessorTests
     }
 
     /// <summary>
+    /// 短期枠が98%から回復する直前の状態を生成します。
+    /// </summary>
+    /// <returns>短期枠の低下基準を含む状態です。</returns>
+    private static ApplicationState CreateStateBeforeShortWindowRecovery()
+    {
+        return new ApplicationState
+        {
+            InitialSetupCompleted = true,
+            RateLimitRecoveryStates =
+            [
+                new RateLimitRecoveryState
+                {
+                    LimitId = "codex",
+                    Position = RateLimitPosition.Primary,
+                    WindowDurationMinutes = 300,
+                    HasObservation = true,
+                    WasBelowThreshold = true,
+                    LastRemainingPercent = 98,
+                    RecoveryBaselineRemainingPercent = 98,
+                },
+            ],
+        };
+    }
+
+    /// <summary>
     /// メモリ上だけで状態を保持するテスト用リポジトリです。
     /// </summary>
     private sealed class InMemoryStateRepository : IApplicationStateRepository
     {
-        private ApplicationState state = new() { InitialSetupCompleted = true };
+        private ApplicationState state = CreateStateBeforeShortWindowRecovery();
 
         /// <summary>
         /// 現在の状態を返します。

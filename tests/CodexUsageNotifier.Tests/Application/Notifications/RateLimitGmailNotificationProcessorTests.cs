@@ -360,9 +360,13 @@ public sealed class RateLimitGmailNotificationProcessorTests
         DateTimeOffset? nowUtc = null,
         ApplicationStateStore? stateStore = null)
     {
+        ApplicationState seededState = WithShortWindowRecoveryBaselines(
+            initialState ?? new ApplicationState { InitialSetupCompleted = true },
+            "codex",
+            "first");
         ApplicationStateStore actualStore = stateStore
             ?? new ApplicationStateStore(new InMemoryStateRepository(
-                initialState ?? new ApplicationState { InitialSetupCompleted = true }));
+                seededState));
         RecordingWindowsNotificationSender windowsSender = new();
         StubGmailAuthenticationService actualAuthentication = authentication ?? CreateAuthenticatedService();
         StubGmailNotificationSender actualGmailSender = gmailSender ?? new StubGmailNotificationSender();
@@ -375,6 +379,36 @@ public sealed class RateLimitGmailNotificationProcessorTests
             timeProvider,
             NullLogger<RateLimitNotificationProcessor>.Instance);
         return new TestContext(processor, windowsSender, actualGmailSender);
+    }
+
+    /// <summary>指定した短期枠が98%から回復する直前の状態を補います。</summary>
+    private static ApplicationState WithShortWindowRecoveryBaselines(
+        ApplicationState state,
+        params string[] limitIds)
+    {
+        ArgumentNullException.ThrowIfNull(state);
+        ArgumentNullException.ThrowIfNull(limitIds);
+        List<RateLimitRecoveryState> recoveryStates = state.RateLimitRecoveryStates.ToList();
+        foreach (string limitId in limitIds.Where(limitId => !string.IsNullOrWhiteSpace(limitId)))
+        {
+            if (recoveryStates.Any(candidate => string.Equals(candidate.LimitId, limitId, StringComparison.Ordinal)))
+            {
+                continue;
+            }
+
+            recoveryStates.Add(new RateLimitRecoveryState
+            {
+                LimitId = limitId,
+                Position = RateLimitPosition.Primary,
+                WindowDurationMinutes = 300,
+                HasObservation = true,
+                WasBelowThreshold = true,
+                LastRemainingPercent = 98,
+                RecoveryBaselineRemainingPercent = 98,
+            });
+        }
+
+        return state with { RateLimitRecoveryStates = recoveryStates };
     }
 
     /// <summary>認証済み状態を返すサービスを生成します。</summary>
