@@ -1,7 +1,7 @@
 namespace CodexUsageNotifier.Domain.Models;
 
 /// <summary>
-/// リセット時刻がない短期枠の回復遷移と連番を永続化します。
+/// 短期枠の回復遷移と連番を永続化します。
 /// </summary>
 public sealed record RateLimitRecoveryState
 {
@@ -39,4 +39,9 @@ public sealed record RateLimitRecoveryState
     /// 直近観測の残量を取得または設定します。
     /// </summary>
     public double LastRemainingPercent { get; init; }
+
+    /// <summary>
+    /// 次の回復判定で基準にする、直近の低下後に観測した最小残量を取得または設定します。
+    /// </summary>
+    public double? RecoveryBaselineRemainingPercent { get; init; }
 }

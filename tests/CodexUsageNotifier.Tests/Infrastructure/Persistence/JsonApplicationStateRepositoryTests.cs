@@ -83,6 +83,7 @@ public sealed class JsonApplicationStateRepositoryTests
                     HasObservation = true,
                     RecoverySequence = 3,
                     LastRemainingPercent = 99,
+                    RecoveryBaselineRemainingPercent = 98.5,
                 },
             ],
         };
@@ -132,6 +133,7 @@ public sealed class JsonApplicationStateRepositoryTests
             GmailDeliveryFailureKind.Transient,
             actual.RateLimitNotificationStates.Single().GmailFailureKind);
         Assert.AreEqual(3, actual.RateLimitRecoveryStates.Single().RecoverySequence);
+        Assert.AreEqual(98.5, actual.RateLimitRecoveryStates.Single().RecoveryBaselineRemainingPercent);
         Assert.IsFalse(Directory.EnumerateFiles(temporaryDirectory.Path, "*.tmp").Any());
     }
 

@@ -9,6 +9,7 @@ namespace CodexUsageNotifier.Domain.Services;
 public static class RateLimitNotificationPolicy
 {
     private static readonly TimeSpan DeferredNotificationMaxAge = TimeSpan.FromHours(24);
+    private const double MinimumRecoveryIncreasePoints = 1D;
 
     /// <summary>
     /// 1つのWindows通知に許可する最大表示試行回数です。
@@ -83,7 +84,8 @@ public static class RateLimitNotificationPolicy
                         windowSetting,
                         recoveryState,
                         recoveryStarted,
-                        settings),
+                        settings,
+                        notificationStates),
                     notificationStates,
                     currentSnapshot.CapturedAtUtc,
                     settings);
@@ -156,10 +158,12 @@ public static class RateLimitNotificationPolicy
         RateLimitNotificationSetting windowSetting,
         RateLimitRecoveryState? recoveryState,
         bool recoveryStarted,
-        AppSettings settings)
+        AppSettings settings,
+        IReadOnlyList<RateLimitNotificationState> notificationStates)
     {
         if (!windowSetting.ShortWindowRecoveryEnabled
-            || window.RemainingPercent < settings.ShortWindowRecoveryThresholdPercent)
+            || window.RemainingPercent < settings.ShortWindowRecoveryThresholdPercent
+            || recoveryState is null)
         {
             return null;
         }
@@ -171,12 +175,17 @@ public static class RateLimitNotificationPolicy
         }
         else
         {
-            if (!recoveryStarted || recoveryState is null)
-            {
-                return null;
-            }
-
             recoveryWindowId = CreateNoResetRecoveryWindowId(window, recoveryState.RecoverySequence);
+        }
+
+        bool hasExistingNotification = notificationStates.Any(state =>
+            HasSameIdentity(state, window)
+            && string.Equals(state.RecoveryWindowId, recoveryWindowId, StringComparison.Ordinal)
+            && state.NotificationType == RateLimitNotificationType.ShortWindowRecovered
+            && state.NotificationStage == RateLimitNotificationStage.Recovered);
+        if (!recoveryStarted && !hasExistingNotification)
+        {
+            return null;
         }
 
         return CreateCandidate(
@@ -321,8 +330,35 @@ public static class RateLimitNotificationPolicy
         int thresholdPercent)
     {
         bool isBelowThreshold = window.RemainingPercent < thresholdPercent;
+        double? recoveryBaseline = previous?.RecoveryBaselineRemainingPercent;
+        if (recoveryBaseline is null && previous is { HasObservation: true, WasBelowThreshold: true })
+        {
+            // 新プロパティ追加前の保存状態も、直近の閾値未満値を回復基準として継続します。
+            recoveryBaseline = previous.LastRemainingPercent;
+        }
+
+        if (previous is null or { HasObservation: false }
+            && window.RemainingPercent < 100D)
+        {
+            recoveryBaseline = window.RemainingPercent;
+        }
+
+        if (previous is { HasObservation: true }
+            && window.RemainingPercent < previous.LastRemainingPercent)
+        {
+            recoveryBaseline = recoveryBaseline is null
+                ? window.RemainingPercent
+                : Math.Min(recoveryBaseline.Value, window.RemainingPercent);
+        }
+
         bool recoveryStarted = !isBelowThreshold
-            && (previous is null || !previous.HasObservation || previous.WasBelowThreshold);
+            && recoveryBaseline is not null
+            && window.RemainingPercent - recoveryBaseline.Value >= MinimumRecoveryIncreasePoints;
+        if (recoveryStarted)
+        {
+            recoveryBaseline = null;
+        }
+
         return (new RateLimitRecoveryState
         {
             LimitId = window.LimitId ?? string.Empty,
@@ -332,6 +368,7 @@ public static class RateLimitNotificationPolicy
             WasBelowThreshold = isBelowThreshold,
             RecoverySequence = (previous?.RecoverySequence ?? 0) + (recoveryStarted ? 1 : 0),
             LastRemainingPercent = window.RemainingPercent,
+            RecoveryBaselineRemainingPercent = recoveryBaseline,
         }, recoveryStarted);
     }
 
