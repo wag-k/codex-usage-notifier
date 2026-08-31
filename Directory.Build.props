@@ -6,5 +6,7 @@
     <InformationalVersion Condition="'$(InformationalVersion)' == ''">$(Version)</InformationalVersion>
     <Product>Codex Usage Notifier</Product>
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+    <!-- ライセンス監査manifestと自己完結配布で使用する.NET 8 servicing版を一致させます。 -->
+    <RuntimeFrameworkVersion>8.0.29</RuntimeFrameworkVersion>
   </PropertyGroup>
 </Project>
