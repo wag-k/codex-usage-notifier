@@ -13,10 +13,12 @@ public static class WindowsNotificationMessageFactory
     /// </summary>
     /// <param name="candidates">同一取得で成立した通知候補です。</param>
     /// <param name="capturedAtUtc">通知判定に使用した取得UTC時刻です。</param>
+    /// <param name="displayContext">配送時点の週間枠残量を含む補助表示情報です。</param>
     /// <returns>候補が1件なら従来形式、複数なら集約形式のWindows通知です。</returns>
     public static WindowsNotificationMessage CreateAggregate(
         IReadOnlyList<RateLimitNotificationCandidate> candidates,
-        DateTimeOffset capturedAtUtc)
+        DateTimeOffset capturedAtUtc,
+        RateLimitNotificationDisplayContext? displayContext = null)
     {
         ArgumentNullException.ThrowIfNull(candidates);
         if (candidates.Count == 0)
@@ -26,12 +28,15 @@ public static class WindowsNotificationMessageFactory
 
         if (candidates.Count == 1)
         {
-            return Create(candidates[0], capturedAtUtc);
+            return Create(candidates[0], capturedAtUtc, displayContext);
         }
 
+        RateLimitNotificationDisplayContext effectiveContext = displayContext
+            ?? RateLimitNotificationDisplayContext.Empty;
         string body = string.Join(
             Environment.NewLine,
-            candidates.Select(candidate => $"・{CreateAggregateLine(candidate, capturedAtUtc)}"));
+            candidates.Select(candidate =>
+                $"・{CreateAggregateLine(candidate, capturedAtUtc, effectiveContext)}"));
         return new WindowsNotificationMessage
         {
             Title = $"Codex利用枠のお知らせ（{candidates.Count.ToString(CultureInfo.CurrentCulture)}件）",
@@ -44,12 +49,16 @@ public static class WindowsNotificationMessageFactory
     /// </summary>
     /// <param name="candidate">通知対象と種別を含む候補です。</param>
     /// <param name="capturedAtUtc">通知判定に使用した取得UTC時刻です。</param>
+    /// <param name="displayContext">配送時点の週間枠残量を含む補助表示情報です。</param>
     /// <returns>Windows通知へ渡すメッセージです。</returns>
     public static WindowsNotificationMessage Create(
         RateLimitNotificationCandidate candidate,
-        DateTimeOffset capturedAtUtc)
+        DateTimeOffset capturedAtUtc,
+        RateLimitNotificationDisplayContext? displayContext = null)
     {
         ArgumentNullException.ThrowIfNull(candidate);
+        RateLimitNotificationDisplayContext effectiveContext = displayContext
+            ?? RateLimitNotificationDisplayContext.Empty;
         string targetName = candidate.Window.Classification switch
         {
             RateLimitClassification.FiveHour => "5時間枠",
@@ -70,7 +79,7 @@ public static class WindowsNotificationMessageFactory
             RateLimitNotificationType.ShortWindowRecovered => new WindowsNotificationMessage
             {
                 Title = "Codexの短期利用枠が回復しました",
-                Body = $"対象：{targetName}{Environment.NewLine}残り使用量：{candidate.Window.RemainingPercent:0.#}%{Environment.NewLine}次回リセット：{resetAt}{Environment.NewLine}{identity}",
+                Body = $"対象：{targetName}{Environment.NewLine}短期枠の残量：{candidate.Window.RemainingPercent:0.#}%{Environment.NewLine}週間枠の残量：{effectiveContext.FormatWeeklyRemainingPercent(CultureInfo.CurrentCulture)}{Environment.NewLine}次回リセット：{resetAt}{Environment.NewLine}{identity}",
             },
             RateLimitNotificationType.LongWindowResetCompleted => new WindowsNotificationMessage
             {
@@ -110,12 +119,15 @@ public static class WindowsNotificationMessageFactory
     /// </summary>
     /// <param name="candidate">説明対象の通知候補です。</param>
     /// <param name="capturedAtUtc">通知判定に使用した取得UTC時刻です。</param>
+    /// <param name="displayContext">配送時点の週間枠残量を含む補助表示情報です。</param>
     /// <returns>利用枠と通知目的を識別できる1行の説明です。</returns>
     private static string CreateAggregateLine(
         RateLimitNotificationCandidate candidate,
-        DateTimeOffset capturedAtUtc)
+        DateTimeOffset capturedAtUtc,
+        RateLimitNotificationDisplayContext displayContext)
     {
         ArgumentNullException.ThrowIfNull(candidate);
+        ArgumentNullException.ThrowIfNull(displayContext);
         string targetName = candidate.Window.Classification switch
         {
             RateLimitClassification.FiveHour => "5時間枠",
@@ -125,7 +137,7 @@ public static class WindowsNotificationMessageFactory
         return candidate.NotificationType switch
         {
             RateLimitNotificationType.ShortWindowRecovered =>
-                $"{targetName}が{candidate.Window.RemainingPercent:0.#}%まで回復",
+                $"{targetName}が{candidate.Window.RemainingPercent:0.#}%まで回復（週間枠 残り{displayContext.FormatWeeklyRemainingPercent(CultureInfo.CurrentCulture)}）",
             RateLimitNotificationType.LongWindowResetCompleted =>
                 $"{targetName}の新しい利用期間を確認（残り{candidate.Window.RemainingPercent:0.#}%）",
             RateLimitNotificationType.LongWindowEarlyWarning

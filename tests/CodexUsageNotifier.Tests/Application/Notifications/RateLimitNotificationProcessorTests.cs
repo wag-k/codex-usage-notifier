@@ -56,7 +56,9 @@ public sealed class RateLimitNotificationProcessorTests
         RateLimitNotificationProcessor processor = CreateProcessor(stateStore, sender, timeProvider);
         RateLimitWindow window = CreateFiveHourWindow(quietUtc);
         await processor.ProcessAsync(
-            CreateSnapshot(window, quietUtc),
+            CreateSnapshot(
+                [window, CreateWeeklyWindow(quietUtc, 70)],
+                quietUtc),
             AppSettings.CreateDefault(),
             CancellationToken.None);
 
@@ -64,7 +66,9 @@ public sealed class RateLimitNotificationProcessorTests
         timeProvider.SetUtcNow(afterQuietUtc);
         RateLimitWindow currentWindow = CreateFiveHourWindow(afterQuietUtc);
         NotificationProcessingResult sent = await processor.ProcessAsync(
-            CreateSnapshot(currentWindow, afterQuietUtc),
+            CreateSnapshot(
+                [currentWindow, CreateWeeklyWindow(afterQuietUtc, 64)],
+                afterQuietUtc),
             AppSettings.CreateDefault(),
             CancellationToken.None);
         await processor.ProcessAsync(
@@ -73,6 +77,7 @@ public sealed class RateLimitNotificationProcessorTests
             CancellationToken.None);
 
         Assert.AreEqual(1, sender.SendCount);
+        StringAssert.Contains(sender.Messages.Single().Body, "週間枠の残量：64%");
         Assert.AreEqual(DeliveryStatus.Succeeded, sent.State.RateLimitNotificationStates.Single().WindowsDeliveryStatus);
     }
 
@@ -116,6 +121,7 @@ public sealed class RateLimitNotificationProcessorTests
 
         Assert.AreEqual(1, sender.SendCount);
         Assert.AreEqual("Codex利用枠のお知らせ（2件）", sender.Messages.Single().Title);
+        StringAssert.Contains(sender.Messages.Single().Body, "週間枠 残り65%");
         Assert.AreEqual(2, result.State.RateLimitNotificationStates.Count);
         Assert.IsTrue(result.State.RateLimitNotificationStates.All(
             state => state.WindowsDeliveryStatus == DeliveryStatus.Succeeded));
@@ -136,17 +142,17 @@ public sealed class RateLimitNotificationProcessorTests
         RateLimitWindow window = CreateFiveHourWindow(nowUtc);
 
         NotificationProcessingResult failed = await processor.ProcessAsync(
-            CreateSnapshot(window, nowUtc),
+            CreateSnapshot([window, CreateWeeklyWindow(nowUtc, 70)], nowUtc),
             AppSettings.CreateDefault(),
             CancellationToken.None);
         timeProvider.SetUtcNow(nowUtc.AddMinutes(4));
         await processor.ProcessAsync(
-            CreateSnapshot(window, nowUtc.AddMinutes(4)),
+            CreateSnapshot([window, CreateWeeklyWindow(nowUtc.AddMinutes(4), 68)], nowUtc.AddMinutes(4)),
             AppSettings.CreateDefault(),
             CancellationToken.None);
         timeProvider.SetUtcNow(nowUtc.AddMinutes(5));
         NotificationProcessingResult succeeded = await processor.ProcessAsync(
-            CreateSnapshot(window, nowUtc.AddMinutes(5)),
+            CreateSnapshot([window, CreateWeeklyWindow(nowUtc.AddMinutes(5), 63)], nowUtc.AddMinutes(5)),
             AppSettings.CreateDefault(),
             CancellationToken.None);
         timeProvider.SetUtcNow(nowUtc.AddMinutes(6));
@@ -158,6 +164,7 @@ public sealed class RateLimitNotificationProcessorTests
         RateLimitNotificationState failedState = failed.State.RateLimitNotificationStates.Single();
         RateLimitNotificationState succeededState = succeeded.State.RateLimitNotificationStates.Single();
         Assert.AreEqual(2, sender.SendCount);
+        StringAssert.Contains(sender.Messages[^1].Body, "週間枠の残量：63%");
         Assert.AreEqual(DeliveryStatus.Failed, failedState.WindowsDeliveryStatus);
         Assert.AreEqual(1, failedState.WindowsAttemptCount);
         Assert.AreEqual(nowUtc.AddMinutes(5), failedState.WindowsNextRetryAtUtc);
@@ -504,6 +511,26 @@ public sealed class RateLimitNotificationProcessorTests
         };
     }
 
+    /// <summary>通知条件を成立させず補助表示だけに使用する週間枠を生成します。</summary>
+    /// <param name="capturedAtUtc">取得UTC時刻です。</param>
+    /// <param name="remainingPercent">表示する週間枠残量です。</param>
+    /// <returns>次回リセットまで7日ある週間枠です。</returns>
+    private static RateLimitWindow CreateWeeklyWindow(
+        DateTimeOffset capturedAtUtc,
+        double remainingPercent)
+    {
+        return new RateLimitWindow
+        {
+            LimitId = "codex",
+            Position = RateLimitPosition.Secondary,
+            Classification = RateLimitClassification.Weekly,
+            WindowDurationMinutes = 10080,
+            UsedPercent = 100 - remainingPercent,
+            RemainingPercent = remainingPercent,
+            ResetsAtUtc = capturedAtUtc.AddDays(7),
+        };
+    }
+
     /// <summary>
     /// 1つの利用枠を含むスナップショットを生成します。
     /// </summary>
@@ -512,10 +539,21 @@ public sealed class RateLimitNotificationProcessorTests
     /// <returns>テスト用スナップショットです。</returns>
     private static UsageSnapshot CreateSnapshot(RateLimitWindow window, DateTimeOffset capturedAtUtc)
     {
+        return CreateSnapshot([window], capturedAtUtc);
+    }
+
+    /// <summary>複数利用枠を含むスナップショットを生成します。</summary>
+    /// <param name="windows">同じ正常取得で観測した利用枠です。</param>
+    /// <param name="capturedAtUtc">取得UTC時刻です。</param>
+    /// <returns>指定利用枠を保持するスナップショットです。</returns>
+    private static UsageSnapshot CreateSnapshot(
+        IReadOnlyList<RateLimitWindow> windows,
+        DateTimeOffset capturedAtUtc)
+    {
         return new UsageSnapshot
         {
             CapturedAtUtc = capturedAtUtc,
-            RateLimits = [window],
+            RateLimits = windows,
         };
     }
 

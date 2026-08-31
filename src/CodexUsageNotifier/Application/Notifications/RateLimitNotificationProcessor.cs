@@ -363,7 +363,8 @@ public sealed partial class RateLimitNotificationProcessor
 
         WindowsNotificationMessage message = WindowsNotificationMessageFactory.CreateAggregate(
             windowsCandidates,
-            snapshot.CapturedAtUtc);
+            snapshot.CapturedAtUtc,
+            RateLimitNotificationDisplayContext.FromSnapshot(snapshot));
         try
         {
             await windowsNotificationSender.SendAsync(message, cancellationToken);
@@ -500,7 +501,8 @@ public sealed partial class RateLimitNotificationProcessor
         GmailNotificationMessage message = GmailNotificationMessageFactory.CreateAggregate(
             gmailCandidates,
             snapshot.CapturedAtUtc,
-            timeProvider.LocalTimeZone);
+            timeProvider.LocalTimeZone,
+            RateLimitNotificationDisplayContext.FromSnapshot(snapshot));
         try
         {
             await gmailNotificationSender.SendAsync(

@@ -54,6 +54,7 @@ public sealed class TestNotificationServiceTests
         }
 
         Assert.AreEqual(6, sender.Messages.Count);
+        StringAssert.Contains(sender.Messages[0].Body, "週間枠の残量：未観測");
         Assert.AreEqual(1, state.RateLimitNotificationStates.Count);
         Assert.AreEqual("reset:1", state.RateLimitNotificationStates.Single().RecoveryWindowId);
     }

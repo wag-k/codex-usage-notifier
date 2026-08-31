@@ -58,11 +58,14 @@ public sealed class RateLimitGmailRetryProcessorTests
         TestContext context = CreateContext(CreateRetryState(window, NowUtc.AddMinutes(-60)));
 
         NotificationProcessingResult result = await context.Processor.ProcessAsync(
-            CreateSnapshot(NowUtc, [window]),
+            CreateSnapshot(
+                NowUtc,
+                [window, CreateWeeklyWindow("team", NowUtc.AddDays(7), 63)]),
             CreateSettings(windowsEnabled: false),
             CancellationToken.None);
 
         Assert.AreEqual(1, context.GmailSender.SendCallCount);
+        StringAssert.Contains(context.GmailSender.Messages.Single().Body, "週間枠の残量: 63%");
         Assert.AreEqual(2, result.State.RateLimitNotificationStates.Single().GmailAttemptCount);
         Assert.AreEqual(DeliveryStatus.Succeeded, result.State.RateLimitNotificationStates.Single().GmailDeliveryStatus);
     }

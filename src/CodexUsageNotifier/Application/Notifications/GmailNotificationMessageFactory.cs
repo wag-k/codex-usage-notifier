@@ -16,11 +16,13 @@ public static class GmailNotificationMessageFactory
     /// <param name="candidates">集約する共通通知候補です。</param>
     /// <param name="confirmedAtUtc">候補を確認したUTC時刻です。</param>
     /// <param name="localTimeZone">画面表示時刻へ変換するタイムゾーンです。</param>
+    /// <param name="displayContext">配送時点の週間枠残量を含む補助表示情報です。</param>
     /// <returns>日本語UTF-8で送信する件名と本文です。</returns>
     public static GmailNotificationMessage CreateAggregate(
         IReadOnlyList<RateLimitNotificationCandidate> candidates,
         DateTimeOffset confirmedAtUtc,
-        TimeZoneInfo localTimeZone)
+        TimeZoneInfo localTimeZone,
+        RateLimitNotificationDisplayContext? displayContext = null)
     {
         ArgumentNullException.ThrowIfNull(candidates);
         ArgumentNullException.ThrowIfNull(localTimeZone);
@@ -28,6 +30,9 @@ public static class GmailNotificationMessageFactory
         {
             throw new ArgumentException("Gmail通知候補が1件以上必要です。", nameof(candidates));
         }
+
+        RateLimitNotificationDisplayContext effectiveContext = displayContext
+            ?? RateLimitNotificationDisplayContext.Empty;
 
         string subject = candidates.Count == 1
             ? $"Codex Usage Notifier: {CreateHeadline(candidates[0])}"
@@ -49,7 +54,8 @@ public static class GmailNotificationMessageFactory
                 index + 1,
                 candidates.Count > 1,
                 confirmedAtUtc,
-                localTimeZone);
+                localTimeZone,
+                effectiveContext);
             if (index < candidates.Count - 1)
             {
                 body.AppendLine();
@@ -69,10 +75,12 @@ public static class GmailNotificationMessageFactory
         int number,
         bool includeNumber,
         DateTimeOffset confirmedAtUtc,
-        TimeZoneInfo localTimeZone)
+        TimeZoneInfo localTimeZone,
+        RateLimitNotificationDisplayContext displayContext)
     {
         ArgumentNullException.ThrowIfNull(body);
         ArgumentNullException.ThrowIfNull(candidate);
+        ArgumentNullException.ThrowIfNull(displayContext);
         RateLimitWindow window = candidate.Window;
         if (includeNumber)
         {
@@ -89,11 +97,24 @@ public static class GmailNotificationMessageFactory
             .Append("分類: ").AppendLine(window.Classification.ToString())
             .Append("期間: ")
             .Append(window.WindowDurationMinutes?.ToString(CultureInfo.InvariantCulture) ?? "不明")
-            .AppendLine("分")
-            .Append("残量: ")
-            .Append(window.RemainingPercent.ToString("0.##", CultureInfo.InvariantCulture))
-            .AppendLine("%")
-            .Append("条件成立: ")
+            .AppendLine("分");
+
+        if (candidate.NotificationType == RateLimitNotificationType.ShortWindowRecovered)
+        {
+            body.Append("短期枠の残量: ")
+                .Append(window.RemainingPercent.ToString("0.##", CultureInfo.InvariantCulture))
+                .AppendLine("%")
+                .Append("週間枠の残量: ")
+                .AppendLine(displayContext.FormatWeeklyRemainingPercent(CultureInfo.InvariantCulture));
+        }
+        else
+        {
+            body.Append("残量: ")
+                .Append(window.RemainingPercent.ToString("0.##", CultureInfo.InvariantCulture))
+                .AppendLine("%");
+        }
+
+        body.Append("条件成立: ")
             .AppendLine(FormatLocalDateTime(candidate.ConditionMetAtUtc, localTimeZone));
 
         if (window.ResetsAtUtc is null)
