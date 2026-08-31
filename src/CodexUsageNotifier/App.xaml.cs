@@ -165,6 +165,7 @@ public partial class App : System.Windows.Application
         services.AddSingleton<ApplicationStateStore>();
         services.AddSingleton<ApplicationVersionProvider>();
         services.AddSingleton<TimeProvider>(TimeProvider.System);
+        services.AddSingleton<UsageTrendViewModel>();
         services.AddSingleton<IPowerEventSource, SystemPowerEventSource>();
         services.AddSingleton<TrayIconHost>();
         services.AddSingleton<IWindowsNotificationSender, WindowsBalloonNotificationSender>();

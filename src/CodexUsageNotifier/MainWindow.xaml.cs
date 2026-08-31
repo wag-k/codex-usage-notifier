@@ -7,11 +7,13 @@ namespace CodexUsageNotifier;
 /// <summary>
 /// Codex利用枠監視の基本状態を表示するウィンドウです。
 /// </summary>
-public partial class MainWindow : System.Windows.Window
+public partial class MainWindow : System.Windows.Window, IDisposable
 {
+    private readonly CancellationTokenSource lifetimeCancellation = new();
     private readonly ApplicationLifetime applicationLifetime;
     private readonly SettingsWindow settingsWindow;
     private readonly StatusViewModel viewModel;
+    private bool disposed;
 
     /// <summary>
     /// 状態表示用のデータとアプリケーション終了状態を受け取って初期化します。
@@ -36,6 +38,7 @@ public partial class MainWindow : System.Windows.Window
         this.settingsWindow = settingsWindow;
         Closing += OnClosing;
         Activated += OnActivated;
+        Closed += OnClosed;
     }
 
     /// <summary>
@@ -80,6 +83,37 @@ public partial class MainWindow : System.Windows.Window
     /// <param name="e">アクティブ化イベントです。</param>
     private async void OnActivated(object? sender, EventArgs e)
     {
-        await viewModel.RefreshGmailAuthenticationStatusAsync(CancellationToken.None);
+        try
+        {
+            Task authenticationTask = viewModel.RefreshGmailAuthenticationStatusAsync(lifetimeCancellation.Token);
+            Task historyTask = viewModel.UsageTrend.EnsureLoadedAsync(lifetimeCancellation.Token);
+            await Task.WhenAll(authenticationTask, historyTask);
+        }
+        catch (OperationCanceledException) when (lifetimeCancellation.IsCancellationRequested)
+        {
+            // アプリ終了に伴う画面処理のキャンセルは正常終了として扱います。
+        }
+    }
+
+    /// <summary>アプリ終了時に進行中の画面向け非同期処理を中断します。</summary>
+    /// <param name="sender">状態画面です。</param>
+    /// <param name="e">終了イベントです。</param>
+    private void OnClosed(object? sender, EventArgs e)
+    {
+        Dispose();
+    }
+
+    /// <summary>画面に属する非同期処理のキャンセル資源を解放します。</summary>
+    public void Dispose()
+    {
+        if (disposed)
+        {
+            return;
+        }
+
+        disposed = true;
+        lifetimeCancellation.Cancel();
+        lifetimeCancellation.Dispose();
+        GC.SuppressFinalize(this);
     }
 }
