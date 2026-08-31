@@ -14,6 +14,7 @@ internal sealed partial class JsonRpcConnection : IAsyncDisposable
     private readonly TimeProvider timeProvider;
     private readonly ILogger<JsonRpcConnection> logger;
     private readonly ConcurrentDictionary<long, TaskCompletionSource<JsonElement>> pendingRequests = new();
+    private readonly object completionGate = new();
     private readonly SemaphoreSlim writeGate = new(1, 1);
     private readonly CancellationTokenSource lifetimeCancellation = new();
     private long nextRequestId;
@@ -76,13 +77,18 @@ internal sealed partial class JsonRpcConnection : IAsyncDisposable
         CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(method);
-        ObjectDisposedException.ThrowIf(Volatile.Read(ref completed) != 0, this);
-
-        long id = Interlocked.Increment(ref nextRequestId);
-        TaskCompletionSource<JsonElement> completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        if (!pendingRequests.TryAdd(id, completion))
+        long id;
+        TaskCompletionSource<JsonElement> completion;
+        lock (completionGate)
         {
-            throw new InvalidOperationException("JSON-RPC要求IDを登録できませんでした。");
+            ObjectDisposedException.ThrowIf(Volatile.Read(ref completed) != 0, this);
+            id = Interlocked.Increment(ref nextRequestId);
+            completion = new TaskCompletionSource<JsonElement>(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+            if (!pendingRequests.TryAdd(id, completion))
+            {
+                throw new InvalidOperationException("JSON-RPC要求IDを登録できませんでした。");
+            }
         }
 
         try
@@ -274,17 +280,20 @@ internal sealed partial class JsonRpcConnection : IAsyncDisposable
     /// <param name="exception">待機要求へ通知する例外です。</param>
     private void Complete(Exception exception)
     {
-        if (Interlocked.Exchange(ref completed, 1) != 0)
+        lock (completionGate)
         {
-            return;
-        }
+            if (Interlocked.Exchange(ref completed, 1) != 0)
+            {
+                return;
+            }
 
-        foreach (TaskCompletionSource<JsonElement> completion in pendingRequests.Values)
-        {
-            completion.TrySetException(exception);
-        }
+            foreach (TaskCompletionSource<JsonElement> completion in pendingRequests.Values)
+            {
+                completion.TrySetException(exception);
+            }
 
-        pendingRequests.Clear();
+            pendingRequests.Clear();
+        }
     }
 
     /// <summary>
