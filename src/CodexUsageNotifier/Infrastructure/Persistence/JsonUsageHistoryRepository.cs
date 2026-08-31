@@ -11,7 +11,11 @@ namespace CodexUsageNotifier.Infrastructure.Persistence;
 /// <summary>
 /// 取得単位の全利用枠をJSONL履歴へ追記し、過去の識別組み合わせを保持します。
 /// </summary>
-public sealed partial class JsonUsageHistoryRepository : IUsageHistoryRepository, IUsageHistoryMaintenance, IDisposable
+public sealed partial class JsonUsageHistoryRepository :
+    IUsageHistoryRepository,
+    IUsageHistoryReader,
+    IUsageHistoryMaintenance,
+    IDisposable
 {
     private static readonly JsonSerializerOptions SerializerOptions = CreateSerializerOptions();
     private readonly IAppDataPaths paths;
@@ -78,6 +82,64 @@ public sealed partial class JsonUsageHistoryRepository : IUsageHistoryRepository
             }
 
             return newlyObserved;
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<UsageHistoryEntry>> ReadAsync(
+        DateTimeOffset fromUtc,
+        DateTimeOffset toUtc,
+        CancellationToken cancellationToken)
+    {
+        if (toUtc < fromUtc)
+        {
+            throw new ArgumentOutOfRangeException(nameof(toUtc), "読み取り終了時刻は開始時刻以降にしてください。");
+        }
+
+        ObjectDisposedException.ThrowIf(disposed, this);
+        await gate.WaitAsync(cancellationToken);
+        try
+        {
+            if (!File.Exists(paths.UsageHistoryFilePath))
+            {
+                return Array.Empty<UsageHistoryEntry>();
+            }
+
+            List<UsageHistoryEntry> entries = [];
+            int lineNumber = 0;
+            await foreach (string line in File.ReadLinesAsync(
+                paths.UsageHistoryFilePath,
+                cancellationToken))
+            {
+                lineNumber++;
+                try
+                {
+                    UsageHistoryEntry? entry = JsonSerializer.Deserialize<UsageHistoryEntry>(
+                        line,
+                        SerializerOptions);
+                    if (entry?.RateLimits is null)
+                    {
+                        throw new JsonException("利用履歴行に必要なデータがありません。");
+                    }
+
+                    if (entry.CapturedAtUtc >= fromUtc && entry.CapturedAtUtc <= toUtc)
+                    {
+                        entries.Add(entry);
+                    }
+                }
+                catch (JsonException exception)
+                {
+                    LogCorruptedHistoryLineOnRead(logger, lineNumber, exception);
+                }
+            }
+
+            return entries
+                .OrderBy(entry => entry.CapturedAtUtc)
+                .ToArray();
         }
         finally
         {
@@ -325,4 +387,11 @@ public sealed partial class JsonUsageHistoryRepository : IUsageHistoryRepository
         int retainedLineCount,
         int corruptedLineCount,
         Exception? exception);
+
+    /// <summary>読み取り時に破損行を除外したことを記録します。</summary>
+    [LoggerMessage(2033, LogLevel.Warning, "利用履歴の読み取り時に破損行を除外しました。LineNumber={LineNumber}")]
+    private static partial void LogCorruptedHistoryLineOnRead(
+        ILogger logger,
+        int lineNumber,
+        Exception exception);
 }

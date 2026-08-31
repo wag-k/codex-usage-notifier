@@ -46,7 +46,10 @@ public sealed class StatusViewModel : INotifyPropertyChanged, IUsageStatusSink
     /// <summary>Gmail認証状態の安全な提供元と実行Assemblyのバージョンを受け取ります。</summary>
     /// <param name="gmailAuthenticationStatusProvider">トークンを公開しない認証状態の提供元です。</param>
     public StatusViewModel(IGmailAuthenticationStatusProvider gmailAuthenticationStatusProvider)
-        : this(gmailAuthenticationStatusProvider, new ApplicationVersionProvider())
+        : this(
+            gmailAuthenticationStatusProvider,
+            new ApplicationVersionProvider(),
+            new UsageTrendViewModel())
     {
     }
 
@@ -55,23 +58,41 @@ public sealed class StatusViewModel : INotifyPropertyChanged, IUsageStatusSink
     public StatusViewModel(
         IGmailAuthenticationStatusProvider gmailAuthenticationStatusProvider,
         ApplicationVersionProvider applicationVersionProvider)
+        : this(gmailAuthenticationStatusProvider, applicationVersionProvider, new UsageTrendViewModel())
+    {
+    }
+
+    /// <summary>DIから認証状態、共通バージョン、および使用率推移を受け取ります。</summary>
+    /// <param name="gmailAuthenticationStatusProvider">トークンを公開しない認証状態の提供元です。</param>
+    /// <param name="applicationVersionProvider">実行Assemblyのバージョン提供元です。</param>
+    /// <param name="usageTrend">既存履歴と最新取得を表示する推移ビューモデルです。</param>
+    public StatusViewModel(
+        IGmailAuthenticationStatusProvider gmailAuthenticationStatusProvider,
+        ApplicationVersionProvider applicationVersionProvider,
+        UsageTrendViewModel usageTrend)
     {
         ArgumentNullException.ThrowIfNull(gmailAuthenticationStatusProvider);
         ArgumentNullException.ThrowIfNull(applicationVersionProvider);
+        ArgumentNullException.ThrowIfNull(usageTrend);
         this.gmailAuthenticationStatusProvider = gmailAuthenticationStatusProvider;
         this.applicationVersionProvider = applicationVersionProvider;
+        UsageTrend = usageTrend;
     }
 
     /// <summary>外部通信を行わない表示テスト用のインスタンスを初期化します。</summary>
     internal StatusViewModel()
     {
         applicationVersionProvider = new ApplicationVersionProvider();
+        UsageTrend = new UsageTrendViewModel();
     }
 
     /// <summary>
     /// 表示値が変更されたときに発生します。
     /// </summary>
     public event PropertyChangedEventHandler? PropertyChanged;
+
+    /// <summary>使用率推移グラフの表示状態を取得します。</summary>
+    public UsageTrendViewModel UsageTrend { get; }
 
     /// <summary>状態画面に表示するRelease Versionを取得します。</summary>
     public string ApplicationVersion => $"Version {applicationVersionProvider.Version}";
@@ -309,6 +330,11 @@ public sealed class StatusViewModel : INotifyPropertyChanged, IUsageStatusSink
             state.LastUsageSnapshot,
             state,
             settings);
+        UsageTrend.UpdatePollingInterval(settings.FallbackPollingMinutes);
+        if (state.LastUsageSnapshot is not null)
+        {
+            UsageTrend.AddSnapshot(state.LastUsageSnapshot);
+        }
         LastSuccessfulFetch = FormatLocalDateTime(state.LastSuccessfulFetchAtUtc, "未取得");
         LastSuccessfulFetchShort = FormatShortLocalDateTime(state.LastSuccessfulFetchAtUtc, "未取得");
         gmailNotificationEnabled = settings.GmailNotificationEnabled;
@@ -401,6 +427,8 @@ public sealed class StatusViewModel : INotifyPropertyChanged, IUsageStatusSink
         RunOnUiThread(() =>
         {
             ApplyUsageSnapshot(snapshot, state, settings);
+            UsageTrend.UpdatePollingInterval(settings.FallbackPollingMinutes);
+            UsageTrend.AddSnapshot(snapshot);
             LastSuccessfulFetch = FormatLocalDateTime(snapshot.CapturedAtUtc, "未取得");
             LastSuccessfulFetchShort = FormatShortLocalDateTime(snapshot.CapturedAtUtc, "未取得");
             gmailNotificationEnabled = settings.GmailNotificationEnabled;

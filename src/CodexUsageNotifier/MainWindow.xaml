@@ -254,6 +254,146 @@
                                     ContentTemplate="{StaticResource RateLimitCardTemplate}" />
                 </Grid>
 
+                <Border Margin="0,24,0,0"
+                        Style="{StaticResource CardStyle}">
+                    <StackPanel>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel>
+                                <TextBlock Style="{StaticResource SectionTitleStyle}"
+                                           Text="使用率の推移" />
+                                <TextBlock Margin="0,3,0,0"
+                                           Style="{StaticResource SecondaryTextStyle}"
+                                           Text="既存の利用履歴からUsedPercent（使用率）を表示します。" />
+                            </StackPanel>
+                            <ListBox Grid.Column="1"
+                                     MinHeight="34"
+                                     Margin="16,0,0,0"
+                                     VerticalAlignment="Center"
+                                     AutomationProperties.Name="使用率推移の表示期間"
+                                     Background="#F2F4F7"
+                                     BorderThickness="0"
+                                     ItemsSource="{Binding UsageTrend.RangeOptions}"
+                                     SelectedValue="{Binding UsageTrend.SelectedRange, Mode=TwoWay}"
+                                     SelectedValuePath="Range">
+                                <ListBox.ItemsPanel>
+                                    <ItemsPanelTemplate>
+                                        <StackPanel Orientation="Horizontal" />
+                                    </ItemsPanelTemplate>
+                                </ListBox.ItemsPanel>
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding DisplayName}" />
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                                <ListBox.ItemContainerStyle>
+                                    <Style TargetType="ListBoxItem">
+                                        <Setter Property="Padding" Value="11,6" />
+                                        <Setter Property="Foreground" Value="{StaticResource MutedBrush}" />
+                                        <Setter Property="HorizontalContentAlignment" Value="Center" />
+                                        <Setter Property="Template">
+                                            <Setter.Value>
+                                                <ControlTemplate TargetType="ListBoxItem">
+                                                    <Border x:Name="RangeBorder"
+                                                            Padding="{TemplateBinding Padding}"
+                                                            Background="Transparent"
+                                                            CornerRadius="7">
+                                                        <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" />
+                                                    </Border>
+                                                    <ControlTemplate.Triggers>
+                                                        <Trigger Property="IsSelected" Value="True">
+                                                            <Setter TargetName="RangeBorder" Property="Background" Value="White" />
+                                                            <Setter Property="Foreground" Value="{StaticResource PrimaryBrush}" />
+                                                            <Setter Property="FontWeight" Value="SemiBold" />
+                                                        </Trigger>
+                                                        <Trigger Property="IsKeyboardFocused" Value="True">
+                                                            <Setter TargetName="RangeBorder" Property="BorderBrush" Value="{StaticResource PrimaryBrush}" />
+                                                            <Setter TargetName="RangeBorder" Property="BorderThickness" Value="1" />
+                                                        </Trigger>
+                                                    </ControlTemplate.Triggers>
+                                                </ControlTemplate>
+                                            </Setter.Value>
+                                        </Setter>
+                                    </Style>
+                                </ListBox.ItemContainerStyle>
+                            </ListBox>
+                        </Grid>
+
+                        <StackPanel Margin="0,15,0,3" Orientation="Horizontal">
+                            <Line Width="28"
+                                  Height="2"
+                                  Margin="0,0,8,0"
+                                  VerticalAlignment="Center"
+                                  X1="0"
+                                  X2="28"
+                                  Y1="1"
+                                  Y2="1"
+                                  Stroke="{StaticResource SuccessBrush}"
+                                  StrokeDashArray="3,2"
+                                  StrokeThickness="2" />
+                            <TextBlock Margin="0,0,24,0" Text="5時間枠" />
+                            <Line Width="28"
+                                  Height="2"
+                                  Margin="0,0,8,0"
+                                  VerticalAlignment="Center"
+                                  X1="0"
+                                  X2="28"
+                                  Y1="1"
+                                  Y2="1"
+                                  Stroke="{StaticResource PrimaryBrush}"
+                                  StrokeThickness="2" />
+                            <TextBlock Text="週間枠" />
+                        </StackPanel>
+
+                        <Grid MinHeight="270">
+                            <controls:UsageTrendChart Height="270"
+                                                      AutomationProperties.Name="5時間枠と週間枠の使用率推移グラフ"
+                                                      FiveHourBrush="{StaticResource SuccessBrush}"
+                                                      FiveHourPoints="{Binding UsageTrend.FiveHourPoints}"
+                                                      GapThreshold="{Binding UsageTrend.GapThreshold}"
+                                                      RangeEndUtc="{Binding UsageTrend.RangeEndUtc}"
+                                                      RangeStartUtc="{Binding UsageTrend.RangeStartUtc}"
+                                                      SelectedRange="{Binding UsageTrend.SelectedRange}"
+                                                      WeeklyBrush="{StaticResource PrimaryBrush}"
+                                                      WeeklyPoints="{Binding UsageTrend.WeeklyPoints}">
+                                <controls:UsageTrendChart.Style>
+                                    <Style TargetType="controls:UsageTrendChart">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding UsageTrend.HasVisiblePoints}" Value="True">
+                                                <Setter Property="Visibility" Value="Visible" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </controls:UsageTrendChart.Style>
+                            </controls:UsageTrendChart>
+                            <TextBlock MaxWidth="440"
+                                       Margin="20"
+                                       HorizontalAlignment="Center"
+                                       VerticalAlignment="Center"
+                                       FontSize="14"
+                                       Foreground="{StaticResource MutedBrush}"
+                                       Text="{Binding UsageTrend.StatusMessage}"
+                                       TextAlignment="Center"
+                                       TextWrapping="Wrap">
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock">
+                                        <Setter Property="Visibility" Value="Visible" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding UsageTrend.HasVisiblePoints}" Value="True">
+                                                <Setter Property="Visibility" Value="Collapsed" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
+                        </Grid>
+                    </StackPanel>
+                </Border>
+
                 <TextBlock Margin="0,24,0,12"
                            Style="{StaticResource SectionTitleStyle}"
                            Text="通知と監視" />

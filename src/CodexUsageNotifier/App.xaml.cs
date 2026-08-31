@@ -148,6 +148,7 @@ public partial class App : System.Windows.Application
         services.AddSingleton<IApplicationStateRepository, JsonApplicationStateRepository>();
         services.AddSingleton<JsonUsageHistoryRepository>();
         services.AddSingleton<IUsageHistoryRepository>(provider => provider.GetRequiredService<JsonUsageHistoryRepository>());
+        services.AddSingleton<IUsageHistoryReader>(provider => provider.GetRequiredService<JsonUsageHistoryRepository>());
         services.AddSingleton<IUsageHistoryMaintenance>(provider => provider.GetRequiredService<JsonUsageHistoryRepository>());
         services.AddSingleton<IGoogleOAuthClientConfigurationService, GoogleOAuthClientConfigurationService>();
         services.AddSingleton<IUserDataProtector, WindowsUserDataProtector>();
@@ -164,6 +165,7 @@ public partial class App : System.Windows.Application
         services.AddSingleton<ApplicationStateStore>();
         services.AddSingleton<ApplicationVersionProvider>();
         services.AddSingleton<TimeProvider>(TimeProvider.System);
+        services.AddSingleton<UsageTrendViewModel>();
         services.AddSingleton<IPowerEventSource, SystemPowerEventSource>();
         services.AddSingleton<TrayIconHost>();
         services.AddSingleton<IWindowsNotificationSender, WindowsBalloonNotificationSender>();
