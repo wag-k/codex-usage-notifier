@@ -1,4 +1,5 @@
 using System.Text.Json;
+using CodexUsageNotifier.Application.Abstractions;
 using CodexUsageNotifier.Application.Maintenance;
 using CodexUsageNotifier.Domain.Models;
 using CodexUsageNotifier.Infrastructure.Persistence;
@@ -12,6 +13,171 @@ namespace CodexUsageNotifier.Tests.Infrastructure.Persistence;
 [TestClass]
 public sealed class JsonUsageHistoryRepositoryTests
 {
+    /// <summary>履歴ファイルがない場合に空の一覧を返すことを検証します。</summary>
+    [TestMethod]
+    public async Task ReadAsync_FileDoesNotExist_ReturnsEmpty()
+    {
+        using TemporaryDirectory temporaryDirectory = new();
+        using JsonUsageHistoryRepository repository = CreateRepository(new AppDataPaths(temporaryDirectory.Path));
+
+        IReadOnlyList<UsageHistoryEntry> entries = await repository.ReadAsync(
+            DateTimeOffset.MinValue,
+            DateTimeOffset.MaxValue,
+            CancellationToken.None);
+
+        Assert.AreEqual(0, entries.Count);
+    }
+
+    /// <summary>FiveHour、Weekly、Unknownを含む1行をスキーマどおり読み取ることを検証します。</summary>
+    [TestMethod]
+    public async Task ReadAsync_OneLine_ReturnsEveryClassification()
+    {
+        using TemporaryDirectory temporaryDirectory = new();
+        AppDataPaths paths = new(temporaryDirectory.Path);
+        using JsonUsageHistoryRepository repository = CreateRepository(paths);
+        DateTimeOffset capturedAtUtc = new(2026, 8, 1, 0, 0, 0, TimeSpan.Zero);
+        await repository.AppendAsync(
+            CreateSnapshot(
+                capturedAtUtc,
+                CreateWindow("short", RateLimitPosition.Primary, 300, 10),
+                CreateWindow("weekly", RateLimitPosition.Secondary, 10080, 20),
+                CreateWindow("unknown", RateLimitPosition.Primary, 1440, 30)),
+            CancellationToken.None);
+
+        IReadOnlyList<UsageHistoryEntry> entries = await repository.ReadAsync(
+            capturedAtUtc,
+            capturedAtUtc,
+            CancellationToken.None);
+
+        Assert.AreEqual(1, entries.Count);
+        CollectionAssert.AreEquivalent(
+            new[]
+            {
+                RateLimitClassification.FiveHour,
+                RateLimitClassification.Weekly,
+                RateLimitClassification.Unknown,
+            },
+            entries.Single().RateLimits.Select(rateLimit => rateLimit.Classification).ToArray());
+    }
+
+    /// <summary>開始・終了境界を含み、範囲外の複数行を除外して昇順で返すことを検証します。</summary>
+    [TestMethod]
+    public async Task ReadAsync_MultipleLines_FiltersInclusiveRangeAndOrdersAscending()
+    {
+        using TemporaryDirectory temporaryDirectory = new();
+        using JsonUsageHistoryRepository repository = CreateRepository(new AppDataPaths(temporaryDirectory.Path));
+        DateTimeOffset fromUtc = new(2026, 8, 1, 0, 0, 0, TimeSpan.Zero);
+        DateTimeOffset toUtc = fromUtc.AddDays(7);
+        await repository.AppendAsync(CreateSnapshot(fromUtc.AddTicks(-1), CreateWindow("old", RateLimitPosition.Primary, 300, 1)), CancellationToken.None);
+        await repository.AppendAsync(CreateSnapshot(toUtc, CreateWindow("to", RateLimitPosition.Primary, 300, 3)), CancellationToken.None);
+        await repository.AppendAsync(CreateSnapshot(fromUtc, CreateWindow("from", RateLimitPosition.Primary, 300, 2)), CancellationToken.None);
+        await repository.AppendAsync(CreateSnapshot(toUtc.AddTicks(1), CreateWindow("future", RateLimitPosition.Primary, 300, 4)), CancellationToken.None);
+
+        IReadOnlyList<UsageHistoryEntry> entries = await repository.ReadAsync(
+            fromUtc,
+            toUtc,
+            CancellationToken.None);
+
+        Assert.AreEqual(2, entries.Count);
+        Assert.AreEqual(fromUtc, entries[0].CapturedAtUtc);
+        Assert.AreEqual(toUtc, entries[1].CapturedAtUtc);
+    }
+
+    /// <summary>90日境界の履歴を読み取り対象に含めることを検証します。</summary>
+    [TestMethod]
+    public async Task ReadAsync_NinetyDayRange_IncludesBoundary()
+    {
+        using TemporaryDirectory temporaryDirectory = new();
+        using JsonUsageHistoryRepository repository = CreateRepository(new AppDataPaths(temporaryDirectory.Path));
+        DateTimeOffset toUtc = new(2026, 8, 31, 0, 0, 0, TimeSpan.Zero);
+        DateTimeOffset fromUtc = toUtc.AddDays(-90);
+        await repository.AppendAsync(CreateSnapshot(fromUtc, CreateWindow("boundary", RateLimitPosition.Primary, 10080, 50)), CancellationToken.None);
+
+        IReadOnlyList<UsageHistoryEntry> entries = await repository.ReadAsync(fromUtc, toUtc, CancellationToken.None);
+
+        Assert.AreEqual(1, entries.Count);
+    }
+
+    /// <summary>破損行だけを除外し、その後の正常行も読み取れることを検証します。</summary>
+    [TestMethod]
+    public async Task ReadAsync_CorruptedLine_SkipsOnlyCorruptionAndContinues()
+    {
+        using TemporaryDirectory temporaryDirectory = new();
+        AppDataPaths paths = new(temporaryDirectory.Path);
+        using JsonUsageHistoryRepository repository = CreateRepository(paths);
+        DateTimeOffset firstUtc = new(2026, 8, 1, 0, 0, 0, TimeSpan.Zero);
+        await repository.AppendAsync(CreateSnapshot(firstUtc, CreateWindow("first", RateLimitPosition.Primary, 300, 1)), CancellationToken.None);
+        await File.AppendAllTextAsync(paths.UsageHistoryFilePath, "{ broken" + Environment.NewLine);
+        await repository.AppendAsync(CreateSnapshot(firstUtc.AddHours(1), CreateWindow("last", RateLimitPosition.Primary, 10080, 2)), CancellationToken.None);
+
+        IReadOnlyList<UsageHistoryEntry> entries = await repository.ReadAsync(
+            firstUtc,
+            firstUtc.AddHours(1),
+            CancellationToken.None);
+
+        Assert.AreEqual(2, entries.Count);
+        Assert.AreEqual("last", entries[1].RateLimits.Single().LimitId);
+    }
+
+    /// <summary>読み取り前にキャンセルされている場合はファイルへアクセスせず中断することを検証します。</summary>
+    [TestMethod]
+    public async Task ReadAsync_Canceled_ThrowsTaskCanceledException()
+    {
+        using TemporaryDirectory temporaryDirectory = new();
+        using JsonUsageHistoryRepository repository = CreateRepository(new AppDataPaths(temporaryDirectory.Path));
+        using CancellationTokenSource cancellation = new();
+        cancellation.Cancel();
+
+        await Assert.ThrowsExceptionAsync<TaskCanceledException>(
+            () => repository.ReadAsync(DateTimeOffset.MinValue, DateTimeOffset.MaxValue, cancellation.Token));
+    }
+
+    /// <summary>読み取りが履歴ファイルの内容を変更しないことを検証します。</summary>
+    [TestMethod]
+    public async Task ReadAsync_DoesNotModifyHistoryFile()
+    {
+        using TemporaryDirectory temporaryDirectory = new();
+        AppDataPaths paths = new(temporaryDirectory.Path);
+        using JsonUsageHistoryRepository repository = CreateRepository(paths);
+        await repository.AppendAsync(CreateSnapshot(CreateWindow("codex", RateLimitPosition.Primary, 300, 10)), CancellationToken.None);
+        string before = await File.ReadAllTextAsync(paths.UsageHistoryFilePath);
+
+        _ = await repository.ReadAsync(DateTimeOffset.MinValue, DateTimeOffset.MaxValue, CancellationToken.None);
+
+        Assert.AreEqual(before, await File.ReadAllTextAsync(paths.UsageHistoryFilePath));
+    }
+
+    /// <summary>追記と読み取りの同時要求が同じ同期資源で安全に完了することを検証します。</summary>
+    [TestMethod]
+    public async Task AppendAndReadAsync_ConcurrentRequests_AreSerializedSafely()
+    {
+        using TemporaryDirectory temporaryDirectory = new();
+        using JsonUsageHistoryRepository repository = CreateRepository(new AppDataPaths(temporaryDirectory.Path));
+        DateTimeOffset nowUtc = new(2026, 8, 31, 0, 0, 0, TimeSpan.Zero);
+
+        await Task.WhenAll(
+            repository.AppendAsync(CreateSnapshot(nowUtc, CreateWindow("codex", RateLimitPosition.Primary, 300, 10)), CancellationToken.None),
+            repository.ReadAsync(nowUtc.AddDays(-1), nowUtc.AddDays(1), CancellationToken.None));
+
+        Assert.AreEqual(1, (await repository.ReadAsync(nowUtc, nowUtc, CancellationToken.None)).Count);
+    }
+
+    /// <summary>保守と読み取りの同時要求が置換途中のファイルを公開しないことを検証します。</summary>
+    [TestMethod]
+    public async Task MaintainAndReadAsync_ConcurrentRequests_AreSerializedSafely()
+    {
+        using TemporaryDirectory temporaryDirectory = new();
+        using JsonUsageHistoryRepository repository = CreateRepository(new AppDataPaths(temporaryDirectory.Path));
+        DateTimeOffset nowUtc = new(2026, 8, 31, 0, 0, 0, TimeSpan.Zero);
+        await repository.AppendAsync(CreateSnapshot(nowUtc, CreateWindow("codex", RateLimitPosition.Primary, 10080, 10)), CancellationToken.None);
+
+        await Task.WhenAll(
+            repository.MaintainAsync(nowUtc.AddDays(-90), CancellationToken.None),
+            repository.ReadAsync(nowUtc.AddDays(-90), nowUtc, CancellationToken.None));
+
+        Assert.AreEqual(1, (await repository.ReadAsync(nowUtc, nowUtc, CancellationToken.None)).Count);
+    }
+
     /// <summary>
     /// 取得成功1回の全利用枠を1行へ保存し、必要な観測項目を保持することを検証します。
     /// </summary>
