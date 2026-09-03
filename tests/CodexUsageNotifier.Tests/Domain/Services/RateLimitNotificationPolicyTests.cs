@@ -375,6 +375,273 @@ public sealed class RateLimitNotificationPolicyTests
     }
 
     /// <summary>
+    /// 実ログCase Aの予定時刻前リセットを時刻進行から最初の観測で検出できることを検証します。
+    /// </summary>
+    [TestMethod]
+    public void Evaluate_EarlyResetFromCaseA_ReturnsResetTimeAdvanced()
+    {
+        DateTimeOffset previousResetUtc = new(2026, 9, 3, 17, 8, 0, TimeSpan.Zero);
+        DateTimeOffset capturedAtUtc = new(2026, 8, 29, 22, 1, 0, TimeSpan.Zero);
+        RateLimitWindow previous = CreateWindow(
+            "codex",
+            RateLimitPosition.Secondary,
+            RateLimitClassification.Weekly,
+            10080,
+            68,
+            previousResetUtc);
+        RateLimitWindow current = CreateWindow(
+            "codex",
+            RateLimitPosition.Secondary,
+            RateLimitClassification.Weekly,
+            10080,
+            100,
+            new DateTimeOffset(2026, 9, 5, 22, 1, 0, TimeSpan.Zero));
+
+        RateLimitNotificationEvaluation result = Evaluate(
+            [current],
+            CreateSnapshot([previous], capturedAtUtc.AddHours(-1)),
+            capturedAtUtc: capturedAtUtc);
+
+        RateLimitNotificationCandidate candidate = result.Candidates.Single();
+        Assert.AreEqual(RateLimitNotificationType.LongWindowResetCompleted, candidate.NotificationType);
+        Assert.AreEqual(RateLimitResetCompletionReason.ResetTimeAdvanced, candidate.ResetCompletionReason);
+    }
+
+    /// <summary>
+    /// 実ログCase Bで時刻進行と56ポイント低下が同時成立しても時刻進行理由へ正規化することを検証します。
+    /// </summary>
+    [TestMethod]
+    public void Evaluate_EarlyResetFromCaseB_PrioritizesResetTimeAdvanced()
+    {
+        DateTimeOffset capturedAtUtc = new(2026, 8, 27, 17, 0, 0, TimeSpan.Zero);
+        RateLimitWindow previous = CreateWindow(
+            "codex",
+            RateLimitPosition.Primary,
+            RateLimitClassification.Weekly,
+            10080,
+            44,
+            new DateTimeOffset(2026, 9, 1, 14, 20, 56, TimeSpan.Zero));
+        RateLimitWindow current = CreateWindow(
+            "codex",
+            RateLimitPosition.Primary,
+            RateLimitClassification.Weekly,
+            10080,
+            100,
+            new DateTimeOffset(2026, 9, 3, 17, 0, 38, TimeSpan.Zero));
+
+        RateLimitNotificationEvaluation result = Evaluate(
+            [current],
+            CreateSnapshot([previous], capturedAtUtc.AddHours(-1)),
+            capturedAtUtc: capturedAtUtc);
+
+        Assert.AreEqual(
+            RateLimitResetCompletionReason.ResetTimeAdvanced,
+            result.Candidates.Single().ResetCompletionReason);
+    }
+
+    /// <summary>
+    /// 予定時刻前でも使用率が閾値以上低下すれば時刻進行なしで推定できることを検証します。
+    /// </summary>
+    [TestMethod]
+    public void Evaluate_EarlyResetWithUsageDropOnly_ReturnsUsageDropInference()
+    {
+        DateTimeOffset capturedAtUtc = new(2026, 8, 27, 17, 0, 0, TimeSpan.Zero);
+        DateTimeOffset resetUtc = new(2026, 9, 1, 14, 20, 56, TimeSpan.Zero);
+        RateLimitWindow previous = CreateWindow(
+            "codex",
+            RateLimitPosition.Primary,
+            RateLimitClassification.Weekly,
+            10080,
+            44,
+            resetUtc);
+        RateLimitWindow current = CreateWindow(
+            "codex",
+            RateLimitPosition.Primary,
+            RateLimitClassification.Weekly,
+            10080,
+            100,
+            resetUtc);
+
+        RateLimitNotificationEvaluation result = Evaluate(
+            [current],
+            CreateSnapshot([previous], capturedAtUtc.AddHours(-1)),
+            capturedAtUtc: capturedAtUtc);
+
+        Assert.AreEqual(
+            RateLimitResetCompletionReason.UsageDropInference,
+            result.Candidates.Single().ResetCompletionReason);
+    }
+
+    /// <summary>
+    /// 予定時刻前の小さな使用率低下と同一リセット時刻では完了候補にならないことを検証します。
+    /// </summary>
+    [TestMethod]
+    public void Evaluate_EarlySmallUsageDropWithSameReset_ReturnsNoCandidate()
+    {
+        DateTimeOffset capturedAtUtc = new(2026, 8, 27, 17, 0, 0, TimeSpan.Zero);
+        DateTimeOffset resetUtc = new(2026, 9, 1, 14, 20, 56, TimeSpan.Zero);
+        RateLimitWindow previous = CreateWindow(
+            "codex",
+            RateLimitPosition.Primary,
+            RateLimitClassification.Weekly,
+            10080,
+            60,
+            resetUtc);
+        RateLimitWindow current = WithRemaining(previous, 65);
+
+        RateLimitNotificationEvaluation result = Evaluate(
+            [current],
+            CreateSnapshot([previous], capturedAtUtc.AddHours(-1)),
+            capturedAtUtc: capturedAtUtc);
+
+        Assert.AreEqual(0, result.Candidates.Count);
+    }
+
+    /// <summary>
+    /// 秒単位のリセット時刻補正だけでは新しい利用期間と判定しないことを検証します。
+    /// </summary>
+    [TestMethod]
+    public void Evaluate_ResetTimeAdvancedBySecondsOnly_ReturnsNoCandidate()
+    {
+        DateTimeOffset capturedAtUtc = new(2026, 8, 27, 17, 0, 0, TimeSpan.Zero);
+        RateLimitWindow previous = CreateWindow(
+            "codex",
+            RateLimitPosition.Primary,
+            RateLimitClassification.Weekly,
+            10080,
+            60,
+            new DateTimeOffset(2026, 9, 1, 14, 20, 0, TimeSpan.Zero));
+        RateLimitWindow current = CreateWindow(
+            "codex",
+            RateLimitPosition.Primary,
+            RateLimitClassification.Weekly,
+            10080,
+            60,
+            new DateTimeOffset(2026, 9, 1, 14, 20, 30, TimeSpan.Zero));
+
+        RateLimitNotificationEvaluation result = Evaluate(
+            [current],
+            CreateSnapshot([previous], capturedAtUtc.AddHours(-1)),
+            capturedAtUtc: capturedAtUtc);
+
+        Assert.AreEqual(0, result.Candidates.Count);
+    }
+
+    /// <summary>
+    /// 初回観測が使用率0%でもリセット完了候補を生成しないことを検証します。
+    /// </summary>
+    [TestMethod]
+    public void Evaluate_FirstObservationAtZeroUsedPercent_ReturnsNoResetCompletedCandidate()
+    {
+        RateLimitWindow current = CreateWindow(
+            "codex",
+            RateLimitPosition.Primary,
+            RateLimitClassification.Weekly,
+            10080,
+            100,
+            NowUtc.AddDays(7));
+
+        RateLimitNotificationEvaluation result = Evaluate([current]);
+
+        Assert.IsFalse(result.Candidates.Any(candidate =>
+            candidate.NotificationType == RateLimitNotificationType.LongWindowResetCompleted));
+    }
+
+    /// <summary>
+    /// 別Positionの前回枠を比較対象にせず早期リセット通知を生成しないことを検証します。
+    /// </summary>
+    [TestMethod]
+    public void Evaluate_PreviousWindowWithDifferentIdentity_ReturnsNoResetCompletedCandidate()
+    {
+        RateLimitWindow previous = CreateWindow(
+            "codex",
+            RateLimitPosition.Primary,
+            RateLimitClassification.Weekly,
+            10080,
+            50,
+            NowUtc.AddDays(2));
+        RateLimitWindow current = CreateWindow(
+            "codex",
+            RateLimitPosition.Secondary,
+            RateLimitClassification.Weekly,
+            10080,
+            100,
+            NowUtc.AddDays(7));
+
+        RateLimitNotificationEvaluation result = Evaluate(
+            [current],
+            CreateSnapshot([previous], NowUtc.AddHours(-1)));
+
+        Assert.IsFalse(result.Candidates.Any(candidate =>
+            candidate.NotificationType == RateLimitNotificationType.LongWindowResetCompleted));
+    }
+
+    /// <summary>
+    /// 同じ新期間の通知済み状態がある場合は早期リセット候補を重複生成しないことを検証します。
+    /// </summary>
+    [TestMethod]
+    public void Evaluate_EarlyResetAlreadyDelivered_ReturnsNoDuplicateCandidate()
+    {
+        DateTimeOffset capturedAtUtc = NowUtc.AddHours(-2);
+        RateLimitWindow previous = CreateWindow(
+            "codex",
+            RateLimitPosition.Primary,
+            RateLimitClassification.Weekly,
+            10080,
+            68,
+            NowUtc.AddDays(3));
+        RateLimitWindow current = CreateWindow(
+            "codex",
+            RateLimitPosition.Primary,
+            RateLimitClassification.Weekly,
+            10080,
+            100,
+            NowUtc.AddDays(5));
+        RateLimitNotificationState delivered = new()
+        {
+            LimitId = "codex",
+            Position = RateLimitPosition.Primary,
+            WindowDurationMinutes = 10080,
+            RecoveryWindowId = RateLimitNotificationPolicy.CreateRecoveryWindowId(current, capturedAtUtc),
+            NotificationType = RateLimitNotificationType.LongWindowResetCompleted,
+            NotificationStage = RateLimitNotificationStage.Completed,
+            WindowsDeliveryStatus = DeliveryStatus.Succeeded,
+        };
+
+        RateLimitNotificationEvaluation result = Evaluate(
+            [current],
+            CreateSnapshot([previous], capturedAtUtc.AddHours(-1)),
+            notificationStates: [delivered],
+            capturedAtUtc: capturedAtUtc);
+
+        Assert.AreEqual(0, result.Candidates.Count);
+    }
+
+    /// <summary>
+    /// 再起動後に保存された新期間を再取得しても同じリセット完了候補を生成しないことを検証します。
+    /// </summary>
+    [TestMethod]
+    public void Evaluate_AfterRestartWithSameNewPeriod_ReturnsNoDuplicateCandidate()
+    {
+        RateLimitWindow current = CreateWindow(
+            "codex",
+            RateLimitPosition.Primary,
+            RateLimitClassification.Weekly,
+            10080,
+            100,
+            NowUtc.AddDays(7));
+        UsageSnapshot savedSnapshot = CreateSnapshot([current], NowUtc.AddMinutes(-1));
+
+        RateLimitNotificationEvaluation result = Evaluate(
+            [current],
+            savedSnapshot,
+            capturedAtUtc: NowUtc);
+
+        Assert.IsFalse(result.Candidates.Any(candidate =>
+            candidate.NotificationType == RateLimitNotificationType.LongWindowResetCompleted));
+    }
+
+    /// <summary>
     /// リセット予定時刻へ到達しただけではリセット完了候補にならないことを検証します。
     /// </summary>
     [TestMethod]

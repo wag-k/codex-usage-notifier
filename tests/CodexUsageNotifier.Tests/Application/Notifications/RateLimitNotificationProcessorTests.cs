@@ -82,6 +82,56 @@ public sealed class RateLimitNotificationProcessorTests
     }
 
     /// <summary>
+    /// 予定時刻前の週間枠リセットを禁止時間中に検出した場合、終了後に同じ新期間を1回だけ通知することを検証します。
+    /// </summary>
+    [TestMethod]
+    public async Task ProcessAsync_EarlyWeeklyResetDuringQuietHours_DefersAndSendsOnce()
+    {
+        DateTimeOffset quietUtc = new(2026, 8, 30, 1, 0, 0, TimeSpan.Zero);
+        DateTimeOffset previousResetUtc = new(2026, 9, 3, 17, 8, 0, TimeSpan.Zero);
+        DateTimeOffset currentResetUtc = new(2026, 9, 5, 22, 1, 0, TimeSpan.Zero);
+        RateLimitWindow previousWindow = CreateWeeklyWindow(68, previousResetUtc);
+        RateLimitWindow resetWindow = CreateWeeklyWindow(100, currentResetUtc);
+        InMemoryStateRepository repository = new();
+        await repository.SaveAsync(
+            new ApplicationState
+            {
+                InitialSetupCompleted = true,
+                LastUsageSnapshot = CreateSnapshot(previousWindow, quietUtc.AddHours(-1)),
+            },
+            CancellationToken.None);
+        using ApplicationStateStore stateStore = new(repository);
+        RecordingWindowsNotificationSender sender = new();
+        MutableTimeProvider timeProvider = new(quietUtc);
+        RateLimitNotificationProcessor processor = CreateProcessor(stateStore, sender, timeProvider);
+
+        NotificationProcessingResult deferred = await processor.ProcessAsync(
+            CreateSnapshot(resetWindow, quietUtc),
+            AppSettings.CreateDefault(),
+            CancellationToken.None);
+
+        DateTimeOffset afterQuietUtc = new(2026, 8, 30, 8, 0, 0, TimeSpan.Zero);
+        timeProvider.SetUtcNow(afterQuietUtc);
+        NotificationProcessingResult delivered = await processor.ProcessAsync(
+            CreateSnapshot(resetWindow, afterQuietUtc),
+            AppSettings.CreateDefault(),
+            CancellationToken.None);
+        await processor.ProcessAsync(
+            CreateSnapshot(resetWindow, afterQuietUtc.AddMinutes(1)),
+            AppSettings.CreateDefault(),
+            CancellationToken.None);
+
+        RateLimitNotificationState state = delivered.State.RateLimitNotificationStates.Single();
+        Assert.AreEqual(0, deferred.State.RateLimitNotificationStates.Single().WindowsAttemptCount);
+        Assert.AreEqual(1, sender.SendCount);
+        Assert.AreEqual(DeliveryStatus.Succeeded, state.WindowsDeliveryStatus);
+        Assert.AreEqual(RateLimitResetCompletionReason.ResetTimeAdvanced, state.ResetCompletionReason);
+        Assert.AreEqual(
+            RateLimitNotificationPolicy.CreateRecoveryWindowId(resetWindow, afterQuietUtc),
+            state.RecoveryWindowId);
+    }
+
+    /// <summary>
     /// 同一取得で複数候補が成立してもWindows通知を1件だけ送り、各候補を成功として保存することを検証します。
     /// </summary>
     [TestMethod]
@@ -528,6 +578,28 @@ public sealed class RateLimitNotificationProcessorTests
             UsedPercent = 100 - remainingPercent,
             RemainingPercent = remainingPercent,
             ResetsAtUtc = capturedAtUtc.AddDays(7),
+        };
+    }
+
+    /// <summary>
+    /// 指定残量とリセット時刻を持つ週間枠を生成します。
+    /// </summary>
+    /// <param name="remainingPercent">残量パーセントです。</param>
+    /// <param name="resetsAtUtc">次回リセット予定UTC時刻です。</param>
+    /// <returns>テスト用週間枠です。</returns>
+    private static RateLimitWindow CreateWeeklyWindow(
+        double remainingPercent,
+        DateTimeOffset resetsAtUtc)
+    {
+        return new RateLimitWindow
+        {
+            LimitId = "codex",
+            Position = RateLimitPosition.Secondary,
+            Classification = RateLimitClassification.Weekly,
+            WindowDurationMinutes = 10080,
+            UsedPercent = 100D - remainingPercent,
+            RemainingPercent = remainingPercent,
+            ResetsAtUtc = resetsAtUtc,
         };
     }
 

@@ -9,6 +9,11 @@ namespace CodexUsageNotifier.Domain.Services;
 public static class RateLimitNotificationPolicy
 {
     private static readonly TimeSpan DeferredNotificationMaxAge = TimeSpan.FromHours(24);
+
+    /// <summary>
+    /// App Serverの秒単位の時刻補正を新しい利用期間と誤認しないために必要な最小進行量です。
+    /// </summary>
+    private static readonly TimeSpan MinimumResetTimeAdvance = TimeSpan.FromMinutes(1);
     private const double MinimumRecoveryIncreasePoints = 1D;
 
     /// <summary>
@@ -303,15 +308,10 @@ public static class RateLimitNotificationPolicy
             return null;
         }
 
-        if (previousWindow.ResetsAtUtc is not null
-            && currentSnapshot.CapturedAtUtc < previousWindow.ResetsAtUtc.Value)
-        {
-            return null;
-        }
-
         if (currentWindow.ResetsAtUtc is not null
             && previousWindow.ResetsAtUtc is not null
-            && currentWindow.ResetsAtUtc.Value > previousWindow.ResetsAtUtc.Value)
+            && currentWindow.ResetsAtUtc.Value - previousWindow.ResetsAtUtc.Value
+                >= MinimumResetTimeAdvance)
         {
             return RateLimitResetCompletionReason.ResetTimeAdvanced;
         }
