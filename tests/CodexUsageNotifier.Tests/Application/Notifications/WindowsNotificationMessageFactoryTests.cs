@@ -12,7 +12,7 @@ public sealed class WindowsNotificationMessageFactoryTests
     private static readonly DateTimeOffset NowUtc = new(2026, 8, 5, 0, 0, 0, TimeSpan.Zero);
 
     /// <summary>
-    /// 短期枠回復通知に残量、利用枠識別値、およびリセット時刻が含まれることを検証します。
+    /// 短期枠回復通知に短期・週間残量、利用枠識別値、およびリセット時刻が含まれることを検証します。
     /// </summary>
     [TestMethod]
     public void Create_ShortWindowRecovered_ContainsWindowDetails()
@@ -23,14 +23,62 @@ public sealed class WindowsNotificationMessageFactoryTests
             RateLimitNotificationType.ShortWindowRecovered,
             RateLimitNotificationStage.Recovered);
 
-        WindowsNotificationMessage result = WindowsNotificationMessageFactory.Create(candidate, NowUtc);
+        WindowsNotificationMessage result = WindowsNotificationMessageFactory.Create(
+            candidate,
+            NowUtc,
+            new RateLimitNotificationDisplayContext { WeeklyRemainingPercent = 63 });
 
         Assert.AreEqual("Codexの短期利用枠が回復しました", result.Title);
         StringAssert.Contains(result.Body, "対象：5時間枠");
-        StringAssert.Contains(result.Body, "残り使用量：65%");
+        StringAssert.Contains(result.Body, "短期枠の残量：65%");
+        StringAssert.Contains(result.Body, "週間枠の残量：63%");
         StringAssert.Contains(result.Body, "LimitId：codex");
         StringAssert.Contains(result.Body, "位置：Primary");
         StringAssert.Contains(result.Body, "次回リセット：");
+    }
+
+    /// <summary>週間枠を同じ取得で観測できない場合に0%ではなく未観測と表示することを検証します。</summary>
+    [TestMethod]
+    public void Create_ShortWindowRecoveredWithoutWeekly_ShowsUnobserved()
+    {
+        RateLimitNotificationCandidate candidate = CreateCandidate(
+            RateLimitClassification.FiveHour,
+            300,
+            RateLimitNotificationType.ShortWindowRecovered,
+            RateLimitNotificationStage.Recovered);
+
+        WindowsNotificationMessage result = WindowsNotificationMessageFactory.Create(candidate, NowUtc);
+
+        StringAssert.Contains(result.Body, "週間枠の残量：未観測");
+        Assert.IsFalse(result.Body.Contains("週間枠の残量：0%", StringComparison.Ordinal));
+    }
+
+    /// <summary>週間枠の使用率から既存計算済み残量を境界値どおり表示することを検証します。</summary>
+    /// <param name="weeklyRemainingPercent">表示する週間枠残量です。</param>
+    /// <param name="expected">期待する百分率表示です。</param>
+    [DataTestMethod]
+    [DataRow(100D, "100%")]
+    [DataRow(63D, "63%")]
+    [DataRow(0D, "0%")]
+    public void Create_ShortWindowRecovered_FormatsWeeklyRemainingBoundary(
+        double weeklyRemainingPercent,
+        string expected)
+    {
+        RateLimitNotificationCandidate candidate = CreateCandidate(
+            RateLimitClassification.FiveHour,
+            300,
+            RateLimitNotificationType.ShortWindowRecovered,
+            RateLimitNotificationStage.Recovered);
+
+        WindowsNotificationMessage result = WindowsNotificationMessageFactory.Create(
+            candidate,
+            NowUtc,
+            new RateLimitNotificationDisplayContext
+            {
+                WeeklyRemainingPercent = weeklyRemainingPercent,
+            });
+
+        StringAssert.Contains(result.Body, $"週間枠の残量：{expected}");
     }
 
     /// <summary>
@@ -51,6 +99,7 @@ public sealed class WindowsNotificationMessageFactoryTests
         StringAssert.Contains(result.Body, "段階：Standard");
         StringAssert.Contains(result.Body, "リセットまで：約24時間");
         StringAssert.Contains(result.Body, "バックログを確認してください");
+        Assert.IsFalse(result.Body.Contains("週間枠の残量：", StringComparison.Ordinal));
     }
 
     /// <summary>
@@ -90,10 +139,11 @@ public sealed class WindowsNotificationMessageFactoryTests
 
         WindowsNotificationMessage result = WindowsNotificationMessageFactory.CreateAggregate(
             [shortWindow, weekly],
-            NowUtc);
+            NowUtc,
+            new RateLimitNotificationDisplayContext { WeeklyRemainingPercent = 63 });
 
         Assert.AreEqual("Codex利用枠のお知らせ（2件）", result.Title);
-        StringAssert.Contains(result.Body, "・5時間枠が65%まで回復");
+        StringAssert.Contains(result.Body, "・5時間枠が65%まで回復（週間枠 残り63%）");
         StringAssert.Contains(result.Body, "・週間枠はリセットまで約24時間、残り65%（Standard）");
     }
 

@@ -44,7 +44,10 @@ public sealed partial class TestNotificationService
     {
         DateTimeOffset nowUtc = timeProvider.GetUtcNow();
         RateLimitNotificationCandidate candidate = CreateCandidate(notificationType, nowUtc);
-        WindowsNotificationMessage message = WindowsNotificationMessageFactory.Create(candidate, nowUtc);
+        WindowsNotificationMessage message = WindowsNotificationMessageFactory.Create(
+            candidate,
+            nowUtc,
+            RateLimitNotificationDisplayContext.Empty);
         try
         {
             await windowsNotificationSender.SendAsync(message, cancellationToken);
