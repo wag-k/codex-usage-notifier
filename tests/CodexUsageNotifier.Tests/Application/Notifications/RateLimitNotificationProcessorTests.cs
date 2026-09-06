@@ -57,7 +57,7 @@ public sealed class RateLimitNotificationProcessorTests
         RateLimitWindow window = CreateFiveHourWindow(quietUtc);
         await processor.ProcessAsync(
             CreateSnapshot(
-                [window, CreateWeeklyWindow(quietUtc, 70)],
+                [window, CreateAuxiliaryWeeklyWindow(70)],
                 quietUtc),
             AppSettings.CreateDefault(),
             CancellationToken.None);
@@ -67,7 +67,7 @@ public sealed class RateLimitNotificationProcessorTests
         RateLimitWindow currentWindow = CreateFiveHourWindow(afterQuietUtc);
         NotificationProcessingResult sent = await processor.ProcessAsync(
             CreateSnapshot(
-                [currentWindow, CreateWeeklyWindow(afterQuietUtc, 64)],
+                [currentWindow, CreateAuxiliaryWeeklyWindow(64)],
                 afterQuietUtc),
             AppSettings.CreateDefault(),
             CancellationToken.None);
@@ -192,17 +192,17 @@ public sealed class RateLimitNotificationProcessorTests
         RateLimitWindow window = CreateFiveHourWindow(nowUtc);
 
         NotificationProcessingResult failed = await processor.ProcessAsync(
-            CreateSnapshot([window, CreateWeeklyWindow(nowUtc, 70)], nowUtc),
+            CreateSnapshot([window, CreateAuxiliaryWeeklyWindow(70)], nowUtc),
             AppSettings.CreateDefault(),
             CancellationToken.None);
         timeProvider.SetUtcNow(nowUtc.AddMinutes(4));
         await processor.ProcessAsync(
-            CreateSnapshot([window, CreateWeeklyWindow(nowUtc.AddMinutes(4), 68)], nowUtc.AddMinutes(4)),
+            CreateSnapshot([window, CreateAuxiliaryWeeklyWindow(68)], nowUtc.AddMinutes(4)),
             AppSettings.CreateDefault(),
             CancellationToken.None);
         timeProvider.SetUtcNow(nowUtc.AddMinutes(5));
         NotificationProcessingResult succeeded = await processor.ProcessAsync(
-            CreateSnapshot([window, CreateWeeklyWindow(nowUtc.AddMinutes(5), 63)], nowUtc.AddMinutes(5)),
+            CreateSnapshot([window, CreateAuxiliaryWeeklyWindow(63)], nowUtc.AddMinutes(5)),
             AppSettings.CreateDefault(),
             CancellationToken.None);
         timeProvider.SetUtcNow(nowUtc.AddMinutes(6));
@@ -561,13 +561,10 @@ public sealed class RateLimitNotificationProcessorTests
         };
     }
 
-    /// <summary>通知条件を成立させず補助表示だけに使用する週間枠を生成します。</summary>
-    /// <param name="capturedAtUtc">取得UTC時刻です。</param>
+    /// <summary>期間IDを固定し、通知条件を成立させず補助表示だけに使用する週間枠を生成します。</summary>
     /// <param name="remainingPercent">表示する週間枠残量です。</param>
-    /// <returns>次回リセットまで7日ある週間枠です。</returns>
-    private static RateLimitWindow CreateWeeklyWindow(
-        DateTimeOffset capturedAtUtc,
-        double remainingPercent)
+    /// <returns>取得間で同じリセット期間を表す週間枠です。</returns>
+    private static RateLimitWindow CreateAuxiliaryWeeklyWindow(double remainingPercent)
     {
         return new RateLimitWindow
         {
@@ -577,7 +574,7 @@ public sealed class RateLimitNotificationProcessorTests
             WindowDurationMinutes = 10080,
             UsedPercent = 100 - remainingPercent,
             RemainingPercent = remainingPercent,
-            ResetsAtUtc = capturedAtUtc.AddDays(7),
+            ResetsAtUtc = new DateTimeOffset(2026, 8, 12, 8, 0, 0, TimeSpan.Zero),
         };
     }
 
