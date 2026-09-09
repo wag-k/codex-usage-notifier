@@ -39,7 +39,7 @@ public sealed partial class SettingsViewModel
     /// <summary>利用者が明示的にコピーする秘密Topicを取得します。</summary>
     public string? NtfyTopicValueForCopy => currentNtfyTopic?.Value;
 
-    /// <summary>Android ntfyアプリで購読画面を開くディープリンクを取得します。</summary>
+    /// <summary>利用者がスマートフォンへ渡すAndroid ntfy購読用ディープリンクを取得します。</summary>
     public string? NtfyAndroidDeepLink => currentNtfyTopic is null
         ? null
         : NtfySubscriptionLinkFactory.CreateAndroidDeepLink(currentNtfyTopic);

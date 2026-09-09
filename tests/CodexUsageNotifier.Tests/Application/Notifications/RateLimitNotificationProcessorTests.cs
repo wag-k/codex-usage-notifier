@@ -520,6 +520,36 @@ namespace CodexUsageNotifier.Tests.Application.Notifications;
         Assert.AreEqual(DeliveryStatus.Succeeded, notified.WindowsDeliveryResult?.Status);
     }
 
+    /// <summary>Quiet Hours中でも既存のWindows監視障害通知を抑止せず、ntfyだけを保留することを検証します。</summary>
+    [TestMethod]
+    public async Task NotifyMonitoringFailureAsync_DuringQuietHours_SendsWindowsButNotNtfy()
+    {
+        DateTimeOffset nowUtc = new(2026, 9, 10, 1, 0, 0, TimeSpan.Zero);
+        InMemoryStateRepository repository = new();
+        using ApplicationStateStore stateStore = new(repository);
+        RecordingWindowsNotificationSender windows = new();
+        RecordingNtfySender ntfy = new();
+        RateLimitNotificationProcessor processor = CreateProcessor(
+            stateStore,
+            windows,
+            new MutableTimeProvider(nowUtc),
+            ntfyNotificationSender: ntfy);
+        AppSettings settings = AppSettings.CreateDefault() with
+        {
+            NtfyNotificationEnabled = true,
+        };
+
+        ApplicationState result = await processor.NotifyMonitoringFailureAsync(
+            new ApplicationState { InitialSetupCompleted = true, ConsecutiveFailures = 3 },
+            settings,
+            CancellationToken.None);
+
+        Assert.AreEqual(1, windows.SendCount);
+        Assert.AreEqual(0, ntfy.SendCount);
+        Assert.IsTrue(result.FailureNotificationSent);
+        Assert.IsFalse(result.NtfyFailureNotificationSent);
+    }
+
     /// <summary>Windowsを無効にしてもntfyだけを独立配送できることを検証します。</summary>
     [TestMethod]
     public async Task ProcessAsync_WindowsDisabledNtfyEnabled_SendsOnlyNtfy()
@@ -545,6 +575,40 @@ namespace CodexUsageNotifier.Tests.Application.Notifications;
         Assert.AreEqual(0, windows.SendCount);
         Assert.AreEqual(1, ntfy.SendCount);
         Assert.AreEqual(DeliveryStatus.Succeeded, result.State.RateLimitNotificationStates.Single().NtfyDeliveryStatus);
+    }
+
+    /// <summary>取得後に時刻が進んでも、ntfy有効化直後の同一Snapshotで成立した通知を取りこぼさないことを検証します。</summary>
+    [TestMethod]
+    public async Task ProcessAsync_NtfyJustEnabledWithOlderSnapshot_SendsFirstCandidate()
+    {
+        DateTimeOffset capturedAtUtc = new(2026, 9, 10, 8, 0, 0, TimeSpan.Zero);
+        InMemoryStateRepository repository = new(CreateStateBeforeShortWindowRecovery());
+        using ApplicationStateStore stateStore = new(repository);
+        RecordingNtfySender ntfy = new();
+        MutableTimeProvider clock = new(capturedAtUtc.AddSeconds(2));
+        RateLimitNotificationProcessor processor = CreateProcessor(
+            stateStore,
+            new RecordingWindowsNotificationSender(),
+            clock,
+            ntfyNotificationSender: ntfy);
+        AppSettings settings = AppSettings.CreateDefault() with
+        {
+            WindowsNotificationEnabled = false,
+            GmailNotificationEnabled = false,
+            NtfyNotificationEnabled = true,
+            QuietHoursEnabled = false,
+        };
+
+        NotificationProcessingResult result = await processor.ProcessAsync(
+            CreateSnapshot(CreateFiveHourWindow(capturedAtUtc), capturedAtUtc),
+            settings,
+            CancellationToken.None);
+
+        Assert.AreEqual(capturedAtUtc, result.State.NtfyDeliveryEnabledSinceUtc);
+        Assert.AreEqual(1, ntfy.SendCount);
+        Assert.AreEqual(
+            DeliveryStatus.Succeeded,
+            result.State.RateLimitNotificationStates.Single().NtfyDeliveryStatus);
     }
 
     /// <summary>ntfy一時失敗を5分後に1回だけ再試行し、Windowsを再送しないことを検証します。</summary>

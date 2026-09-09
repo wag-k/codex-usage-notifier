@@ -30,10 +30,11 @@ public sealed partial class RateLimitNotificationProcessor
     [LoggerMessage(EventId = 3106, Level = LogLevel.Warning, Message = "スマホ通知を送信できませんでした。Topicと本文は記録していません。Retry={Retry}")]
     private static partial void LogNtfyFailed(ILogger logger, bool retry, Exception exception);
 
-    /// <summary>設定と秘密Topic世代の変化をntfy配送境界へ同期します。</summary>
+    /// <summary>設定と秘密Topic世代の変化を、処理対象の取得時刻を基準にntfy配送境界へ同期します。</summary>
     private async Task<(ApplicationState State, NtfyTopic? Topic)> SynchronizeNtfyDeliveryBoundaryAsync(
         ApplicationState state,
         AppSettings settings,
+        DateTimeOffset capturedAtUtc,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(state);
@@ -63,7 +64,7 @@ public sealed partial class RateLimitNotificationProcessor
         ApplicationState updated = await stateStore.UpdateAsync(current => current with
         {
             NtfyDeliveryEnabledLastObserved = usable,
-            NtfyDeliveryEnabledSinceUtc = boundaryChanged ? timeProvider.GetUtcNow() : current.NtfyDeliveryEnabledSinceUtc,
+            NtfyDeliveryEnabledSinceUtc = boundaryChanged ? capturedAtUtc : current.NtfyDeliveryEnabledSinceUtc,
             NtfyTopicGenerationId = usable ? topic!.GenerationId : current.NtfyTopicGenerationId,
         }, cancellationToken);
         if (boundaryChanged)

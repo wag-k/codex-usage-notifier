@@ -48,7 +48,7 @@ public sealed class NtfyNotificationMessageFactoryTests
         StringAssert.Contains(message.Body, "分類: 週間枠");
     }
 
-    /// <summary>複数候補でもタイトルだけで件数と週間枠残量を把握できることを検証します。</summary>
+    /// <summary>複数候補では週間枠のリセットを先頭表示し、各候補にも個別のリセット時刻を含めることを検証します。</summary>
     [TestMethod]
     public void CreateAggregate_MultipleCandidates_PutsWeeklyRemainingInTitle()
     {
@@ -67,10 +67,15 @@ public sealed class NtfyNotificationMessageFactoryTests
 
         RateLimitNotificationCandidate second = new()
         {
-            Window = candidate.Window,
+            Window = new RateLimitWindow
+            {
+                LimitId = "codex", Position = RateLimitPosition.Secondary,
+                Classification = RateLimitClassification.Weekly, WindowDurationMinutes = 10080,
+                RemainingPercent = 23, UsedPercent = 77, ResetsAtUtc = now.AddHours(24),
+            },
             RecoveryWindowId = "period-2",
-            NotificationType = candidate.NotificationType,
-            NotificationStage = candidate.NotificationStage,
+            NotificationType = RateLimitNotificationType.LongWindowStandardWarning,
+            NotificationStage = RateLimitNotificationStage.Standard,
             ConditionMetAtUtc = candidate.ConditionMetAtUtc,
         };
         NtfyNotificationMessage message = NtfyNotificationMessageFactory.CreateAggregate(
@@ -79,5 +84,8 @@ public sealed class NtfyNotificationMessageFactoryTests
 
         StringAssert.Contains(message.Title, "2件");
         StringAssert.Contains(message.Title, "週間残り23%");
+        StringAssert.StartsWith(message.Body, "次回リセット 2026/09/10 00:00");
+        StringAssert.Contains(message.Body, "次回リセット: 2026/09/09 05:00");
+        StringAssert.Contains(message.Body, "次回リセット: 2026/09/10 00:00");
     }
 }

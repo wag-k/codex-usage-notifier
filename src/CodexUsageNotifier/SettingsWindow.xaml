@@ -285,9 +285,9 @@
                         </WrapPanel>
 
                         <TextBlock Margin="0,6,0,4" FontWeight="SemiBold" Text="3. ntfyアプリで購読" />
-                        <TextBlock Text="コピーしたTopicをntfy.shの購読先として追加します。Androidでは下のボタンでも購読画面を開けます。" TextWrapping="Wrap" />
-                        <Button Margin="0,8,0,10" Padding="12,6" HorizontalAlignment="Left" Content="Android ntfyで開く"
-                                IsEnabled="{Binding IsNtfyTopicConfigured}" Click="OnOpenNtfyAndroid" />
+                        <TextBlock Text="コピーしたTopicをntfy.shの購読先として追加します。Android端末へ渡す場合は購読用リンクもコピーできます。" TextWrapping="Wrap" />
+                        <Button Margin="0,8,0,10" Padding="12,6" HorizontalAlignment="Left" Content="Android向け購読リンクをコピー"
+                                IsEnabled="{Binding IsNtfyTopicConfigured}" Click="OnCopyNtfyAndroidLink" />
 
                         <TextBlock Margin="0,6,0,4" FontWeight="SemiBold" Text="4. テスト通知を確認" />
                         <Button Margin="0,4,0,0" Padding="12,6" HorizontalAlignment="Left" Content="スマホへテスト通知を送信"

@@ -85,6 +85,7 @@ public sealed partial class RateLimitNotificationProcessor
         (previousState, NtfyTopic? ntfyTopic) = await SynchronizeNtfyDeliveryBoundaryAsync(
             previousState,
             settings,
+            snapshot.CapturedAtUtc,
             cancellationToken);
         previousState = await RecoverInterruptedWindowsAttemptsAsync(
             previousState,
@@ -720,11 +721,6 @@ public sealed partial class RateLimitNotificationProcessor
         }
 
         DateTimeOffset nowUtc = timeProvider.GetUtcNow();
-        if (QuietHoursSchedule.GetQuietHoursEndUtc(nowUtc, timeProvider.LocalTimeZone, settings) is not null)
-        {
-            return state;
-        }
-
         ApplicationState current = state;
         if (settings.WindowsNotificationEnabled && !state.FailureNotificationSent)
         {
@@ -752,6 +748,12 @@ public sealed partial class RateLimitNotificationProcessor
             {
                 LogMonitoringFailureNotificationFailed(logger, exception);
             }
+        }
+
+        // Windowsの監視障害通知は既存仕様どおり即時送信し、Quiet Hoursはntfyだけに適用します。
+        if (QuietHoursSchedule.GetQuietHoursEndUtc(nowUtc, timeProvider.LocalTimeZone, settings) is not null)
+        {
+            return current;
         }
 
         bool canAttemptNtfy = settings.NtfyNotificationEnabled

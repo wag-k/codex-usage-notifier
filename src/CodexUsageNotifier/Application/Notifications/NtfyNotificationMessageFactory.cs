@@ -27,7 +27,13 @@ public static class NtfyNotificationMessageFactory
             ? CreateTitle(candidates[0], displayContext)
             : $"Codex利用枠 {candidates.Count.ToString(CultureInfo.InvariantCulture)}件｜週間残り{displayContext.FormatWeeklyRemainingPercent(CultureInfo.InvariantCulture)}";
         StringBuilder body = new();
-        DateTimeOffset? firstReset = candidates.Select(candidate => candidate.Window.ResetsAtUtc).FirstOrDefault(value => value is not null);
+        RateLimitNotificationCandidate firstCandidate = candidates
+            .FirstOrDefault(candidate => candidate.Window.Classification == RateLimitClassification.Weekly
+                && candidate.Window.ResetsAtUtc is not null)
+            ?? candidates.FirstOrDefault(candidate => candidate.Window.Classification == RateLimitClassification.Weekly)
+            ?? candidates.FirstOrDefault(candidate => candidate.Window.ResetsAtUtc is not null)
+            ?? candidates[0];
+        DateTimeOffset? firstReset = firstCandidate.Window.ResetsAtUtc;
         body.Append("次回リセット ")
             .AppendLine(firstReset is null ? "未取得" : FormatLocal(firstReset.Value, localTimeZone));
         for (int index = 0; index < candidates.Count; index++)
@@ -48,6 +54,9 @@ public static class NtfyNotificationMessageFactory
                 .Append("位置: ").AppendLine(FormatPosition(window.Position))
                 .Append("分類: ").AppendLine(FormatClassification(window.Classification))
                 .Append("期間: ").Append(window.WindowDurationMinutes?.ToString(CultureInfo.InvariantCulture) ?? "未取得").AppendLine("分")
+                .Append("次回リセット: ").AppendLine(window.ResetsAtUtc is null
+                    ? "未取得"
+                    : FormatLocal(window.ResetsAtUtc.Value, localTimeZone))
                 .Append("条件成立: ").AppendLine(FormatLocal(candidate.ConditionMetAtUtc, localTimeZone));
             if (window.ResetsAtUtc is not null)
             {

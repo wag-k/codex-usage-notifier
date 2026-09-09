@@ -192,12 +192,18 @@ public partial class SettingsWindow : Window
         }
     }
 
-    /// <summary>Android ntfyアプリの購読画面を秘密Topic付きディープリンクで開きます。</summary>
-    private void OnOpenNtfyAndroid(object sender, RoutedEventArgs e)
+    /// <summary>Android端末へ安全に渡せるntfy購読用ディープリンクをクリップボードへコピーします。</summary>
+    private void OnCopyNtfyAndroidLink(object sender, RoutedEventArgs e)
     {
         if (viewModel.NtfyAndroidDeepLink is string link)
         {
-            OpenTrustedUri(new Uri(link, UriKind.Absolute));
+            System.Windows.Clipboard.SetText(link);
+            System.Windows.MessageBox.Show(
+                this,
+                "Android向け購読リンクをコピーしました。Android端末へ安全な方法で渡して開いてください。",
+                "購読リンクをコピー",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
         }
     }
 
