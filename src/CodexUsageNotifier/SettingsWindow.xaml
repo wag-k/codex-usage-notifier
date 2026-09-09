@@ -276,7 +276,7 @@
 
                         <TextBlock Margin="0,6,0,4" FontWeight="SemiBold" Text="2. 秘密Topicを生成" />
                         <TextBlock Text="Topicは通知先を知るための秘密情報です。通常は一部を隠して表示します。" TextWrapping="Wrap" />
-                        <TextBox Margin="0,8,0,0" Padding="8" IsReadOnly="True" Text="{Binding NtfyTopicDisplay}" />
+                        <TextBox Margin="0,8,0,0" Padding="8" IsReadOnly="True" Text="{Binding NtfyTopicDisplay, Mode=OneWay}" />
                         <WrapPanel Margin="0,8,0,10">
                             <Button Margin="0,0,8,0" Padding="12,6" Content="通知用Topicを生成" Click="OnGenerateNtfyTopic" />
                             <Button Margin="0,0,8,0" Padding="12,6" Content="表示 / 隠す" Click="OnToggleNtfyTopic" />
