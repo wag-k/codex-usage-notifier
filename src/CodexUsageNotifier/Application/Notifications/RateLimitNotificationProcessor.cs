@@ -1,5 +1,6 @@
 using CodexUsageNotifier.Application.Abstractions;
 using CodexUsageNotifier.Application.Gmail;
+using CodexUsageNotifier.Application.Ntfy;
 using CodexUsageNotifier.Application.State;
 using CodexUsageNotifier.Domain.Models;
 using CodexUsageNotifier.Domain.Services;
@@ -22,6 +23,8 @@ public sealed partial class RateLimitNotificationProcessor
     private readonly IGmailNotificationSender gmailNotificationSender;
     private readonly TimeProvider timeProvider;
     private readonly ILogger<RateLimitNotificationProcessor> logger;
+    private readonly INtfyTopicStore? ntfyTopicStore;
+    private readonly INtfyNotificationSender? ntfyNotificationSender;
 
     /// <summary>
     /// 状態保存、チャネル別通知、Gmail認証状態、時刻、およびロガーを受け取ります。
@@ -38,7 +41,9 @@ public sealed partial class RateLimitNotificationProcessor
         IGmailAuthenticationStatusProvider gmailAuthenticationStatusProvider,
         IGmailNotificationSender gmailNotificationSender,
         TimeProvider timeProvider,
-        ILogger<RateLimitNotificationProcessor> logger)
+        ILogger<RateLimitNotificationProcessor> logger,
+        INtfyTopicStore? ntfyTopicStore = null,
+        INtfyNotificationSender? ntfyNotificationSender = null)
     {
         ArgumentNullException.ThrowIfNull(stateStore);
         ArgumentNullException.ThrowIfNull(windowsNotificationSender);
@@ -52,6 +57,8 @@ public sealed partial class RateLimitNotificationProcessor
         this.gmailNotificationSender = gmailNotificationSender;
         this.timeProvider = timeProvider;
         this.logger = logger;
+        this.ntfyTopicStore = ntfyTopicStore;
+        this.ntfyNotificationSender = ntfyNotificationSender;
     }
 
     /// <summary>
@@ -75,11 +82,20 @@ public sealed partial class RateLimitNotificationProcessor
                 previousState,
                 settings,
                 cancellationToken);
+        (previousState, NtfyTopic? ntfyTopic) = await SynchronizeNtfyDeliveryBoundaryAsync(
+            previousState,
+            settings,
+            snapshot.CapturedAtUtc,
+            cancellationToken);
         previousState = await RecoverInterruptedWindowsAttemptsAsync(
             previousState,
             snapshot.CapturedAtUtc,
             cancellationToken);
         previousState = await RecoverInterruptedGmailAttemptsAsync(
+            previousState,
+            snapshot.CapturedAtUtc,
+            cancellationToken);
+        previousState = await RecoverInterruptedNtfyAttemptsAsync(
             previousState,
             snapshot.CapturedAtUtc,
             cancellationToken);
@@ -92,6 +108,12 @@ public sealed partial class RateLimitNotificationProcessor
             previousState,
             snapshot,
             settings,
+            cancellationToken);
+        previousState = await ExpireInvalidNtfyRetriesAsync(
+            previousState,
+            snapshot,
+            settings,
+            ntfyTopic,
             cancellationToken);
         RateLimitNotificationEvaluation evaluation = RateLimitNotificationPolicy.Evaluate(
             snapshot,
@@ -107,6 +129,11 @@ public sealed partial class RateLimitNotificationProcessor
                 RateLimitRecoveryStates = evaluation.RecoveryStates,
                 ConsecutiveFailures = 0,
                 FailureNotificationSent = false,
+                NtfyFailureNotificationSent = false,
+                NtfyFailureNotificationAttemptCount = 0,
+                NtfyFailureNotificationLastAttemptedAtUtc = null,
+                NtfyFailureNotificationNextRetryAtUtc = null,
+                NtfyFailureNotificationFailureKind = NtfyDeliveryFailureKind.None,
             },
             cancellationToken);
 
@@ -143,6 +170,12 @@ public sealed partial class RateLimitNotificationProcessor
                     GmailLastAttemptedAtUtc = existing?.GmailLastAttemptedAtUtc,
                     GmailNextRetryAtUtc = existing?.GmailNextRetryAtUtc,
                     GmailFailureKind = existing?.GmailFailureKind ?? GmailDeliveryFailureKind.None,
+                    NtfyDeliveryStatus = existing?.NtfyDeliveryStatus ?? DeliveryStatus.NotAttempted,
+                    NtfyAttemptCount = existing?.NtfyAttemptCount ?? 0,
+                    NtfyLastAttemptedAtUtc = existing?.NtfyLastAttemptedAtUtc,
+                    NtfyNextRetryAtUtc = existing?.NtfyNextRetryAtUtc,
+                    NtfyFailureKind = existing?.NtfyFailureKind ?? NtfyDeliveryFailureKind.None,
+                    NtfyTopicGenerationId = existing?.NtfyTopicGenerationId ?? ntfyTopic?.GenerationId,
                 };
                 currentState = await SaveNotificationStateAsync(deferred, cancellationToken);
                 LogNotificationDeferred(
@@ -197,6 +230,13 @@ public sealed partial class RateLimitNotificationProcessor
             snapshot,
             settings,
             gmailAuthenticationStatus,
+            cancellationToken);
+        currentState = await DeliverNtfyAsync(
+            evaluation.Candidates,
+            currentState,
+            snapshot,
+            settings,
+            ntfyTopic,
             cancellationToken);
 
         return new NotificationProcessingResult { State = currentState };
@@ -675,41 +715,130 @@ public sealed partial class RateLimitNotificationProcessor
     {
         ArgumentNullException.ThrowIfNull(state);
         ArgumentNullException.ThrowIfNull(settings);
-        if (state.ConsecutiveFailures < 3
-            || state.FailureNotificationSent
-            || !settings.WindowsNotificationEnabled)
+        if (state.ConsecutiveFailures < 3)
         {
             return state;
         }
 
-        try
+        DateTimeOffset nowUtc = timeProvider.GetUtcNow();
+        ApplicationState current = state;
+        if (settings.WindowsNotificationEnabled && !state.FailureNotificationSent)
         {
-            await windowsNotificationSender.SendAsync(
-                new WindowsNotificationMessage
-                {
-                    Title = "Codex利用枠の監視に失敗しています",
-                    Body = $"Codex App Serverとの通信に{state.ConsecutiveFailures}回連続で失敗しました。状態画面とログを確認してください。",
-                },
-                cancellationToken);
-            DateTimeOffset attemptedAtUtc = timeProvider.GetUtcNow();
-            return await stateStore.UpdateAsync(
-                current => current with
+            try
+            {
+                await windowsNotificationSender.SendAsync(
+                    new WindowsNotificationMessage
+                    {
+                        Title = "Codex利用枠の監視に失敗しています",
+                        Body = $"Codex App Serverとの通信に{state.ConsecutiveFailures}回連続で失敗しました。状態画面とログを確認してください。",
+                    },
+                    cancellationToken);
+                current = await stateStore.UpdateAsync(value => value with
                 {
                     FailureNotificationSent = true,
                     WindowsDeliveryResult = new DeliveryResultState
                     {
                         Status = DeliveryStatus.Succeeded,
-                        AttemptedAtUtc = attemptedAtUtc,
+                        AttemptedAtUtc = nowUtc,
                         Summary = RateLimitNotificationType.MonitoringFailure.ToString(),
                     },
-                },
-                cancellationToken);
+                }, cancellationToken);
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                LogMonitoringFailureNotificationFailed(logger, exception);
+            }
         }
-        catch (Exception exception) when (exception is not OperationCanceledException)
+
+        // Windowsの監視障害通知は既存仕様どおり即時送信し、Quiet Hoursはntfyだけに適用します。
+        if (QuietHoursSchedule.GetQuietHoursEndUtc(nowUtc, timeProvider.LocalTimeZone, settings) is not null)
         {
-            LogMonitoringFailureNotificationFailed(logger, exception);
-            return state;
+            return current;
         }
+
+        bool canAttemptNtfy = settings.NtfyNotificationEnabled
+            && !state.NtfyFailureNotificationSent
+            && state.NtfyFailureNotificationAttemptCount < RateLimitNotificationPolicy.MaxNtfyAttemptCount
+            && (state.NtfyFailureNotificationAttemptCount == 0
+                || (state.NtfyFailureNotificationFailureKind == NtfyDeliveryFailureKind.Transient
+                    && state.NtfyFailureNotificationNextRetryAtUtc <= nowUtc));
+        if (canAttemptNtfy && ntfyTopicStore is not null && ntfyNotificationSender is not null)
+        {
+            NtfyTopic? topic;
+            try
+            {
+                topic = await ntfyTopicStore.LoadAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                LogNtfyTopicLoadFailed(logger, exception);
+                return current;
+            }
+            if (topic is not null)
+            {
+                int attempt = state.NtfyFailureNotificationAttemptCount + 1;
+                try
+                {
+                    await ntfyNotificationSender.SendAsync(topic, new NtfyNotificationMessage
+                    {
+                        Title = "Codex利用枠の監視に失敗",
+                        Body = $"連続失敗: {state.ConsecutiveFailures}回\n状態画面とログを確認してください。",
+                    }, cancellationToken).ConfigureAwait(false);
+                    current = await stateStore.UpdateAsync(value => value with
+                    {
+                        NtfyFailureNotificationSent = true,
+                        NtfyFailureNotificationAttemptCount = attempt,
+                        NtfyFailureNotificationLastAttemptedAtUtc = nowUtc,
+                        NtfyFailureNotificationNextRetryAtUtc = null,
+                        NtfyFailureNotificationFailureKind = NtfyDeliveryFailureKind.None,
+                        NtfyDeliveryResult = new DeliveryResultState
+                        {
+                            Status = DeliveryStatus.Succeeded,
+                            AttemptedAtUtc = nowUtc,
+                            Summary = RateLimitNotificationType.MonitoringFailure.ToString(),
+                        },
+                    }, cancellationToken);
+                }
+                catch (NtfyDeliveryException exception) when (exception.FailureKind == NtfyDeliveryFailureKind.Transient)
+                {
+                    current = await stateStore.UpdateAsync(value => value with
+                    {
+                        NtfyFailureNotificationAttemptCount = attempt,
+                        NtfyFailureNotificationLastAttemptedAtUtc = nowUtc,
+                        NtfyFailureNotificationNextRetryAtUtc = attempt < RateLimitNotificationPolicy.MaxNtfyAttemptCount
+                            ? nowUtc.Add(NtfyRetryDelay) : null,
+                        NtfyFailureNotificationFailureKind = NtfyDeliveryFailureKind.Transient,
+                        NtfyDeliveryResult = new DeliveryResultState
+                        {
+                            Status = DeliveryStatus.Failed,
+                            AttemptedAtUtc = nowUtc,
+                            Summary = "スマホへの監視障害通知を送信できませんでした。",
+                        },
+                    }, cancellationToken);
+                    LogNtfyFailed(logger, attempt < RateLimitNotificationPolicy.MaxNtfyAttemptCount, exception);
+                }
+                catch (Exception exception) when (exception is not OperationCanceledException)
+                {
+                    current = await stateStore.UpdateAsync(value => value with
+                    {
+                        NtfyFailureNotificationAttemptCount = attempt,
+                        NtfyFailureNotificationLastAttemptedAtUtc = nowUtc,
+                        NtfyFailureNotificationNextRetryAtUtc = null,
+                        NtfyFailureNotificationFailureKind = exception is NtfyDeliveryException delivery
+                            ? delivery.FailureKind : NtfyDeliveryFailureKind.Permanent,
+                        NtfyDeliveryResult = new DeliveryResultState
+                        {
+                            Status = DeliveryStatus.Failed,
+                            AttemptedAtUtc = nowUtc,
+                            Summary = "スマホへの監視障害通知を送信できませんでした。",
+                        },
+                    }, cancellationToken);
+                    LogNtfyFailed(logger, false, exception);
+                }
+            }
+        }
+
+        return current;
     }
 
     /// <summary>
@@ -739,6 +868,7 @@ public sealed partial class RateLimitNotificationProcessor
             DeliveredAtUtc = deliveredAtUtc,
             WindowsDeliveryStatus = windowsStatus,
             GmailDeliveryStatus = DeliveryStatus.NotAttempted,
+            NtfyDeliveryStatus = DeliveryStatus.NotAttempted,
             DeferredUntilUtc = deferredUntilUtc,
             ResetCompletionReason = candidate.ResetCompletionReason,
         };
@@ -772,6 +902,12 @@ public sealed partial class RateLimitNotificationProcessor
             GmailLastAttemptedAtUtc = existing?.GmailLastAttemptedAtUtc,
             GmailNextRetryAtUtc = existing?.GmailNextRetryAtUtc,
             GmailFailureKind = existing?.GmailFailureKind ?? GmailDeliveryFailureKind.None,
+            NtfyDeliveryStatus = existing?.NtfyDeliveryStatus ?? DeliveryStatus.NotAttempted,
+            NtfyAttemptCount = existing?.NtfyAttemptCount ?? 0,
+            NtfyLastAttemptedAtUtc = existing?.NtfyLastAttemptedAtUtc,
+            NtfyNextRetryAtUtc = existing?.NtfyNextRetryAtUtc,
+            NtfyFailureKind = existing?.NtfyFailureKind ?? NtfyDeliveryFailureKind.None,
+            NtfyTopicGenerationId = existing?.NtfyTopicGenerationId,
         };
     }
 
@@ -1054,6 +1190,9 @@ public sealed partial class RateLimitNotificationProcessor
                             GmailDeliveryStatus = notification.GmailDeliveryStatus == DeliveryStatus.NotAttempted
                                 ? DeliveryStatus.Expired
                                 : notification.GmailDeliveryStatus,
+                            NtfyDeliveryStatus = notification.NtfyDeliveryStatus == DeliveryStatus.NotAttempted
+                                ? DeliveryStatus.Expired
+                                : notification.NtfyDeliveryStatus,
                             DeferredUntilUtc = null,
                             WindowsNextRetryAtUtc = null,
                             GmailNextRetryAtUtc = null,
@@ -1085,7 +1224,8 @@ public sealed partial class RateLimitNotificationProcessor
         ArgumentNullException.ThrowIfNull(settings);
         if (notification.DeferredUntilUtc is null
             || (notification.WindowsDeliveryStatus != DeliveryStatus.NotAttempted
-                && notification.GmailDeliveryStatus != DeliveryStatus.NotAttempted))
+                && notification.GmailDeliveryStatus != DeliveryStatus.NotAttempted
+                && notification.NtfyDeliveryStatus != DeliveryStatus.NotAttempted))
         {
             return false;
         }

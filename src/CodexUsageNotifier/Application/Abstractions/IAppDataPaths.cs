@@ -46,6 +46,11 @@ public interface IAppDataPaths
     string GoogleCredentialFilePath { get; }
 
     /// <summary>
+    /// DPAPI保護されたntfy Topicファイルのパスを取得します。
+    /// </summary>
+    string NtfyTopicFilePath { get; }
+
+    /// <summary>
     /// ログディレクトリのパスを取得します。
     /// </summary>
     string LogDirectory { get; }

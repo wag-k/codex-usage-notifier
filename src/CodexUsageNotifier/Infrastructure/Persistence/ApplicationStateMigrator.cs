@@ -44,6 +44,7 @@ public sealed class ApplicationStateMigrator : IApplicationStateMigrator
                 1 => MigrateVersion1To2(migrated),
                 2 => MigrateVersion2To3(migrated),
                 3 => MigrateVersion3To4(migrated),
+                4 => MigrateVersion4To5(migrated),
                 _ => throw new NotSupportedException($"状態スキーマバージョン{version}からの移行はサポートされていません。"),
             };
             version = migrated.SchemaVersion;
@@ -82,6 +83,19 @@ public sealed class ApplicationStateMigrator : IApplicationStateMigrator
         {
             SchemaVersion = 4,
             LastMaintenanceAtUtc = null,
+        };
+    }
+
+    /// <summary>Version 5で追加したntfy配送状態を安全な無効・未観測値で初期化します。</summary>
+    private static ApplicationState MigrateVersion4To5(ApplicationState state)
+    {
+        return state with
+        {
+            SchemaVersion = 5,
+            NtfyDeliveryResult = null,
+            NtfyDeliveryEnabledSinceUtc = null,
+            NtfyDeliveryEnabledLastObserved = false,
+            NtfyTopicGenerationId = null,
         };
     }
 }

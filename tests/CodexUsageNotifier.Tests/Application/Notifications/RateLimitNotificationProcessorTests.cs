@@ -1,6 +1,7 @@
 using CodexUsageNotifier.Application.Abstractions;
 using CodexUsageNotifier.Application.Gmail;
 using CodexUsageNotifier.Application.Notifications;
+using CodexUsageNotifier.Application.Ntfy;
 using CodexUsageNotifier.Application.State;
 using CodexUsageNotifier.Domain.Models;
 using CodexUsageNotifier.Domain.Services;
@@ -13,7 +14,7 @@ namespace CodexUsageNotifier.Tests.Application.Notifications;
 /// Windows通知の保留、送信、および永続化による重複防止を検証します。
 /// </summary>
 [TestClass]
-public sealed class RateLimitNotificationProcessorTests
+    public sealed class RateLimitNotificationProcessorTests
 {
     /// <summary>
     /// 禁止時間中は通知を送らず07:00まで保留することを検証します。
@@ -519,6 +520,422 @@ public sealed class RateLimitNotificationProcessorTests
         Assert.AreEqual(DeliveryStatus.Succeeded, notified.WindowsDeliveryResult?.Status);
     }
 
+    /// <summary>Quiet Hours中でも既存のWindows監視障害通知を抑止せず、ntfyだけを保留することを検証します。</summary>
+    [TestMethod]
+    public async Task NotifyMonitoringFailureAsync_DuringQuietHours_SendsWindowsButNotNtfy()
+    {
+        DateTimeOffset nowUtc = new(2026, 9, 10, 1, 0, 0, TimeSpan.Zero);
+        InMemoryStateRepository repository = new();
+        using ApplicationStateStore stateStore = new(repository);
+        RecordingWindowsNotificationSender windows = new();
+        RecordingNtfySender ntfy = new();
+        RateLimitNotificationProcessor processor = CreateProcessor(
+            stateStore,
+            windows,
+            new MutableTimeProvider(nowUtc),
+            ntfyNotificationSender: ntfy);
+        AppSettings settings = AppSettings.CreateDefault() with
+        {
+            NtfyNotificationEnabled = true,
+        };
+
+        ApplicationState result = await processor.NotifyMonitoringFailureAsync(
+            new ApplicationState { InitialSetupCompleted = true, ConsecutiveFailures = 3 },
+            settings,
+            CancellationToken.None);
+
+        Assert.AreEqual(1, windows.SendCount);
+        Assert.AreEqual(0, ntfy.SendCount);
+        Assert.IsTrue(result.FailureNotificationSent);
+        Assert.IsFalse(result.NtfyFailureNotificationSent);
+    }
+
+    /// <summary>Windowsを無効にしてもntfyだけを独立配送できることを検証します。</summary>
+    [TestMethod]
+    public async Task ProcessAsync_WindowsDisabledNtfyEnabled_SendsOnlyNtfy()
+    {
+        DateTimeOffset now = new(2026, 9, 9, 8, 0, 0, TimeSpan.Zero);
+        InMemoryStateRepository repository = new();
+        using ApplicationStateStore store = new(repository);
+        RecordingWindowsNotificationSender windows = new();
+        RecordingNtfySender ntfy = new();
+        RateLimitNotificationProcessor processor = CreateProcessor(
+            store, windows, new MutableTimeProvider(now), ntfyNotificationSender: ntfy);
+        AppSettings settings = AppSettings.CreateDefault() with
+        {
+            WindowsNotificationEnabled = false,
+            GmailNotificationEnabled = false,
+            NtfyNotificationEnabled = true,
+            QuietHoursEnabled = false,
+        };
+
+        NotificationProcessingResult result = await processor.ProcessAsync(
+            CreateSnapshot(CreateFiveHourWindow(now), now), settings, CancellationToken.None);
+
+        Assert.AreEqual(0, windows.SendCount);
+        Assert.AreEqual(1, ntfy.SendCount);
+        Assert.AreEqual(DeliveryStatus.Succeeded, result.State.RateLimitNotificationStates.Single().NtfyDeliveryStatus);
+    }
+
+    /// <summary>取得後に時刻が進んでも、ntfy有効化直後の同一Snapshotで成立した通知を取りこぼさないことを検証します。</summary>
+    [TestMethod]
+    public async Task ProcessAsync_NtfyJustEnabledWithOlderSnapshot_SendsFirstCandidate()
+    {
+        DateTimeOffset capturedAtUtc = new(2026, 9, 10, 8, 0, 0, TimeSpan.Zero);
+        InMemoryStateRepository repository = new(CreateStateBeforeShortWindowRecovery());
+        using ApplicationStateStore stateStore = new(repository);
+        RecordingNtfySender ntfy = new();
+        MutableTimeProvider clock = new(capturedAtUtc.AddSeconds(2));
+        RateLimitNotificationProcessor processor = CreateProcessor(
+            stateStore,
+            new RecordingWindowsNotificationSender(),
+            clock,
+            ntfyNotificationSender: ntfy);
+        AppSettings settings = AppSettings.CreateDefault() with
+        {
+            WindowsNotificationEnabled = false,
+            GmailNotificationEnabled = false,
+            NtfyNotificationEnabled = true,
+            QuietHoursEnabled = false,
+        };
+
+        NotificationProcessingResult result = await processor.ProcessAsync(
+            CreateSnapshot(CreateFiveHourWindow(capturedAtUtc), capturedAtUtc),
+            settings,
+            CancellationToken.None);
+
+        Assert.AreEqual(capturedAtUtc, result.State.NtfyDeliveryEnabledSinceUtc);
+        Assert.AreEqual(1, ntfy.SendCount);
+        Assert.AreEqual(
+            DeliveryStatus.Succeeded,
+            result.State.RateLimitNotificationStates.Single().NtfyDeliveryStatus);
+    }
+
+    /// <summary>ntfy一時失敗を5分後に1回だけ再試行し、Windowsを再送しないことを検証します。</summary>
+    [TestMethod]
+    public async Task ProcessAsync_NtfyTransientFailure_RetriesOnceWithoutWindowsResend()
+    {
+        DateTimeOffset now = new(2026, 9, 9, 8, 0, 0, TimeSpan.Zero);
+        InMemoryStateRepository repository = new();
+        using ApplicationStateStore store = new(repository);
+        RecordingWindowsNotificationSender windows = new();
+        RecordingNtfySender ntfy = new() { FailuresRemaining = 1 };
+        MutableTimeProvider clock = new(now);
+        RateLimitNotificationProcessor processor = CreateProcessor(store, windows, clock, ntfyNotificationSender: ntfy);
+        AppSettings settings = AppSettings.CreateDefault() with
+        {
+            GmailNotificationEnabled = false,
+            NtfyNotificationEnabled = true,
+            QuietHoursEnabled = false,
+        };
+
+        await processor.ProcessAsync(CreateSnapshot(CreateFiveHourWindow(now), now), settings, CancellationToken.None);
+        clock.SetUtcNow(now.AddMinutes(4));
+        await processor.ProcessAsync(CreateSnapshot(CreateFiveHourWindow(now.AddMinutes(4)), now.AddMinutes(4)), settings, CancellationToken.None);
+        clock.SetUtcNow(now.AddMinutes(5));
+        NotificationProcessingResult result = await processor.ProcessAsync(
+            CreateSnapshot(CreateFiveHourWindow(now.AddMinutes(5)), now.AddMinutes(5)), settings, CancellationToken.None);
+
+        Assert.AreEqual(1, windows.SendCount);
+        Assert.AreEqual(2, ntfy.SendCount);
+        Assert.AreEqual(2, result.State.RateLimitNotificationStates.Single().NtfyAttemptCount);
+        Assert.AreEqual(DeliveryStatus.Succeeded, result.State.RateLimitNotificationStates.Single().NtfyDeliveryStatus);
+    }
+
+    /// <summary>ntfyが2回失敗した後は次の正常取得でも3回目を送らないことを検証します。</summary>
+    [TestMethod]
+    public async Task ProcessAsync_NtfyFailsTwice_DoesNotRetryThirdTime()
+    {
+        DateTimeOffset now = new(2026, 9, 9, 8, 0, 0, TimeSpan.Zero);
+        InMemoryStateRepository repository = new();
+        using ApplicationStateStore store = new(repository);
+        MutableTimeProvider clock = new(now);
+        RecordingNtfySender ntfy = new() { FailuresRemaining = 2 };
+        RateLimitNotificationProcessor processor = CreateProcessor(
+            store, new RecordingWindowsNotificationSender(), clock, ntfyNotificationSender: ntfy);
+        AppSettings settings = AppSettings.CreateDefault() with
+        {
+            WindowsNotificationEnabled = false, GmailNotificationEnabled = false,
+            NtfyNotificationEnabled = true, QuietHoursEnabled = false,
+        };
+
+        await processor.ProcessAsync(CreateSnapshot(CreateFiveHourWindow(now), now), settings, CancellationToken.None);
+        clock.SetUtcNow(now.AddMinutes(5));
+        await processor.ProcessAsync(CreateSnapshot(CreateFiveHourWindow(now.AddMinutes(5)), now.AddMinutes(5)), settings, CancellationToken.None);
+        clock.SetUtcNow(now.AddMinutes(10));
+        NotificationProcessingResult result = await processor.ProcessAsync(
+            CreateSnapshot(CreateFiveHourWindow(now.AddMinutes(10)), now.AddMinutes(10)), settings, CancellationToken.None);
+
+        Assert.AreEqual(2, ntfy.SendCount);
+        Assert.AreEqual(2, result.State.RateLimitNotificationStates.Single().NtfyAttemptCount);
+        Assert.AreEqual(DeliveryStatus.Failed, result.State.RateLimitNotificationStates.Single().NtfyDeliveryStatus);
+    }
+
+    /// <summary>Quiet Hours中はntfyを保留し、解除後に有効な候補を1回だけ送ることを検証します。</summary>
+    [TestMethod]
+    public async Task ProcessAsync_NtfyDuringQuietHours_DefersThenSendsOnce()
+    {
+        DateTimeOffset quiet = new(2026, 9, 9, 1, 0, 0, TimeSpan.Zero);
+        InMemoryStateRepository repository = new();
+        using ApplicationStateStore store = new(repository);
+        MutableTimeProvider clock = new(quiet);
+        RecordingNtfySender ntfy = new();
+        RateLimitNotificationProcessor processor = CreateProcessor(
+            store, new RecordingWindowsNotificationSender(), clock, ntfyNotificationSender: ntfy);
+        AppSettings settings = AppSettings.CreateDefault() with
+        {
+            WindowsNotificationEnabled = false,
+            GmailNotificationEnabled = false,
+            NtfyNotificationEnabled = true,
+        };
+
+        await processor.ProcessAsync(CreateSnapshot(CreateFiveHourWindow(quiet), quiet), settings, CancellationToken.None);
+        Assert.AreEqual(0, ntfy.SendCount);
+
+        DateTimeOffset afterQuiet = quiet.AddHours(7);
+        clock.SetUtcNow(afterQuiet);
+        await processor.ProcessAsync(CreateSnapshot(CreateFiveHourWindow(afterQuiet), afterQuiet), settings, CancellationToken.None);
+        await processor.ProcessAsync(CreateSnapshot(CreateFiveHourWindow(afterQuiet.AddMinutes(1)), afterQuiet.AddMinutes(1)), settings, CancellationToken.None);
+
+        Assert.AreEqual(1, ntfy.SendCount);
+    }
+
+    /// <summary>Topic再生成後は旧Topicの失敗通知を再試行しないことを検証します。</summary>
+    [TestMethod]
+    public async Task ProcessAsync_NtfyTopicRegenerated_ExpiresOldTopicRetry()
+    {
+        DateTimeOffset now = new(2026, 9, 9, 8, 0, 0, TimeSpan.Zero);
+        InMemoryStateRepository repository = new();
+        using ApplicationStateStore store = new(repository);
+        MutableTimeProvider clock = new(now);
+        RecordingNtfySender ntfy = new() { FailuresRemaining = 1 };
+        StubNtfyTopicStore topics = new();
+        RateLimitNotificationProcessor processor = CreateProcessor(
+            store, new RecordingWindowsNotificationSender(), clock,
+            ntfyNotificationSender: ntfy, ntfyTopicStore: topics);
+        AppSettings settings = AppSettings.CreateDefault() with
+        {
+            WindowsNotificationEnabled = false,
+            GmailNotificationEnabled = false,
+            NtfyNotificationEnabled = true,
+            QuietHoursEnabled = false,
+        };
+
+        await processor.ProcessAsync(CreateSnapshot(CreateFiveHourWindow(now), now), settings, CancellationToken.None);
+        topics.Topic = new NtfyTopic { Value = "new-secret-topic", GenerationId = "generation-2", CreatedAtUtc = now.AddMinutes(1) };
+        clock.SetUtcNow(now.AddMinutes(5));
+        NotificationProcessingResult result = await processor.ProcessAsync(
+            CreateSnapshot(CreateFiveHourWindow(now.AddMinutes(5)), now.AddMinutes(5)), settings, CancellationToken.None);
+
+        Assert.AreEqual(1, ntfy.SendCount);
+        Assert.AreEqual(DeliveryStatus.Expired, result.State.RateLimitNotificationStates.Single().NtfyDeliveryStatus);
+    }
+
+    /// <summary>再起動で残ったntfy送信中状態を5分後に2回目として復旧することを検証します。</summary>
+    [TestMethod]
+    public async Task ProcessAsync_StaleNtfyInProgress_RetriesWithoutResettingAttemptCount()
+    {
+        DateTimeOffset now = new(2026, 9, 9, 8, 5, 0, TimeSpan.Zero);
+        RateLimitWindow window = CreateFiveHourWindow(now);
+        ApplicationState initial = CreateStateBeforeShortWindowRecovery() with
+        {
+            NtfyDeliveryEnabledLastObserved = true,
+            NtfyDeliveryEnabledSinceUtc = now.AddHours(-1),
+            NtfyTopicGenerationId = "generation-1",
+            RateLimitNotificationStates =
+            [
+                new RateLimitNotificationState
+                {
+                    LimitId = "codex", Position = RateLimitPosition.Primary, WindowDurationMinutes = 300,
+                    RecoveryWindowId = RateLimitNotificationPolicy.CreateRecoveryWindowId(window, now),
+                    NotificationType = RateLimitNotificationType.ShortWindowRecovered,
+                    NotificationStage = RateLimitNotificationStage.Recovered,
+                    ConditionMetAtUtc = now.AddMinutes(-5), NtfyDeliveryStatus = DeliveryStatus.InProgress,
+                    NtfyAttemptCount = 1, NtfyLastAttemptedAtUtc = now.AddMinutes(-5),
+                    NtfyTopicGenerationId = "generation-1",
+                },
+            ],
+        };
+        InMemoryStateRepository repository = new(initial);
+        using ApplicationStateStore store = new(repository);
+        RecordingNtfySender ntfy = new();
+        RateLimitNotificationProcessor processor = CreateProcessor(
+            store, new RecordingWindowsNotificationSender(), new MutableTimeProvider(now), ntfyNotificationSender: ntfy);
+        AppSettings settings = AppSettings.CreateDefault() with
+        {
+            WindowsNotificationEnabled = false, GmailNotificationEnabled = false,
+            NtfyNotificationEnabled = true, QuietHoursEnabled = false,
+        };
+
+        NotificationProcessingResult result = await processor.ProcessAsync(
+            CreateSnapshot(window, now), settings, CancellationToken.None);
+
+        Assert.AreEqual(1, ntfy.SendCount);
+        Assert.AreEqual(2, result.State.RateLimitNotificationStates.Single().NtfyAttemptCount);
+        Assert.AreEqual(DeliveryStatus.Succeeded, result.State.RateLimitNotificationStates.Single().NtfyDeliveryStatus);
+    }
+
+    /// <summary>24時間を超えたntfy再試行候補を送信せず期限切れとして除外することを検証します。</summary>
+    [TestMethod]
+    public async Task ProcessAsync_NtfyRetryOlderThanDay_ExpiresWithoutSending()
+    {
+        DateTimeOffset now = new(2026, 9, 10, 8, 0, 0, TimeSpan.Zero);
+        RateLimitWindow window = CreateFiveHourWindow(now);
+        ApplicationState initial = CreateStateBeforeShortWindowRecovery() with
+        {
+            NtfyDeliveryEnabledLastObserved = true,
+            NtfyDeliveryEnabledSinceUtc = now.AddDays(-2),
+            NtfyTopicGenerationId = "generation-1",
+            RateLimitNotificationStates =
+            [
+                new RateLimitNotificationState
+                {
+                    LimitId = "codex", Position = RateLimitPosition.Primary, WindowDurationMinutes = 300,
+                    RecoveryWindowId = RateLimitNotificationPolicy.CreateRecoveryWindowId(window, now),
+                    NotificationType = RateLimitNotificationType.ShortWindowRecovered,
+                    NotificationStage = RateLimitNotificationStage.Recovered,
+                    ConditionMetAtUtc = now.AddHours(-25), NtfyDeliveryStatus = DeliveryStatus.Failed,
+                    NtfyAttemptCount = 1, NtfyLastAttemptedAtUtc = now.AddHours(-25),
+                    NtfyNextRetryAtUtc = now.AddHours(-24), NtfyFailureKind = NtfyDeliveryFailureKind.Transient,
+                    NtfyTopicGenerationId = "generation-1",
+                },
+            ],
+        };
+        InMemoryStateRepository repository = new(initial);
+        using ApplicationStateStore store = new(repository);
+        RecordingNtfySender ntfy = new();
+        RateLimitNotificationProcessor processor = CreateProcessor(
+            store, new RecordingWindowsNotificationSender(), new MutableTimeProvider(now), ntfyNotificationSender: ntfy);
+        AppSettings settings = AppSettings.CreateDefault() with
+        {
+            WindowsNotificationEnabled = false, GmailNotificationEnabled = false,
+            NtfyNotificationEnabled = true, QuietHoursEnabled = false,
+        };
+
+        NotificationProcessingResult result = await processor.ProcessAsync(
+            CreateSnapshot(window, now), settings, CancellationToken.None);
+
+        Assert.AreEqual(0, ntfy.SendCount);
+        Assert.AreEqual(DeliveryStatus.Expired, result.State.RateLimitNotificationStates.Single().NtfyDeliveryStatus);
+    }
+
+    /// <summary>同じ取得の短期回復と週間警告を1件のntfy通知へ集約することを検証します。</summary>
+    [TestMethod]
+    public async Task ProcessAsync_NtfyMultipleCandidates_AggregatesOnce()
+    {
+        DateTimeOffset now = new(2026, 9, 9, 8, 0, 0, TimeSpan.Zero);
+        InMemoryStateRepository repository = new();
+        using ApplicationStateStore store = new(repository);
+        RecordingNtfySender ntfy = new();
+        RateLimitNotificationProcessor processor = CreateProcessor(
+            store, new RecordingWindowsNotificationSender(), new MutableTimeProvider(now), ntfyNotificationSender: ntfy);
+        AppSettings settings = AppSettings.CreateDefault() with
+        {
+            WindowsNotificationEnabled = false,
+            GmailNotificationEnabled = false,
+            NtfyNotificationEnabled = true,
+            QuietHoursEnabled = false,
+        };
+
+        NotificationProcessingResult result = await processor.ProcessAsync(
+            CreateSnapshot([CreateFiveHourWindow(now), CreateWeeklyWindow(65, now.AddHours(20))], now),
+            settings,
+            CancellationToken.None);
+
+        Assert.AreEqual(1, ntfy.SendCount);
+        StringAssert.Contains(ntfy.Messages.Single().Title, "2件");
+        Assert.AreEqual(2, result.State.RateLimitNotificationStates.Count(item => item.NtfyDeliveryStatus == DeliveryStatus.Succeeded));
+    }
+
+    /// <summary>WindowsとGmailが成功してもntfy失敗を独立した状態として保存することを検証します。</summary>
+    [TestMethod]
+    public async Task ProcessAsync_WindowsAndGmailSucceedNtfyFails_StoresIndependentStates()
+    {
+        DateTimeOffset now = new(2026, 9, 9, 8, 0, 0, TimeSpan.Zero);
+        InMemoryStateRepository repository = new();
+        using ApplicationStateStore store = new(repository);
+        StubGmailAuthenticationService authentication = CreateAuthenticatedGmail();
+        StubGmailNotificationSender gmail = new();
+        RecordingNtfySender ntfy = new() { FailuresRemaining = 1 };
+        RateLimitNotificationProcessor processor = CreateProcessor(
+            store, new RecordingWindowsNotificationSender(), new MutableTimeProvider(now), authentication, gmail, ntfy);
+
+        NotificationProcessingResult result = await processor.ProcessAsync(
+            CreateSnapshot(CreateFiveHourWindow(now), now), CreateAllChannelsSettings(), CancellationToken.None);
+
+        RateLimitNotificationState state = result.State.RateLimitNotificationStates.Single();
+        Assert.AreEqual(DeliveryStatus.Succeeded, state.WindowsDeliveryStatus);
+        Assert.AreEqual(DeliveryStatus.Succeeded, state.GmailDeliveryStatus);
+        Assert.AreEqual(DeliveryStatus.Failed, state.NtfyDeliveryStatus);
+    }
+
+    /// <summary>Windows失敗時にもntfy成功を独立して保存することを検証します。</summary>
+    [TestMethod]
+    public async Task ProcessAsync_WindowsFailsNtfySucceeds_StoresIndependentStates()
+    {
+        DateTimeOffset now = new(2026, 9, 9, 8, 0, 0, TimeSpan.Zero);
+        InMemoryStateRepository repository = new();
+        using ApplicationStateStore store = new(repository);
+        RecordingWindowsNotificationSender windows = new() { FailuresRemaining = 1 };
+        RecordingNtfySender ntfy = new();
+        RateLimitNotificationProcessor processor = CreateProcessor(store, windows, new MutableTimeProvider(now), ntfyNotificationSender: ntfy);
+        AppSettings settings = AppSettings.CreateDefault() with
+        {
+            GmailNotificationEnabled = false,
+            NtfyNotificationEnabled = true,
+            QuietHoursEnabled = false,
+        };
+
+        NotificationProcessingResult result = await processor.ProcessAsync(
+            CreateSnapshot(CreateFiveHourWindow(now), now), settings, CancellationToken.None);
+
+        RateLimitNotificationState state = result.State.RateLimitNotificationStates.Single();
+        Assert.AreEqual(DeliveryStatus.Failed, state.WindowsDeliveryStatus);
+        Assert.AreEqual(DeliveryStatus.Succeeded, state.NtfyDeliveryStatus);
+    }
+
+    /// <summary>Gmail失敗時にもntfy成功を独立して保存することを検証します。</summary>
+    [TestMethod]
+    public async Task ProcessAsync_GmailFailsNtfySucceeds_StoresIndependentStates()
+    {
+        DateTimeOffset now = new(2026, 9, 9, 8, 0, 0, TimeSpan.Zero);
+        InMemoryStateRepository repository = new();
+        using ApplicationStateStore store = new(repository);
+        StubGmailNotificationSender gmail = new() { Exception = new InvalidOperationException("テスト用恒久障害") };
+        RecordingNtfySender ntfy = new();
+        RateLimitNotificationProcessor processor = CreateProcessor(
+            store, new RecordingWindowsNotificationSender(), new MutableTimeProvider(now), CreateAuthenticatedGmail(), gmail, ntfy);
+        AppSettings settings = CreateAllChannelsSettings() with { WindowsNotificationEnabled = false };
+
+        NotificationProcessingResult result = await processor.ProcessAsync(
+            CreateSnapshot(CreateFiveHourWindow(now), now), settings, CancellationToken.None);
+
+        RateLimitNotificationState state = result.State.RateLimitNotificationStates.Single();
+        Assert.AreEqual(DeliveryStatus.Failed, state.GmailDeliveryStatus);
+        Assert.AreEqual(DeliveryStatus.Succeeded, state.NtfyDeliveryStatus);
+    }
+
+    /// <summary>全通知チャネルを有効にしたテスト設定を生成します。</summary>
+    private static AppSettings CreateAllChannelsSettings() => AppSettings.CreateDefault() with
+    {
+        WindowsNotificationEnabled = true,
+        GmailNotificationEnabled = true,
+        GmailRecipient = "recipient@example.com",
+        NtfyNotificationEnabled = true,
+        QuietHoursEnabled = false,
+    };
+
+    /// <summary>本番Gmail配送が可能なテスト認証状態を生成します。</summary>
+    private static StubGmailAuthenticationService CreateAuthenticatedGmail() => new()
+    {
+        Status = new GmailAuthenticationStatus
+        {
+            State = GmailAuthenticationState.Authenticated,
+            HasClientConfiguration = true,
+            AuthenticatedEmailAddress = "sender@example.com",
+        },
+    };
+
     /// <summary>
     /// テスト対象の通知プロセッサーを生成します。
     /// </summary>
@@ -531,7 +948,9 @@ public sealed class RateLimitNotificationProcessorTests
         RecordingWindowsNotificationSender sender,
         TimeProvider timeProvider,
         IGmailAuthenticationStatusProvider? gmailStatusProvider = null,
-        IGmailNotificationSender? gmailNotificationSender = null)
+        IGmailNotificationSender? gmailNotificationSender = null,
+        INtfyNotificationSender? ntfyNotificationSender = null,
+        INtfyTopicStore? ntfyTopicStore = null)
     {
         return new RateLimitNotificationProcessor(
             stateStore,
@@ -539,7 +958,9 @@ public sealed class RateLimitNotificationProcessorTests
             gmailStatusProvider ?? new StubGmailAuthenticationService(),
             gmailNotificationSender ?? new StubGmailNotificationSender(),
             timeProvider,
-            NullLogger<RateLimitNotificationProcessor>.Instance);
+            NullLogger<RateLimitNotificationProcessor>.Instance,
+            ntfyTopicStore ?? new StubNtfyTopicStore(),
+            ntfyNotificationSender);
     }
 
     /// <summary>
@@ -691,7 +1112,11 @@ public sealed class RateLimitNotificationProcessorTests
     /// </summary>
     private sealed class InMemoryStateRepository : IApplicationStateRepository
     {
-        private ApplicationState state = CreateStateBeforeShortWindowRecovery();
+        private ApplicationState state;
+
+        /// <summary>既定の回復直前状態または指定状態でリポジトリを初期化します。</summary>
+        public InMemoryStateRepository(ApplicationState? state = null) =>
+            this.state = state ?? CreateStateBeforeShortWindowRecovery();
 
         /// <summary>
         /// 現在の状態を返します。
@@ -756,6 +1181,67 @@ public sealed class RateLimitNotificationProcessorTests
             {
                 FailuresRemaining--;
                 throw new InvalidOperationException("テスト用のWindows通知失敗です。");
+            }
+
+            return Task.CompletedTask;
+        }
+    }
+
+    /// <summary>固定Topicをメモリ上で返すテスト用ストアです。</summary>
+    private sealed class StubNtfyTopicStore : INtfyTopicStore
+    {
+        /// <summary>読み込み時に返すTopicを取得または設定します。</summary>
+        public NtfyTopic? Topic { get; set; } = new() { Value = "secret-test-topic", GenerationId = "generation-1", CreatedAtUtc = DateTimeOffset.UtcNow };
+
+        /// <inheritdoc />
+        public Task<NtfyTopic?> LoadAsync(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult(Topic);
+        }
+
+        /// <inheritdoc />
+        public Task SaveAsync(NtfyTopic value, CancellationToken cancellationToken)
+        {
+            ArgumentNullException.ThrowIfNull(value);
+            cancellationToken.ThrowIfCancellationRequested();
+            Topic = value;
+            return Task.CompletedTask;
+        }
+
+        /// <inheritdoc />
+        public Task DeleteAsync(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Topic = null;
+            return Task.CompletedTask;
+        }
+    }
+
+    /// <summary>送信回数と一時失敗を制御するntfyテスト送信先です。</summary>
+    private sealed class RecordingNtfySender : INtfyNotificationSender
+    {
+        /// <summary>送信時に発生させる残り失敗回数を取得または設定します。</summary>
+        public int FailuresRemaining { get; set; }
+
+        /// <summary>送信要求回数を取得します。</summary>
+        public int SendCount { get; private set; }
+
+        /// <summary>送信要求された表示メッセージを取得します。</summary>
+        public List<NtfyNotificationMessage> Messages { get; } = [];
+
+        /// <inheritdoc />
+        public Task SendAsync(NtfyTopic topic, NtfyNotificationMessage message, CancellationToken cancellationToken)
+        {
+            ArgumentNullException.ThrowIfNull(topic);
+            ArgumentNullException.ThrowIfNull(message);
+            cancellationToken.ThrowIfCancellationRequested();
+            SendCount++;
+            Messages.Add(message);
+            if (FailuresRemaining > 0)
+            {
+                FailuresRemaining--;
+                throw new NtfyDeliveryException("一時障害", NtfyDeliveryFailureKind.Transient);
             }
 
             return Task.CompletedTask;

@@ -8,7 +8,7 @@ public sealed record ApplicationState
     /// <summary>
     /// 現在の状態スキーマのバージョンです。
     /// </summary>
-    public const int CurrentSchemaVersion = 4;
+    public const int CurrentSchemaVersion = 5;
 
     /// <summary>
     /// 状態スキーマのバージョンを取得または設定します。
@@ -29,6 +29,26 @@ public sealed record ApplicationState
     /// Gmail通知の直近結果を取得または設定します。
     /// </summary>
     public DeliveryResultState? GmailDeliveryResult { get; init; }
+
+    /// <summary>
+    /// ntfyスマホ通知の直近結果を取得または設定します。
+    /// </summary>
+    public DeliveryResultState? NtfyDeliveryResult { get; init; }
+
+    /// <summary>
+    /// 現在のTopic世代で本番ntfy配送を開始したUTC時刻を取得または設定します。
+    /// </summary>
+    public DateTimeOffset? NtfyDeliveryEnabledSinceUtc { get; init; }
+
+    /// <summary>
+    /// 前回の正常取得時にntfy通知設定が有効だったかを取得または設定します。
+    /// </summary>
+    public bool NtfyDeliveryEnabledLastObserved { get; init; }
+
+    /// <summary>
+    /// 前回の正常取得時に使用したTopic世代IDを取得または設定します。
+    /// </summary>
+    public string? NtfyTopicGenerationId { get; init; }
 
     /// <summary>
     /// Phase 4Cの本番Gmail配送を開始したUTC時刻を取得または設定します。
@@ -86,6 +106,21 @@ public sealed record ApplicationState
     /// 現在の障害について通知済みかどうかを取得または設定します。
     /// </summary>
     public bool FailureNotificationSent { get; init; }
+
+    /// <summary>現在の監視障害をntfyへ通知済みかどうかを取得または設定します。</summary>
+    public bool NtfyFailureNotificationSent { get; init; }
+
+    /// <summary>現在の監視障害をntfyへ送信した累計試行回数を取得または設定します。</summary>
+    public int NtfyFailureNotificationAttemptCount { get; init; }
+
+    /// <summary>監視障害ntfy通知を最後に試行したUTC時刻を取得または設定します。</summary>
+    public DateTimeOffset? NtfyFailureNotificationLastAttemptedAtUtc { get; init; }
+
+    /// <summary>監視障害ntfy通知を次に再試行できるUTC時刻を取得または設定します。</summary>
+    public DateTimeOffset? NtfyFailureNotificationNextRetryAtUtc { get; init; }
+
+    /// <summary>監視障害ntfy通知の直近失敗が再試行可能かを表す分類を取得または設定します。</summary>
+    public NtfyDeliveryFailureKind NtfyFailureNotificationFailureKind { get; init; }
 
     /// <summary>
     /// 初回設定が完了しているかどうかを取得または設定します。
