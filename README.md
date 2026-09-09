@@ -158,7 +158,7 @@ Codex週間枠のリセットが近づいています
 - 90日履歴の単一非同期読込、期間切替のメモリ内抽出、1500点超の時系列bucket間引き、正常取得の即時反映
 - 命名規則に一致する日付別ログだけを対象とする30日保持
 - 起動時と前回試行から24時間後の非同期運用保守、および終了時Cancellation
-- Release Version `0.5.1`をAssembly、状態画面、App Server `clientInfo.version`、配布物名へ一元反映
+- Release Version `0.5.2`をAssembly、状態画面、App Server `clientInfo.version`、配布物名へ一元反映
 - `packages.lock.json`とlocked restore、Windows Release build/test、NuGet direct/transitive脆弱性ゲート
 - win-x64 self-contained、非trim、非single-fileのZIPとSHA-256を手動Actions artifactとして生成
 
@@ -361,13 +361,13 @@ Windowsのサインアウト／再ログインを伴う確認は自動テスト�
 
 ## CIと手動Release配布（Phase 5B）
 
-既定Release Versionはルートの`Directory.Build.props`にある`VersionPrefix=0.5.1`を単一情報源とします。状態画面は`Version 0.5.1`を表示し、Codex App Serverの`initialize.clientInfo.version`もAssemblyのInformationalVersionから同じRelease Versionを取得します。手動Release workflowの入力値はAssembly/Product Version、配布物名、SHA-256ファイル名へ反映されます。
+既定Release Versionはルートの`Directory.Build.props`にある`VersionPrefix=0.5.2`を単一情報源とします。状態画面は`Version 0.5.2`を表示し、Codex App Serverの`initialize.clientInfo.version`もAssemblyのInformationalVersionから同じRelease Versionを取得します。手動Release workflowの入力値はAssembly/Product Version、配布物名、SHA-256ファイル名へ反映されます。
 
 `.github/workflows/ci.yml`は`main`へのpush、pull request、手動実行でWindows Release buildと全テストを実行します。`.github/workflows/release-build.yml`は`workflow_dispatch`で厳密な`MAJOR.MINOR.PATCH`を受け取り、locked restore、ライセンス監査、Release build、全テスト、direct/transitive NuGet脆弱性確認を通過した場合だけ次を生成します。GitHub Releaseやタグは作成せず、Actions artifactとして14日保持します。
 
 ```text
-CodexUsageNotifier-v0.5.1-win-x64.zip
-CodexUsageNotifier-v0.5.1-win-x64.zip.sha256
+CodexUsageNotifier-v0.5.2-win-x64.zip
+CodexUsageNotifier-v0.5.2-win-x64.zip.sha256
 ```
 
 publish方式は`win-x64`、`Release`、self-containedです。利用者による.NET Runtimeの別途導入を前提とせず、trimming、Single File、AOTは無効です。一般配布ZIPからPDBを除外します。ZIPにはpublishされた実行ファイル群に加え、`LICENSE`、`THIRD-PARTY-NOTICES.txt`、監査結果`licenses-audit.json`、および`licenses/nuget`と`licenses/dotnet`配下の配布対象ライセンス原文を含めます。`settings.json`、`state.json`、履歴、ログ、OAuthクライアント設定、DPAPI認証情報、テスト、ソース、`.git`は検査して除外します。コード署名、インストーラー、自動更新、正式アイコン、GitHub Release自動公開は未実装です。
@@ -386,7 +386,7 @@ dotnet test CodexUsageNotifier.sln -c Release --no-build
 
 ### ZIPの配置と初回起動
 
-1. ZIPと`.sha256`を同じフォルダへ保存し、`(Get-FileHash .\CodexUsageNotifier-v0.5.1-win-x64.zip -Algorithm SHA256).Hash`がSHA-256ファイルの64桁値と一致することを確認します。
+1. ZIPと`.sha256`を同じフォルダへ保存し、`(Get-FileHash .\CodexUsageNotifier-v0.5.2-win-x64.zip -Algorithm SHA256).Hash`がSHA-256ファイルの64桁値と一致することを確認します。
 2. ZIPを新しい空フォルダへ展開し、ダウンロード一時フォルダではなく、今後維持する安定したフォルダへ配置します。
 3. `CodexUsageNotifier.exe`を手動起動し、状態画面のVersion、トレイ、利用枠取得、設定保存を確認します。
 4. 自動起動が必要なら、配置先を確定した後に設定画面で有効にします。Runキーはexeの絶対パスを保持するため、一時フォルダから有効にしないでください。
