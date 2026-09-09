@@ -25,6 +25,7 @@ public static class RateLimitNotificationPolicy
     /// 1つのGmail通知に許可する最大送信試行回数です。
     /// </summary>
     internal const int MaxGmailAttemptCount = 2;
+    internal const int MaxNtfyAttemptCount = 2;
 
     /// <summary>
     /// 取得できた全利用枠を独立に評価し、複数の通知候補と回復状態を返します。
@@ -450,7 +451,10 @@ public static class RateLimitNotificationPolicy
                         && state.DeferredUntilUtc <= nowUtc)
                     || (settings.GmailNotificationEnabled
                         && state.GmailDeliveryStatus == DeliveryStatus.Failed
-                        && CanAttemptGmail(state, nowUtc)))
+                        && CanAttemptGmail(state, nowUtc))
+                    || (settings.NtfyNotificationEnabled
+                        && state.NtfyDeliveryStatus == DeliveryStatus.Failed
+                        && CanAttemptNtfy(state, nowUtc)))
                 && state.ConditionMetAtUtc >= nowUtc.Subtract(DeferredNotificationMaxAge)
                 && (expectedRecoveryWindowId is null
                     || string.Equals(
@@ -496,7 +500,8 @@ public static class RateLimitNotificationPolicy
             && state.NotificationType == candidate.NotificationType
             && state.NotificationStage == candidate.NotificationStage);
         if ((settings.WindowsNotificationEnabled && CanAttemptWindows(existing, nowUtc))
-            || (settings.GmailNotificationEnabled && CanAttemptGmail(existing, nowUtc)))
+            || (settings.GmailNotificationEnabled && CanAttemptGmail(existing, nowUtc))
+            || (settings.NtfyNotificationEnabled && CanAttemptNtfy(existing, nowUtc)))
         {
             candidates.Add(candidate);
         }
@@ -557,6 +562,28 @@ public static class RateLimitNotificationPolicy
             && (existing.DeferredUntilUtc is null || existing.DeferredUntilUtc <= nowUtc);
     }
 
+    /// <summary>保存済みntfy配送状態から初回または5分後の1回再試行が可能か判定します。</summary>
+    internal static bool CanAttemptNtfy(RateLimitNotificationState? existing, DateTimeOffset nowUtc)
+    {
+        if (existing is null)
+        {
+            return true;
+        }
+
+        if (existing.NtfyDeliveryStatus == DeliveryStatus.NotAttempted)
+        {
+            return existing.NtfyAttemptCount < MaxNtfyAttemptCount
+                && (existing.DeferredUntilUtc is null || existing.DeferredUntilUtc <= nowUtc);
+        }
+
+        return existing.NtfyDeliveryStatus == DeliveryStatus.Failed
+            && existing.NtfyAttemptCount == 1
+            && existing.NtfyFailureKind is NtfyDeliveryFailureKind.Transient or NtfyDeliveryFailureKind.Interrupted
+            && existing.NtfyNextRetryAtUtc is not null
+            && existing.NtfyNextRetryAtUtc <= nowUtc
+            && (existing.DeferredUntilUtc is null || existing.DeferredUntilUtc <= nowUtc);
+    }
+
     /// <summary>
     /// 有効な配送チャネルのいずれかに未送信または再試行可能な状態があるか判定します。
     /// </summary>
@@ -572,7 +599,8 @@ public static class RateLimitNotificationPolicy
         ArgumentNullException.ThrowIfNull(state);
         ArgumentNullException.ThrowIfNull(settings);
         return (settings.WindowsNotificationEnabled && CanAttemptWindows(state, nowUtc))
-            || (settings.GmailNotificationEnabled && CanAttemptGmail(state, nowUtc));
+            || (settings.GmailNotificationEnabled && CanAttemptGmail(state, nowUtc))
+            || (settings.NtfyNotificationEnabled && CanAttemptNtfy(state, nowUtc));
     }
 
     /// <summary>
