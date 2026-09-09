@@ -362,6 +362,7 @@ public sealed partial class SettingsViewModel
             settings.LongWindowFinalWarningThresholdPercent,
             settings.LongWindowResetCompletedEnabled,
             settings.GmailNotificationEnabled,
+            settings.NtfyNotificationEnabled,
             settings.GmailRecipient ?? string.Empty,
             settings.ResetInferenceUsageDropPoints);
     }

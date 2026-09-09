@@ -1,5 +1,7 @@
 using CodexUsageNotifier.Domain.Models;
 using CodexUsageNotifier.Application.Gmail;
+using CodexUsageNotifier.Application.Ntfy;
+using CodexUsageNotifier.Application.Versioning;
 using CodexUsageNotifier.Presentation.ViewModels;
 using CodexUsageNotifier.Tests.TestDoubles;
 
@@ -389,16 +391,23 @@ public sealed class StatusViewModelTests
                 AttemptedAtUtc = new DateTimeOffset(2026, 8, 20, 2, 0, 0, TimeSpan.Zero),
                 Summary = "Gmail通知",
             },
+            NtfyDeliveryResult = new DeliveryResultState
+            {
+                Status = DeliveryStatus.Succeeded,
+                AttemptedAtUtc = new DateTimeOffset(2026, 8, 20, 3, 0, 0, TimeSpan.Zero),
+                Summary = "スマホ通知",
+            },
         };
 
         viewModel.Initialize(AppSettings.CreateDefault(), state);
 
         Assert.IsTrue(viewModel.HasRecentNotifications);
-        Assert.AreEqual(2, viewModel.RecentNotifications.Count);
-        Assert.AreEqual("Gmail", viewModel.RecentNotifications[0].Channel);
-        Assert.AreEqual("失敗", viewModel.RecentNotifications[0].StatusText);
-        Assert.AreEqual("Windows", viewModel.RecentNotifications[1].Channel);
-        Assert.IsTrue(viewModel.RecentNotifications[1].IsSucceeded);
+        Assert.AreEqual(3, viewModel.RecentNotifications.Count);
+        Assert.AreEqual("スマホ", viewModel.RecentNotifications[0].Channel);
+        Assert.AreEqual("Gmail", viewModel.RecentNotifications[1].Channel);
+        Assert.AreEqual("失敗", viewModel.RecentNotifications[1].StatusText);
+        Assert.AreEqual("Windows", viewModel.RecentNotifications[2].Channel);
+        Assert.IsTrue(viewModel.RecentNotifications[2].IsSucceeded);
     }
 
     /// <summary>Windows通知設定が無効な場合に状態カードへ反映することを検証します。</summary>
@@ -411,5 +420,40 @@ public sealed class StatusViewModelTests
         viewModel.Initialize(settings, new ApplicationState());
 
         Assert.AreEqual("無効", viewModel.WindowsNotificationStatus);
+    }
+
+    /// <summary>MainWindow用状態がntfyの未設定・設定済み無効を区別することを検証します。</summary>
+    [TestMethod]
+    public async Task RefreshNtfyConfigurationStatusAsync_DistinguishesConfigurationStates()
+    {
+        StubNtfyTopicStatusProvider topicStatus = new();
+        StatusViewModel viewModel = new(
+            new StubGmailAuthenticationService(),
+            new ApplicationVersionProvider(),
+            new UsageTrendViewModel(),
+            topicStatus);
+
+        await viewModel.RefreshNtfyConfigurationStatusAsync(false, CancellationToken.None);
+        Assert.AreEqual("未設定", viewModel.NtfyNotificationStatus);
+
+        topicStatus.IsConfigured = true;
+        await viewModel.RefreshNtfyConfigurationStatusAsync(false, CancellationToken.None);
+        Assert.AreEqual("設定済み / 無効", viewModel.NtfyNotificationStatus);
+        await viewModel.RefreshNtfyConfigurationStatusAsync(true, CancellationToken.None);
+        Assert.AreEqual("有効", viewModel.NtfyNotificationStatus);
+    }
+
+    /// <summary>秘密Topicを公開せず設定有無だけを返すテスト用サービスです。</summary>
+    private sealed class StubNtfyTopicStatusProvider : INtfyTopicConfigurationStatusProvider
+    {
+        /// <summary>返す設定有無を取得または設定します。</summary>
+        public bool IsConfigured { get; set; }
+
+        /// <inheritdoc />
+        public Task<bool> IsConfiguredAsync(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult(IsConfigured);
+        }
     }
 }

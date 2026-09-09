@@ -90,6 +90,24 @@ public sealed record RateLimitNotificationState
     /// </summary>
     public GmailDeliveryFailureKind GmailFailureKind { get; init; }
 
+    /// <summary>ntfyスマホ通知の送信状態を取得または設定します。</summary>
+    public DeliveryStatus NtfyDeliveryStatus { get; init; }
+
+    /// <summary>ntfyスマホ通知の累計試行回数を取得または設定します。</summary>
+    public int NtfyAttemptCount { get; init; }
+
+    /// <summary>ntfyスマホ通知を最後に試行したUTC時刻を取得または設定します。</summary>
+    public DateTimeOffset? NtfyLastAttemptedAtUtc { get; init; }
+
+    /// <summary>ntfyスマホ通知を次に再試行できるUTC時刻を取得または設定します。</summary>
+    public DateTimeOffset? NtfyNextRetryAtUtc { get; init; }
+
+    /// <summary>ntfyスマホ通知の直近失敗分類を取得または設定します。</summary>
+    public NtfyDeliveryFailureKind NtfyFailureKind { get; init; }
+
+    /// <summary>この通知が対象とする秘密Topicの非秘密世代IDを取得または設定します。</summary>
+    public string? NtfyTopicGenerationId { get; init; }
+
     /// <summary>
     /// 通知禁止時間による保留終了UTC時刻を取得または設定します。
     /// </summary>
@@ -99,6 +117,22 @@ public sealed record RateLimitNotificationState
     /// リセット完了通知を判定した理由を取得または設定します。
     /// </summary>
     public RateLimitResetCompletionReason? ResetCompletionReason { get; init; }
+}
+
+/// <summary>ntfy配送失敗の再試行可否を表す安全な分類です。</summary>
+public enum NtfyDeliveryFailureKind
+{
+    /// <summary>失敗が記録されていない状態です。</summary>
+    None,
+
+    /// <summary>ネットワーク、タイムアウト、408、429、または5xxの一時障害です。</summary>
+    Transient,
+
+    /// <summary>入力不備や恒久的なHTTP拒否です。</summary>
+    Permanent,
+
+    /// <summary>終了などで結果を確認できなかった試行です。</summary>
+    Interrupted,
 }
 
 /// <summary>

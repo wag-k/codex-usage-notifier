@@ -222,7 +222,7 @@ public sealed class JsonApplicationStateRepositoryTests
         Assert.IsNotNull(migrated.RateLimitRecoveryStates);
     }
 
-    /// <summary>Version 3からVersion 4へ最終保守時刻を未実行として移行することを確認します。</summary>
+    /// <summary>Version 3から現在版へ最終保守時刻とntfy状態を安全に移行することを確認します。</summary>
     [TestMethod]
     public void Migrate_Version3_AddsLastMaintenanceAtUtc()
     {
@@ -232,9 +232,24 @@ public sealed class JsonApplicationStateRepositoryTests
             new ApplicationState { SchemaVersion = 3, ConsecutiveFailures = 5 },
             3);
 
-        Assert.AreEqual(4, migrated.SchemaVersion);
+        Assert.AreEqual(ApplicationState.CurrentSchemaVersion, migrated.SchemaVersion);
         Assert.AreEqual(5, migrated.ConsecutiveFailures);
         Assert.IsNull(migrated.LastMaintenanceAtUtc);
+        Assert.IsNull(migrated.NtfyDeliveryEnabledSinceUtc);
+    }
+
+    /// <summary>Version 4からVersion 5へ秘密Topicを含まないntfy配送状態を初期化することを確認します。</summary>
+    [TestMethod]
+    public void Migrate_Version4_AddsNtfyDeliveryState()
+    {
+        ApplicationStateMigrator migrator = new();
+
+        ApplicationState migrated = migrator.Migrate(new ApplicationState { SchemaVersion = 4 }, 4);
+
+        Assert.AreEqual(5, migrated.SchemaVersion);
+        Assert.IsFalse(migrated.NtfyDeliveryEnabledLastObserved);
+        Assert.IsNull(migrated.NtfyTopicGenerationId);
+        Assert.IsNull(migrated.NtfyDeliveryResult);
     }
 
     /// <summary>将来スキーマを拒否し、内容・更新時刻・配置を完全に維持することを確認します。</summary>

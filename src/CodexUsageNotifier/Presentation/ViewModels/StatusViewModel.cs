@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using CodexUsageNotifier.Application.Abstractions;
 using CodexUsageNotifier.Application.Gmail;
+using CodexUsageNotifier.Application.Ntfy;
 using CodexUsageNotifier.Application.Versioning;
 using CodexUsageNotifier.Domain.Models;
 using CodexUsageNotifier.Domain.Services;
@@ -14,6 +15,7 @@ namespace CodexUsageNotifier.Presentation.ViewModels;
 public sealed class StatusViewModel : INotifyPropertyChanged, IUsageStatusSink
 {
     private readonly IGmailAuthenticationStatusProvider? gmailAuthenticationStatusProvider;
+    private readonly INtfyTopicConfigurationStatusProvider? ntfyTopicStatusProvider;
     private readonly ApplicationVersionProvider applicationVersionProvider;
     private string fiveHourRateLimit = "未観測";
     private string weeklyRateLimit = "未観測";
@@ -32,6 +34,9 @@ public sealed class StatusViewModel : INotifyPropertyChanged, IUsageStatusSink
     private string lastGmailNotification = "通知実績なし";
     private string lastWindowsNotificationSummary = "通知実績なし";
     private string lastGmailNotificationSummary = "通知実績なし";
+    private string ntfyNotificationStatus = "無効（任意）";
+    private string lastNtfyNotification = "通知実績なし";
+    private string lastNtfyNotificationSummary = "通知実績なし";
     private string consecutiveFailures = "0回";
     private RateLimitCardViewModel fiveHourCard = RateLimitCardViewModel.CreateUnobserved("5時間枠（短期枠）");
     private RateLimitCardViewModel weeklyCard = RateLimitCardViewModel.CreateUnobserved("週間枠");
@@ -42,6 +47,7 @@ public sealed class StatusViewModel : INotifyPropertyChanged, IUsageStatusSink
     private string maskedGmailAccount = "未認証";
     private IReadOnlyList<RecentNotificationViewModel> recentNotifications = Array.Empty<RecentNotificationViewModel>();
     private bool gmailNotificationEnabled;
+    private bool isNtfyTopicConfigured;
 
     /// <summary>Gmail認証状態の安全な提供元と実行Assemblyのバージョンを受け取ります。</summary>
     /// <param name="gmailAuthenticationStatusProvider">トークンを公開しない認証状態の提供元です。</param>
@@ -49,7 +55,8 @@ public sealed class StatusViewModel : INotifyPropertyChanged, IUsageStatusSink
         : this(
             gmailAuthenticationStatusProvider,
             new ApplicationVersionProvider(),
-            new UsageTrendViewModel())
+            new UsageTrendViewModel(),
+            null)
     {
     }
 
@@ -58,7 +65,7 @@ public sealed class StatusViewModel : INotifyPropertyChanged, IUsageStatusSink
     public StatusViewModel(
         IGmailAuthenticationStatusProvider gmailAuthenticationStatusProvider,
         ApplicationVersionProvider applicationVersionProvider)
-        : this(gmailAuthenticationStatusProvider, applicationVersionProvider, new UsageTrendViewModel())
+        : this(gmailAuthenticationStatusProvider, applicationVersionProvider, new UsageTrendViewModel(), null)
     {
     }
 
@@ -69,13 +76,15 @@ public sealed class StatusViewModel : INotifyPropertyChanged, IUsageStatusSink
     public StatusViewModel(
         IGmailAuthenticationStatusProvider gmailAuthenticationStatusProvider,
         ApplicationVersionProvider applicationVersionProvider,
-        UsageTrendViewModel usageTrend)
+        UsageTrendViewModel usageTrend,
+        INtfyTopicConfigurationStatusProvider? ntfyTopicStatusProvider = null)
     {
         ArgumentNullException.ThrowIfNull(gmailAuthenticationStatusProvider);
         ArgumentNullException.ThrowIfNull(applicationVersionProvider);
         ArgumentNullException.ThrowIfNull(usageTrend);
         this.gmailAuthenticationStatusProvider = gmailAuthenticationStatusProvider;
         this.applicationVersionProvider = applicationVersionProvider;
+        this.ntfyTopicStatusProvider = ntfyTopicStatusProvider;
         UsageTrend = usageTrend;
     }
 
@@ -307,6 +316,27 @@ public sealed class StatusViewModel : INotifyPropertyChanged, IUsageStatusSink
         private set => SetProperty(ref lastGmailNotificationSummary, value);
     }
 
+    /// <summary>匿名ntfyスマホ通知の設定状態を取得します。</summary>
+    public string NtfyNotificationStatus
+    {
+        get => ntfyNotificationStatus;
+        private set => SetProperty(ref ntfyNotificationStatus, value);
+    }
+
+    /// <summary>ntfyチャネルの直近配送結果を取得します。</summary>
+    public string LastNtfyNotification
+    {
+        get => lastNtfyNotification;
+        private set => SetProperty(ref lastNtfyNotification, value);
+    }
+
+    /// <summary>ntfyチャネルの直近配送結果をカード用に取得します。</summary>
+    public string LastNtfyNotificationSummary
+    {
+        get => lastNtfyNotificationSummary;
+        private set => SetProperty(ref lastNtfyNotificationSummary, value);
+    }
+
     /// <summary>
     /// 連続失敗回数の表示文字列を取得します。
     /// </summary>
@@ -340,6 +370,7 @@ public sealed class StatusViewModel : INotifyPropertyChanged, IUsageStatusSink
         gmailNotificationEnabled = settings.GmailNotificationEnabled;
         GmailNotificationStatus = gmailNotificationEnabled ? "有効" : "未設定（任意）";
         WindowsNotificationStatus = settings.WindowsNotificationEnabled ? "有効" : "無効";
+        NtfyNotificationStatus = FormatNtfyNotificationStatus(settings.NtfyNotificationEnabled);
         GmailAuthenticationStatus = gmailAuthenticationStatusProvider is null ? "未確認" : "確認中…";
         GmailAuthenticatedAccount = "未認証";
         MaskedGmailAccount = "未認証";
@@ -395,6 +426,22 @@ public sealed class StatusViewModel : INotifyPropertyChanged, IUsageStatusSink
         }
     }
 
+    /// <summary>秘密Topicを画面へ公開せず、ntfyの設定済み状態を非同期に更新します。</summary>
+    public async Task RefreshNtfyConfigurationStatusAsync(bool notificationEnabled, CancellationToken cancellationToken)
+    {
+        try
+        {
+            isNtfyTopicConfigured = ntfyTopicStatusProvider is not null
+                && await ntfyTopicStatusProvider.IsConfiguredAsync(cancellationToken).ConfigureAwait(false);
+            RunOnUiThread(() => NtfyNotificationStatus = FormatNtfyNotificationStatus(notificationEnabled));
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            isNtfyTopicConfigured = false;
+            RunOnUiThread(() => NtfyNotificationStatus = "設定エラー");
+        }
+    }
+
     /// <summary>
     /// 利用枠の取得開始をUIスレッドへ通知します。
     /// </summary>
@@ -434,6 +481,8 @@ public sealed class StatusViewModel : INotifyPropertyChanged, IUsageStatusSink
             gmailNotificationEnabled = settings.GmailNotificationEnabled;
             GmailNotificationStatus = gmailNotificationEnabled ? "有効" : "無効（任意）";
             WindowsNotificationStatus = settings.WindowsNotificationEnabled ? "有効" : "無効";
+            isNtfyTopicConfigured |= state.NtfyTopicGenerationId is not null;
+            NtfyNotificationStatus = FormatNtfyNotificationStatus(settings.NtfyNotificationEnabled);
             UpdateDeliveryResults(state);
             MonitoringStatus = "監視中（App Server接続済み）";
             SetMonitoringPresentation(
@@ -443,6 +492,14 @@ public sealed class StatusViewModel : INotifyPropertyChanged, IUsageStatusSink
             ConsecutiveFailures = "0回";
         });
     }
+
+    /// <summary>ntfyの有効状態とTopic設定有無をカード用の表示へ変換します。</summary>
+    private string FormatNtfyNotificationStatus(bool enabled) => (enabled, isNtfyTopicConfigured) switch
+    {
+        (true, true) => "有効",
+        (false, true) => "設定済み / 無効",
+        _ => "未設定",
+    };
 
     /// <summary>
     /// 次回確認予定時刻をUIスレッドへ反映します。
@@ -784,6 +841,8 @@ public sealed class StatusViewModel : INotifyPropertyChanged, IUsageStatusSink
         LastGmailNotification = FormatDeliveryResult(state.GmailDeliveryResult);
         LastWindowsNotificationSummary = FormatDeliveryCardText(state.WindowsDeliveryResult);
         LastGmailNotificationSummary = FormatDeliveryCardText(state.GmailDeliveryResult);
+        LastNtfyNotification = FormatDeliveryResult(state.NtfyDeliveryResult);
+        LastNtfyNotificationSummary = FormatDeliveryCardText(state.NtfyDeliveryResult);
 
         List<(string Channel, DeliveryResultState Result)> results = [];
         if (state.WindowsDeliveryResult?.AttemptedAtUtc is not null)
@@ -794,6 +853,11 @@ public sealed class StatusViewModel : INotifyPropertyChanged, IUsageStatusSink
         if (state.GmailDeliveryResult?.AttemptedAtUtc is not null)
         {
             results.Add(("Gmail", state.GmailDeliveryResult));
+        }
+
+        if (state.NtfyDeliveryResult?.AttemptedAtUtc is not null)
+        {
+            results.Add(("スマホ", state.NtfyDeliveryResult));
         }
 
         RecentNotifications = results

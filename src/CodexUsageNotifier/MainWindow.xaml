@@ -204,7 +204,7 @@
                                        Text="利用枠をバックグラウンドで監視しています" />
                             <TextBlock Margin="0,3,0,0"
                                        Foreground="#365789"
-                                       Text="回復やリセットのタイミングをWindows通知とGmail通知でお知らせします。"
+                                       Text="回復やリセットのタイミングをWindows、Gmail、スマホ通知でお知らせします。"
                                        TextWrapping="Wrap" />
                         </StackPanel>
                         <Border Grid.Column="2"
@@ -402,6 +402,7 @@
                         <ColumnDefinition Width="*" />
                         <ColumnDefinition Width="*" />
                         <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="*" />
                     </Grid.ColumnDefinitions>
                     <Border Margin="0,0,7,0" Style="{StaticResource CardStyle}">
                         <StackPanel>
@@ -432,6 +433,15 @@
                             <TextBlock Margin="0,3,0,0" Style="{StaticResource SecondaryTextStyle}" Text="{Binding GmailAuthenticationStatus}" />
                             <TextBlock Margin="0,3,0,0" Style="{StaticResource SecondaryTextStyle}" Text="{Binding MaskedGmailAccount}" />
                             <TextBlock Margin="0,5,0,0" Style="{StaticResource SecondaryTextStyle}" Text="{Binding LastGmailNotificationSummary}" />
+                        </StackPanel>
+                    </Border>
+                    <Border Grid.Column="3" Margin="7,0,0,0" Style="{StaticResource CardStyle}">
+                        <StackPanel>
+                            <TextBlock FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="21" Foreground="#16A34A" Text="&#xE8EA;" />
+                            <TextBlock Margin="0,9,0,0" FontWeight="SemiBold" Text="スマホ通知" />
+                            <TextBlock Margin="0,3,0,0" FontSize="15" FontWeight="SemiBold" Text="{Binding NtfyNotificationStatus}" />
+                            <TextBlock Margin="0,3,0,0" Style="{StaticResource SecondaryTextStyle}" Text="ntfy（アカウント不要）" />
+                            <TextBlock Margin="0,5,0,0" Style="{StaticResource SecondaryTextStyle}" Text="{Binding LastNtfyNotificationSummary}" />
                         </StackPanel>
                     </Border>
                 </Grid>

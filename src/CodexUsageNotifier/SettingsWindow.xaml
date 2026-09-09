@@ -264,6 +264,41 @@
                     </StackPanel>
                 </GroupBox>
 
+                <GroupBox Header="スマホ通知（ntfy）">
+                    <StackPanel>
+                        <Border Padding="12" Background="#E8F5E9" CornerRadius="4">
+                            <TextBlock Foreground="#215D2E" FontWeight="SemiBold" TextWrapping="Wrap"
+                                       Text="アカウント登録不要。無料のntfyアプリをスマートフォンへインストールし、このアプリが生成する秘密Topicを購読すると通知を受け取れます。次の4手順を順に完了してください。" />
+                        </Border>
+                        <TextBlock Margin="0,14,0,4" FontWeight="SemiBold" Text="1. ntfyアプリをインストール" />
+                        <TextBlock Text="AndroidまたはiPhoneへ公式ntfyアプリをインストールします。" TextWrapping="Wrap" />
+                        <Button Margin="0,8,0,10" Padding="12,6" HorizontalAlignment="Left" Content="ntfy公式サイトを開く" Click="OnOpenNtfyOfficialSite" />
+
+                        <TextBlock Margin="0,6,0,4" FontWeight="SemiBold" Text="2. 秘密Topicを生成" />
+                        <TextBlock Text="Topicは通知先を知るための秘密情報です。通常は一部を隠して表示します。" TextWrapping="Wrap" />
+                        <TextBox Margin="0,8,0,0" Padding="8" IsReadOnly="True" Text="{Binding NtfyTopicDisplay}" />
+                        <WrapPanel Margin="0,8,0,10">
+                            <Button Margin="0,0,8,0" Padding="12,6" Content="通知用Topicを生成" Click="OnGenerateNtfyTopic" />
+                            <Button Margin="0,0,8,0" Padding="12,6" Content="表示 / 隠す" Click="OnToggleNtfyTopic" />
+                            <Button Margin="0,0,8,0" Padding="12,6" Content="コピー" IsEnabled="{Binding IsNtfyTopicConfigured}" Click="OnCopyNtfyTopic" />
+                            <Button Padding="12,6" Content="再生成" IsEnabled="{Binding IsNtfyTopicConfigured}" Click="OnRegenerateNtfyTopic" />
+                        </WrapPanel>
+
+                        <TextBlock Margin="0,6,0,4" FontWeight="SemiBold" Text="3. ntfyアプリで購読" />
+                        <TextBlock Text="コピーしたTopicをntfy.shの購読先として追加します。Androidでは下のボタンでも購読画面を開けます。" TextWrapping="Wrap" />
+                        <Button Margin="0,8,0,10" Padding="12,6" HorizontalAlignment="Left" Content="Android ntfyで開く"
+                                IsEnabled="{Binding IsNtfyTopicConfigured}" Click="OnOpenNtfyAndroid" />
+
+                        <TextBlock Margin="0,6,0,4" FontWeight="SemiBold" Text="4. テスト通知を確認" />
+                        <Button Margin="0,4,0,0" Padding="12,6" HorizontalAlignment="Left" Content="スマホへテスト通知を送信"
+                                IsEnabled="{Binding IsNtfyTestAvailable}" Click="OnSendNtfyTestNotification" />
+                        <TextBlock Margin="0,6,0,10" Text="{Binding LastNtfyTestResult}" TextWrapping="Wrap" />
+                        <CheckBox Content="スマホ通知を有効にする" IsChecked="{Binding NtfyNotificationEnabled}" />
+                        <TextBlock Style="{StaticResource ErrorText}" Text="{Binding NtfyNotificationError}" />
+                        <TextBlock Margin="0,12,0,0" Foreground="#5B6573" Text="{Binding NtfyPrivacyDescription}" TextWrapping="Wrap" />
+                    </StackPanel>
+                </GroupBox>
+
                 <GroupBox Header="取得済み利用枠">
                     <StackPanel>
                         <TextBlock Margin="0,0,0,10" Foreground="#5B6573"

@@ -1,6 +1,7 @@
 using CodexUsageNotifier.Application.Abstractions;
 using CodexUsageNotifier.Application.State;
 using CodexUsageNotifier.Application.Gmail;
+using CodexUsageNotifier.Application.Ntfy;
 using CodexUsageNotifier.Domain.Models;
 using CodexUsageNotifier.Presentation.ViewModels;
 using CodexUsageNotifier.Application.Startup;
@@ -481,6 +482,57 @@ public sealed class SettingsViewModelTests
         Assert.AreSame(original, after);
     }
 
+    /// <summary>Topic未設定ではntfyを有効化して保存できないことを検証します。</summary>
+    [TestMethod]
+    public async Task NtfyWithoutTopic_CannotBeEnabled()
+    {
+        TestContext context = CreateContext(AppSettings.CreateDefault());
+        await context.ViewModel.LoadAsync(CancellationToken.None);
+
+        context.ViewModel.NtfyNotificationEnabled = true;
+
+        Assert.IsFalse(context.ViewModel.CanSave);
+        StringAssert.Contains(context.ViewModel.NtfyNotificationError, "Topic");
+    }
+
+    /// <summary>生成したTopicを既定ではマスクし、明示操作時だけ完全表示することを検証します。</summary>
+    [TestMethod]
+    public async Task GenerateNtfyTopic_MasksUntilExplicitlyShown()
+    {
+        StubNtfyTopicStore topics = new();
+        TestContext context = CreateContext(AppSettings.CreateDefault(), ntfyTopicStore: topics);
+        await context.ViewModel.LoadAsync(CancellationToken.None);
+
+        await context.ViewModel.GenerateNtfyTopicAsync(CancellationToken.None);
+
+        Assert.IsTrue(context.ViewModel.IsNtfyTopicConfigured);
+        Assert.AreNotEqual(topics.Topic?.Value, context.ViewModel.NtfyTopicDisplay);
+        StringAssert.Contains(context.ViewModel.NtfyAndroidDeepLink!, topics.Topic!.Value);
+        context.ViewModel.IsNtfyTopicVisible = true;
+        Assert.AreEqual(topics.Topic.Value, context.ViewModel.NtfyTopicDisplay);
+    }
+
+    /// <summary>ntfyテスト通知が本番通知状態を変更しないことを検証します。</summary>
+    [TestMethod]
+    public async Task SendNtfyTestNotification_DoesNotChangeProductionState()
+    {
+        ApplicationState original = CreateStateWithWindows();
+        StubNtfyTopicStore topics = new()
+        {
+            Topic = new NtfyTopic { Value = "codex-usage-0123456789abcdef0123456789abcdef", GenerationId = "g1" },
+        };
+        StubNtfyTestNotificationService testSender = new();
+        TestContext context = CreateContext(
+            AppSettings.CreateDefault(), original, ntfyTopicStore: topics, ntfyTestNotificationService: testSender);
+        await context.ViewModel.LoadAsync(CancellationToken.None);
+
+        await context.ViewModel.SendNtfyTestNotificationAsync(CancellationToken.None);
+        ApplicationState after = await context.StateStore.LoadAsync(CancellationToken.None);
+
+        Assert.AreEqual(1, testSender.SendCount);
+        Assert.AreSame(original, after);
+    }
+
     /// <summary>
     /// テスト対象のViewModelとインメモリ依存関係を生成します。
     /// </summary>
@@ -490,7 +542,9 @@ public sealed class SettingsViewModelTests
     private static TestContext CreateContext(
         AppSettings settings,
         ApplicationState? state = null,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        INtfyTopicStore? ntfyTopicStore = null,
+        INtfyTestNotificationService? ntfyTestNotificationService = null)
     {
         InMemorySettingsRepository settingsRepository = new(settings);
         InMemoryStateRepository stateRepository = new(state ?? ApplicationState.CreateDefault());
@@ -509,7 +563,10 @@ public sealed class SettingsViewModelTests
             authenticationService,
             testMailSender,
             timeProvider ?? TimeProvider.System,
-            NullLogger<SettingsViewModel>.Instance);
+            NullLogger<SettingsViewModel>.Instance,
+            new StubNtfyTopicGenerator(),
+            ntfyTopicStore ?? new StubNtfyTopicStore(),
+            ntfyTestNotificationService ?? new StubNtfyTestNotificationService());
         return new TestContext(
             viewModel,
             settingsRepository,
@@ -519,6 +576,68 @@ public sealed class SettingsViewModelTests
             authenticationService,
             testMailSender,
             autoStartManager);
+    }
+
+    /// <summary>決定的な秘密Topicを返す設定画面テスト用生成器です。</summary>
+    private sealed class StubNtfyTopicGenerator : INtfyTopicGenerator
+    {
+        /// <inheritdoc />
+        public NtfyTopic Generate() => new()
+        {
+            Value = "codex-usage-0123456789abcdef0123456789abcdef",
+            GenerationId = "generated-topic",
+            CreatedAtUtc = new DateTimeOffset(2026, 9, 9, 0, 0, 0, TimeSpan.Zero),
+        };
+    }
+
+    /// <summary>設定画面テストでTopicをメモリ上に保持します。</summary>
+    private sealed class StubNtfyTopicStore : INtfyTopicStore
+    {
+        /// <summary>保存中のTopicを取得または設定します。</summary>
+        public NtfyTopic? Topic { get; set; }
+
+        /// <inheritdoc />
+        public Task<NtfyTopic?> LoadAsync(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult(Topic);
+        }
+
+        /// <inheritdoc />
+        public Task SaveAsync(NtfyTopic topic, CancellationToken cancellationToken)
+        {
+            ArgumentNullException.ThrowIfNull(topic);
+            cancellationToken.ThrowIfCancellationRequested();
+            Topic = topic;
+            return Task.CompletedTask;
+        }
+
+        /// <inheritdoc />
+        public Task DeleteAsync(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Topic = null;
+            return Task.CompletedTask;
+        }
+    }
+
+    /// <summary>外部通信なしでntfyテスト通知回数を記録します。</summary>
+    private sealed class StubNtfyTestNotificationService : INtfyTestNotificationService
+    {
+        /// <summary>送信要求回数を取得します。</summary>
+        public int SendCount { get; private set; }
+
+        /// <inheritdoc />
+        public Task<NtfyTestNotificationResult> SendAsync(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            SendCount++;
+            return Task.FromResult(new NtfyTestNotificationResult
+            {
+                Succeeded = true,
+                Message = "テスト通知を受け付けました。",
+            });
+        }
     }
 
     /// <summary>テスト対象をOAuthクライアント未設定状態へ変更します。</summary>

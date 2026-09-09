@@ -9,4 +9,7 @@ public static class PublicDocumentationLinks
     public static Uri GmailOAuthSetupUri { get; } = new(
         "https://github.com/wag-k/codex-usage-notifier/blob/main/docs/gmail-oauth-setup.md",
         UriKind.Absolute);
+
+    /// <summary>ntfy公式サイトの固定URLを取得します。</summary>
+    public static Uri NtfyOfficialSiteUri { get; } = new("https://ntfy.sh/", UriKind.Absolute);
 }

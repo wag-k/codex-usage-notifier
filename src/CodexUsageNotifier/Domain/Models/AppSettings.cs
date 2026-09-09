@@ -113,6 +113,11 @@ public sealed record AppSettings
     public bool GmailNotificationEnabled { get; init; }
 
     /// <summary>
+    /// 匿名ntfyによるスマホ通知が有効かどうかを取得または設定します。
+    /// </summary>
+    public bool NtfyNotificationEnabled { get; init; }
+
+    /// <summary>
     /// Gmail通知の送信先を取得または設定します。
     /// </summary>
     public string? GmailRecipient { get; init; }

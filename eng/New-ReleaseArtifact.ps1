@@ -39,6 +39,7 @@ $forbiddenNames = @(
     "usage-history.jsonl",
     "google-oauth-client.json",
     "google-oauth-credentials.dat",
+    "ntfy-topic.dat",
     ".gitignore"
 )
 $forbiddenExtensions = @(".log", ".pdb", ".cs", ".xaml", ".csproj", ".sln")

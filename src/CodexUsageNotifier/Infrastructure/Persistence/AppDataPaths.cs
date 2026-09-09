@@ -58,6 +58,11 @@ public sealed class AppDataPaths : IAppDataPaths
     public string GoogleCredentialFilePath => Path.Combine(AuthDirectory, "google-oauth-credentials.dat");
 
     /// <summary>
+    /// DPAPI保護されたntfy Topicファイルのパスを取得します。
+    /// </summary>
+    public string NtfyTopicFilePath => Path.Combine(AuthDirectory, "ntfy-topic.dat");
+
+    /// <summary>
     /// ログディレクトリのパスを取得します。
     /// </summary>
     public string LogDirectory => Path.Combine(RootDirectory, "logs");

@@ -1,10 +1,13 @@
 using System.Windows;
+using System.Net.Http;
 using CodexUsageNotifier.Application.Abstractions;
 using CodexUsageNotifier.Application.State;
 using CodexUsageNotifier.Application.Monitoring;
 using CodexUsageNotifier.Application.Notifications;
+using CodexUsageNotifier.Application.Ntfy;
 using CodexUsageNotifier.Domain.Models;
 using CodexUsageNotifier.Infrastructure.Logging;
+using CodexUsageNotifier.Infrastructure.Ntfy;
 using CodexUsageNotifier.Infrastructure.Persistence;
 using CodexUsageNotifier.Infrastructure.Codex;
 using CodexUsageNotifier.Infrastructure.WindowsNotifications;
@@ -162,6 +165,13 @@ public partial class App : System.Windows.Application
         services.AddSingleton<IGmailApiClient, GmailApiClient>();
         services.AddSingleton<IGmailTestMailSender, GmailTestMailSender>();
         services.AddSingleton<IGmailNotificationSender, GmailNotificationSender>();
+        services.AddSingleton<INtfyTopicGenerator, CryptographicNtfyTopicGenerator>();
+        services.AddSingleton<DpapiNtfyTopicStore>();
+        services.AddSingleton<INtfyTopicStore>(provider => provider.GetRequiredService<DpapiNtfyTopicStore>());
+        services.AddSingleton<INtfyTopicConfigurationStatusProvider>(provider => provider.GetRequiredService<DpapiNtfyTopicStore>());
+        services.AddSingleton(new HttpClient { Timeout = TimeSpan.FromSeconds(15) });
+        services.AddSingleton<INtfyNotificationSender, NtfyNotificationSender>();
+        services.AddSingleton<INtfyTestNotificationService, NtfyTestNotificationService>();
         services.AddSingleton<ApplicationStateStore>();
         services.AddSingleton<ApplicationVersionProvider>();
         services.AddSingleton<TimeProvider>(TimeProvider.System);
@@ -235,6 +245,7 @@ public partial class App : System.Windows.Application
         StatusViewModel statusViewModel = provider.GetRequiredService<StatusViewModel>();
         statusViewModel.Initialize(settings, state);
         await statusViewModel.RefreshGmailAuthenticationStatusAsync(cancellationToken);
+        await statusViewModel.RefreshNtfyConfigurationStatusAsync(settings.NtfyNotificationEnabled, cancellationToken);
         LogInitializationCompleted(logger, null);
     }
 

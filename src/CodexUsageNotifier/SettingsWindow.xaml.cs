@@ -155,6 +155,70 @@ public partial class SettingsWindow : Window
         await viewModel.SendGmailTestMailAsync(CancellationToken.None);
     }
 
+    /// <summary>固定されたntfy公式サイトを既定ブラウザーで開きます。</summary>
+    private void OnOpenNtfyOfficialSite(object sender, RoutedEventArgs e) => OpenTrustedUri(PublicDocumentationLinks.NtfyOfficialSiteUri);
+
+    /// <summary>初回の秘密Topicを生成して安全なストアへ保存します。</summary>
+    private async void OnGenerateNtfyTopic(object sender, RoutedEventArgs e)
+    {
+        if (!viewModel.IsNtfyTopicConfigured)
+        {
+            await viewModel.GenerateNtfyTopicAsync(CancellationToken.None);
+        }
+    }
+
+    /// <summary>秘密Topicのマスク表示を利用者操作で切り替えます。</summary>
+    private void OnToggleNtfyTopic(object sender, RoutedEventArgs e) => viewModel.IsNtfyTopicVisible = !viewModel.IsNtfyTopicVisible;
+
+    /// <summary>秘密Topicをクリップボードへコピーします。</summary>
+    private void OnCopyNtfyTopic(object sender, RoutedEventArgs e)
+    {
+        if (viewModel.NtfyTopicValueForCopy is string topic)
+        {
+            System.Windows.Clipboard.SetText(topic);
+        }
+    }
+
+    /// <summary>確認後に旧Topicを無効化し、新しいTopicを生成します。</summary>
+    private async void OnRegenerateNtfyTopic(object sender, RoutedEventArgs e)
+    {
+        MessageBoxResult result = System.Windows.MessageBox.Show(this,
+            "Topicを再生成すると、以前のTopic向け通知と再試行は無効になります。ntfyアプリで新しいTopicを購読し直し、テスト後に通知を有効にしてください。続行しますか？",
+            "スマホ通知Topicの再生成", MessageBoxButton.YesNo, MessageBoxImage.Warning);
+        if (result == MessageBoxResult.Yes)
+        {
+            viewModel.NtfyNotificationEnabled = false;
+            await viewModel.GenerateNtfyTopicAsync(CancellationToken.None);
+        }
+    }
+
+    /// <summary>Android ntfyアプリの購読画面を秘密Topic付きディープリンクで開きます。</summary>
+    private void OnOpenNtfyAndroid(object sender, RoutedEventArgs e)
+    {
+        if (viewModel.NtfyAndroidDeepLink is string link)
+        {
+            OpenTrustedUri(new Uri(link, UriKind.Absolute));
+        }
+    }
+
+    /// <summary>本番状態を変更しないntfyテスト通知を送信します。</summary>
+    private async void OnSendNtfyTestNotification(object sender, RoutedEventArgs e) =>
+        await viewModel.SendNtfyTestNotificationAsync(CancellationToken.None);
+
+    /// <summary>コードで固定または安全に生成したURIをOSの既定ハンドラーで開きます。</summary>
+    private void OpenTrustedUri(Uri uri)
+    {
+        ArgumentNullException.ThrowIfNull(uri);
+        try
+        {
+            Process.Start(new ProcessStartInfo { FileName = uri.AbsoluteUri, UseShellExecute = true });
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or System.ComponentModel.Win32Exception)
+        {
+            System.Windows.MessageBox.Show(this, "リンクを開けませんでした。", "リンクエラー", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+    }
+
     /// <summary>
     /// 未保存変更を破棄して設定画面を隠します。
     /// </summary>

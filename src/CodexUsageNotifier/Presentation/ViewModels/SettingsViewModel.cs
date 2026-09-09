@@ -5,6 +5,7 @@ using System.Runtime.CompilerServices;
 using CodexUsageNotifier.Application.Abstractions;
 using CodexUsageNotifier.Application.State;
 using CodexUsageNotifier.Application.Gmail;
+using CodexUsageNotifier.Application.Ntfy;
 using CodexUsageNotifier.Domain.Models;
 using CodexUsageNotifier.Domain.Services;
 using CodexUsageNotifier.Application.Startup;
@@ -35,6 +36,9 @@ public sealed partial class SettingsViewModel : INotifyPropertyChanged
     private readonly IGmailTestMailSender gmailTestMailSender;
     private readonly TimeProvider timeProvider;
     private readonly ILogger<SettingsViewModel> logger;
+    private readonly INtfyTopicGenerator? ntfyTopicGenerator;
+    private readonly INtfyTopicStore? ntfyTopicStore;
+    private readonly INtfyTestNotificationService? ntfyTestNotificationService;
     private AppSettings baselineSettings = AppSettings.CreateDefault();
     private UsageSnapshot? observedSnapshot;
     private string baselineSignature = string.Empty;
@@ -58,6 +62,8 @@ public sealed partial class SettingsViewModel : INotifyPropertyChanged
     private string longWindowFinalWarningThresholdPercent = "10";
     private bool longWindowResetCompletedEnabled;
     private bool gmailNotificationEnabled;
+    private bool ntfyNotificationEnabled;
+    private string ntfyNotificationError = string.Empty;
     private string gmailRecipient = string.Empty;
     private int resetInferenceUsageDropPoints = 50;
     private bool hasUnsavedChanges;
@@ -99,7 +105,10 @@ public sealed partial class SettingsViewModel : INotifyPropertyChanged
         IGmailAuthenticationService gmailAuthenticationService,
         IGmailTestMailSender gmailTestMailSender,
         TimeProvider timeProvider,
-        ILogger<SettingsViewModel> logger)
+        ILogger<SettingsViewModel> logger,
+        INtfyTopicGenerator? ntfyTopicGenerator = null,
+        INtfyTopicStore? ntfyTopicStore = null,
+        INtfyTestNotificationService? ntfyTestNotificationService = null)
     {
         ArgumentNullException.ThrowIfNull(settingsRepository);
         ArgumentNullException.ThrowIfNull(autoStartManager);
@@ -119,6 +128,9 @@ public sealed partial class SettingsViewModel : INotifyPropertyChanged
         this.gmailTestMailSender = gmailTestMailSender;
         this.timeProvider = timeProvider;
         this.logger = logger;
+        this.ntfyTopicGenerator = ntfyTopicGenerator;
+        this.ntfyTopicStore = ntfyTopicStore;
+        this.ntfyTestNotificationService = ntfyTestNotificationService;
     }
 
     /// <summary>
@@ -315,6 +327,20 @@ public sealed partial class SettingsViewModel : INotifyPropertyChanged
         set => SetEditableProperty(ref gmailNotificationEnabled, value);
     }
 
+    /// <summary>匿名ntfyによるスマホ通知を有効にする設定値を取得または設定します。</summary>
+    public bool NtfyNotificationEnabled
+    {
+        get => ntfyNotificationEnabled;
+        set => SetEditableProperty(ref ntfyNotificationEnabled, value);
+    }
+
+    /// <summary>スマホ通知有効化に関する入力エラーを取得します。</summary>
+    public string NtfyNotificationError
+    {
+        get => ntfyNotificationError;
+        private set => SetProperty(ref ntfyNotificationError, value);
+    }
+
     /// <summary>
     /// Gmail通知の送信先メールアドレスを取得または設定します。
     /// </summary>
@@ -373,6 +399,7 @@ public sealed partial class SettingsViewModel : INotifyPropertyChanged
             {
                 UpdateCanSave();
                 UpdateGmailActionAvailability();
+                RaiseNtfyProperties();
             }
         }
     }
@@ -462,6 +489,7 @@ public sealed partial class SettingsViewModel : INotifyPropertyChanged
             observedSnapshot = state.LastUsageSnapshot;
             ApplySettings(settings);
             await RefreshGmailStatusAsync(cancellationToken);
+            await RefreshNtfyTopicAsync(cancellationToken);
             await RefreshAutoStartStatusAsync(settings.AutoStartEnabled, cancellationToken);
             baselineSignature = CaptureEditSignature();
             ValidateAndTrackChanges();
@@ -659,6 +687,7 @@ public sealed partial class SettingsViewModel : INotifyPropertyChanged
             LongWindowResetCompletedEnabled = defaults.LongWindowResetCompletedEnabled,
             ResetInferenceUsageDropPoints = defaults.ResetInferenceUsageDropPoints,
             GmailNotificationEnabled = false,
+            NtfyNotificationEnabled = false,
             GmailRecipient = defaults.GmailRecipient,
         };
         ApplySettings(restored);
@@ -693,6 +722,7 @@ public sealed partial class SettingsViewModel : INotifyPropertyChanged
         LongWindowFinalWarningThresholdPercent = settings.LongWindowFinalWarningThresholdPercent.ToString(CultureInfo.InvariantCulture);
         LongWindowResetCompletedEnabled = settings.LongWindowResetCompletedEnabled;
         GmailNotificationEnabled = settings.GmailNotificationEnabled;
+        NtfyNotificationEnabled = settings.NtfyNotificationEnabled;
         GmailRecipient = settings.GmailRecipient ?? string.Empty;
         resetInferenceUsageDropPoints = settings.ResetInferenceUsageDropPoints;
         isApplyingValues = false;
@@ -750,6 +780,9 @@ public sealed partial class SettingsViewModel : INotifyPropertyChanged
         GmailNotificationError = GmailNotificationEnabled && !CanEnableGmailNotification
             ? "Gmail通知は、Googleアカウント認証済みかつ有効な送信先がある場合だけ有効にできます。"
             : string.Empty;
+        NtfyNotificationError = NtfyNotificationEnabled && !IsNtfyTopicConfigured
+            ? "スマホ通知を有効にする前に、秘密Topicを生成してください。"
+            : string.Empty;
 
         HasUnsavedChanges = !string.Equals(
             baselineSignature,
@@ -781,6 +814,7 @@ public sealed partial class SettingsViewModel : INotifyPropertyChanged
             FinalThresholdError,
             GmailNotificationError,
             GmailRecipientError,
+            NtfyNotificationError,
         }.Any(value => !string.IsNullOrEmpty(value));
         CanSave = HasUnsavedChanges && !hasErrors && !IsBusy;
     }
@@ -832,6 +866,7 @@ public sealed partial class SettingsViewModel : INotifyPropertyChanged
             LongWindowResetCompletedEnabled = LongWindowResetCompletedEnabled,
             ResetInferenceUsageDropPoints = resetInferenceUsageDropPoints,
             GmailNotificationEnabled = GmailNotificationEnabled,
+            NtfyNotificationEnabled = NtfyNotificationEnabled,
             GmailRecipient = string.IsNullOrWhiteSpace(GmailRecipient) ? null : GmailRecipient.Trim(),
         };
         return settings.IsValid();
@@ -914,6 +949,7 @@ public sealed partial class SettingsViewModel : INotifyPropertyChanged
             LongWindowFinalWarningThresholdPercent,
             LongWindowResetCompletedEnabled,
             GmailNotificationEnabled,
+            NtfyNotificationEnabled,
             GmailRecipient,
             resetInferenceUsageDropPoints);
     }
