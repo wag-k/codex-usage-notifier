@@ -1,6 +1,6 @@
 # Codex Usage Notifier
 
-Codex App Serverが返す任意の利用枠をWindows上で観測し、利用枠の期間と状態に応じてWindowsとGmailへ通知する常駐アプリです。
+Codex App Serverが返す任意の利用枠をWindows上で観測し、利用枠の期間と状態に応じてWindows、Gmail、または匿名ntfyへ通知する常駐アプリです。
 
 短期枠の回復と、長期枠のリセット前に残量が多い状態、および長期枠の新しい利用期間の開始を見逃さず、必要な開発作業を適切なタイミングで計画できるようにすることを目的とします。
 
@@ -11,7 +11,7 @@ Codex App Serverが返す任意の利用枠をWindows上で観測し、利用枠
 > [!WARNING]
 > 現在は初回Public Betaです。MIT Licenseで無償公開しますが、コード署名、インストーラー、自動更新は未実装です。配布ZIPとSHA-256を確認し、内容を理解したうえで利用してください。
 
-Gmail通知は任意です。GoogleアカウントやGoogle Cloudを設定しなくても、Windows通知だけでCodex Usage Notifierを利用できます。Gmailを使う場合、現在の公開版では利用者自身のデスクトップアプリ用OAuthクライアントが必要です。
+Gmail通知とntfyスマホ通知は任意です。外部通知を設定しなくても、Windows通知だけでCodex Usage Notifierを利用できます。Gmailを使う場合は利用者自身のデスクトップアプリ用OAuthクライアントが必要です。ntfyはアカウント不要で利用できます。
 
 ## スクリーンショット
 
@@ -29,6 +29,7 @@ Gmail通知は任意です。GoogleアカウントやGoogle Cloudを設定しな
 - Weeklyなどの長期枠で、リセット前に残量が多いときに段階通知
 - 長期枠のリセット後に再取得し、新しい利用期間の開始を確認して通知
 - Windows通知に対応し、任意でGmail OAuth認証、Gmail APIテスト送信、およびGmail本番通知を利用可能
+- アカウント不要の匿名ntfyでAndroid／iPhoneへスマホ通知を配送
 - PC起動時・スリープ復帰時にも利用枠を確認
 - 同じリセット期間・通知種別・通知段階についての重複通知を防止
 - 深夜の通知を保留し、通知可能時刻に再取得・再判定
@@ -125,7 +126,9 @@ Codex週間枠のリセットが近づいています
 - Windows通知失敗の5分間隔・最大3回再試行と、古い送信中状態の回復
 - Early／Standard／Finalを重複しない時間帯として判定
 - 24時間を超えた保留と現在期間に一致しない保留を期限切れとして除外
-- WindowsとGmailの配送状態を独立して保持し、成功済みチャネルへ再送しない
+- Windows、Gmail、ntfyの配送状態を独立して保持し、成功済みチャネルへ再送しない
+- 匿名ntfyを第三の独立チャネルとして追加し、同一取得候補を1件へ集約、Quiet Hours保留・5分後1回再試行・再起動復旧に対応
+- 160ビット乱数の秘密TopicをDPAPI CurrentUserで保護し、既定マスク、コピー、再生成、Android購読リンク、状態を汚さないテスト通知を提供
 - `resetsAt`なしの短期枠回復連番と長期枠の`UsageDropInference`を状態保存
 - 状態を変更しない6種類のテスト通知をタスクトレイから個別送信
 - タスクトレイと状態画面から開けるWPF設定画面
@@ -147,7 +150,7 @@ Codex週間枠のリセットが近づいています
 - Gmail 403を権限不足、API未有効化、未知の恒久拒否へ分類し、権限不足だけを再認証へ移行
 - 一時的なGmail認証状態取得エラーでは配送境界を進めず、通知を回復後の配送対象として維持
 - Windowsユーザー固有LocalAppDataの`instance.lock`を排他保持し、ログオンセッションをまたぐ二重起動を防止
-- 状態画面へGmail通知設定、OAuth認証、認証アカウント、Windows／Gmail別の最終通知を表示
+- 状態画面へGmail通知設定、OAuth認証、認証アカウント、ntfyの未設定・設定済み・有効状態、Windows／Gmail／ntfy別の最終通知を表示
 - CurrentUserのRunキーによる管理者権限不要のWindows自動起動、設定との起動時同期、設定画面のOS登録状態表示
 - 取得単位JSONLの90日保持、破損行保持、追記との排他、保守後のobservedKeys再構築
 - 履歴Readerを追記・保守と同じ排他へ統合し、破損行を読み飛ばして使用率推移を安全に取得
@@ -198,6 +201,7 @@ CodexUsageNotifier.sln
 │     ├─ Application/
 │     │  ├─ Maintenance/
 │     │  ├─ Monitoring/
+│     │  ├─ Ntfy/
 │     │  ├─ Notifications/
 │     │  └─ Startup/
 │     ├─ Domain/
@@ -207,6 +211,7 @@ CodexUsageNotifier.sln
 │     │  ├─ Codex/
 │     │  ├─ Gmail/
 │     │  ├─ Logging/
+│     │  ├─ Ntfy/
 │     │  ├─ Persistence/
 │     │  ├─ Startup/
 │     │  └─ WindowsNotifications/
@@ -290,7 +295,7 @@ CodexUsageNotifier.sln
 - 最終取得時刻
 - 監視状態
 - Gmail通知の有効・無効、OAuth認証状態、認証済みアカウント
-- WindowsとGmailそれぞれの最後の通知結果
+- Windows、Gmail、ntfyそれぞれの最後の通知結果
 - 5時間枠と週間枠の使用率推移グラフ
 
 使用率推移グラフは、既存の`usage-history.jsonl`を一度だけ非同期に読み込み、24時間、7日（既定）、30日、90日を画面上で切り替えます。縦軸は使用率0～100%固定で、5時間枠を緑の破線、週間枠を青の実線として表示します。Unknown枠はグラフ対象外です。観測間隔が補助確認間隔の2倍を超える区間は線を接続せず、未観測を0%として補完しません。マウスを合わせると取得時刻、使用率、残量、リセット時刻を確認できます。履歴がない場合、選択期間に点がない場合、または読み込みに失敗した場合も、状態画面と監視処理は継続します。
@@ -307,11 +312,12 @@ CodexUsageNotifier.sln
 ├─ usage-history.jsonl
 ├─ auth\
 │  ├─ google-oauth-client.json
-│  └─ google-oauth-credentials.dat
+│  ├─ google-oauth-credentials.dat
+│  └─ ntfy-topic.dat
 └─ logs\
 ```
 
-`google-oauth-client.json`は利用者がGoogle Cloud Consoleから取得したデスクトップアプリ設定です。トークンを含む`google-oauth-credentials.dat`はスキーマバージョン付きの内容全体をWindows DPAPIの`CurrentUser`スコープで暗号化します。別のWindowsユーザーでは復号できず、アクセストークン、リフレッシュトークン、IDトークンを平文保存しません。両ファイルともGit管理対象外です。
+`google-oauth-client.json`は利用者がGoogle Cloud Consoleから取得したデスクトップアプリ設定です。トークンを含む`google-oauth-credentials.dat`と秘密ntfy Topicを含む`ntfy-topic.dat`は、スキーマバージョン付きの内容全体をWindows DPAPIの`CurrentUser`スコープで暗号化します。別のWindowsユーザーでは復号できず、アクセストークン、リフレッシュトークン、IDトークン、ntfy Topicを平文保存しません。これらのファイルはGit管理対象外です。
 
 `state.json`はSchemaVersionを読み込み前に検証します。現在版と同じ場合は通常読込、古い対応済み版は1段階ずつmigrationし、現在版より新しい場合は元の内容・配置・更新日時を変更せずに起動を中止します。新しいアプリで作成した状態を保持したまま古いアプリへロールバックすると起動できない場合があります。状態ファイルを古い形式へ書き戻さず、新しいCodex Usage Notifierを使用してください。
 
@@ -557,6 +563,29 @@ LimitId: codex
 8. 次回取得で成功済み候補が再送されないことを確認します。
 9. 通知禁止時間中は送信されず、終了後の再取得時に有効条件を再評価することを確認します。
 10. 自然な一時障害が発生した場合は、初回失敗から60分後以降の正常取得で1回だけ再試行されることをログと`state.json`で確認します。この自然条件を意図的に発生させることは公開前確認の完了条件には含めません。
+
+## スマホ通知（匿名ntfy）
+
+ntfyの公開サービス `https://ntfy.sh/` を利用し、アカウントを作らずにAndroidまたはiPhoneへ通知できます。Gmailと同様に任意機能であり、設定しなくてもWindows通知は継続します。セルフホストサーバー、ntfyアカウント、アクセストークン認証には現在対応していません。
+
+設定画面の「スマホ通知（ntfy）」で次の順に設定します。
+
+1. [ntfy公式サイト](https://ntfy.sh/)から端末用アプリをインストールする。
+2. 「生成」で推測困難な秘密Topicを作り、必要な場合だけ表示またはコピーする。
+3. 端末のntfyアプリで、サーバー`ntfy.sh`の生成済みTopicを購読する。Androidではアプリ内ボタンから購読用ディープリンクも開けます。
+4. テスト通知を送信して端末で受信を確認し、「スマホ通知を有効にする」を保存する。
+
+テスト成功はntfy.shがHTTP要求を受理したことを表し、端末での表示やプッシュ受信を保証するものではありません。端末側の通知権限、省電力設定、購読Topicも確認してください。
+
+Topicは160ビットの暗号学的乱数から生成し、`%LOCALAPPDATA%\CodexUsageNotifier\auth\ntfy-topic.dat`へWindows DPAPI `CurrentUser`で暗号化して保存します。`settings.json`、`state.json`、ログ、Git、Release ZIPには平文Topicを保存しません。Topicを知る人は通知を購読できるため、パスワードと同様に扱ってください。再生成すると旧Topic向けの保留・再試行は失効し、新しいTopicを購読してテスト後に通知を有効化する必要があります。
+
+送信する情報は利用枠の通知種別・段階、残量、次回リセット、LimitId、Position、Classification、期間、条件成立時刻、リセット完了判定理由です。Codexのプロンプト、会話、ソースコード、OAuth情報は送信しません。HTTP要求はTopicをURLに含めず、`https://ntfy.sh/`へJSONでPOSTします。
+
+Windows、Gmail、ntfyは独立した配送チャネルです。共通の通知禁止時間中はntfyも保留し、解除後の正常取得で条件を再判定します。一時的なネットワーク障害、タイムアウト、HTTP 408／429／5xxだけを5分後以降の正常監視で1回再試行します。専用の短時間タイマーは追加しません。その他の4xxや不正Topicは恒久失敗として自動再試行しません。通知候補が複数ある場合は1件のntfy通知へ集約します。
+
+スマホ通知の詳しい操作と確認項目は[匿名ntfyスマホ通知の設定](./docs/ntfy-setup.md)を参照してください。
+
+実端末では、自然に成立した短期枠回復、週間枠のEarly／Standard／Final／リセット完了、および監視障害について、通知タイトル、週間枠残量、次回リセット日時と、通知を開いた後の詳細を確認します。Quiet Hours、Topic再生成、通知無効化も端末で確認します。実際の利用枠を消費して通知を意図的に発生させることは完了条件に含めません。
 
 ## エラー処理
 

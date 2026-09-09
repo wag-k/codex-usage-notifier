@@ -7,10 +7,10 @@
 | 文書名 | Codex Usage Notifier 仕様書 |
 | 対象バージョン | 初版（MVP） |
 | 作成日 | 2026-08-04 |
-| 最終更新日 | 2026-09-04（予定時刻前の長期枠リセット検出） |
+| 最終更新日 | 2026-09-09（匿名ntfyスマホ通知） |
 | 対象OS | Windows 11 |
 | 開発基盤 | .NET 8 / WPF |
-| 主目的 | 任意のCodex利用枠を監視し、期間に応じた回復・リセット前・リセット完了をWindowsとGmailへ通知する |
+| 主目的 | 任意のCodex利用枠を監視し、期間に応じた回復・リセット前・リセット完了をWindows、Gmail、匿名ntfyへ通知する |
 
 ## 2. 背景
 
@@ -62,12 +62,12 @@ Codexの利用枠が回復していても、または長期枠のリセットが
 │                           │
 │  ┌─────────────────────┐  │
 │  │ Notification Policy │  │
-│  └───────┬───────┬─────┘  │
-│          │       │         │
-│  ┌───────▼───┐ ┌─▼──────┐ │
-│  │ Windows   │ │ Gmail  │ │
-│  │ Notifier  │ │ Sender │ │
-│  └───────────┘ └────────┘ │
+│  └─────┬──────┬──────┬────┘  │
+│        │      │      │       │
+│  ┌─────▼──┐ ┌─▼────┐ ┌▼────┐│
+│  │Windows │ │Gmail │ │ntfy ││
+│  │Notifier│ │Sender│ │Sender││
+│  └────────┘ └──────┘ └─────┘│
 │                           │
 │  ┌─────────────────────┐  │
 │  │ Local Persistence   │  │
@@ -199,6 +199,7 @@ Phase 4BはGoogle認証と設定画面からのテストメール送信を提供
 - 現在残量と次回リセット時刻の表示
 - Windows通知
 - Gmail通知
+- アカウント不要の匿名ntfyスマホ通知
 - 短期枠の回復通知
 - 長期枠の段階的なリセット前通知
 - 長期枠の再取得確認後のリセット完了通知
@@ -354,7 +355,7 @@ Windows通知とGmail通知の短期回復本文には、配送判断に使用�
 - 通知種別
 - 通知段階
 
-通知種別には少なくとも`ShortWindowRecovered`、`LongWindowEarlyWarning`、`LongWindowStandardWarning`、`LongWindowFinalWarning`、`LongWindowResetCompleted`、`NewRateLimitDetected`、`MonitoringFailure`を表現できるようにする。同じリセット期間において、同じ通知種別と通知段階をWindowsとGmailへそれぞれ最大1回送る。
+通知種別には少なくとも`ShortWindowRecovered`、`LongWindowEarlyWarning`、`LongWindowStandardWarning`、`LongWindowFinalWarning`、`LongWindowResetCompleted`、`NewRateLimitDetected`、`MonitoringFailure`を表現できるようにする。同じリセット期間において、同じ通知種別と通知段階をWindows、Gmail、ntfyへそれぞれ最大1回送る。
 
 送信失敗した通知先は、チャネルごとの`AttemptCount`、`LastAttemptedAtUtc`、`NextRetryAtUtc`を保持する。Windows通知は5分間隔・最大3回で再送し、送信前に保存した`InProgress`が5分以上残っている場合は中断された試行として次の正常取得時に再試行可能な状態へ戻す。Gmailは一時障害だけを初回失敗から60分後以降の次回正常取得で1回再試行し、初回と合わせて最大2回とする。Gmailの`InProgress`が60分以上残った場合も試行回数を巻き戻さず、最大2回の範囲で回復する。WindowsとGmailは候補を共有するが配送状態を独立して評価し、一方が未送信でも成功済みの他方へ再送しない。
 
@@ -633,7 +634,7 @@ Phase 4Bでは、OAuthクライアント設定の状態と標準配置先、認�
 - 利用枠・リセット期間・通知種別・通知段階ごとの通知状態
 - 利用枠ごとの閾値未満状態、直近残量、低下後の最小残量、回復連番
 - 長期枠リセット完了の判定理由
-- Windows通知とGmail通知それぞれの送信結果
+- Windows通知、Gmail通知、ntfy通知それぞれの送信結果
 - Phase 4Cの本番Gmail配送開始時刻`GmailProductionDeliveryStartedAtUtc`
 - 現在のGmail配送有効期間の開始時刻`GmailDeliveryEnabledSinceUtc`
 - Gmailの再試行可否を示す安全な失敗分類と、直近のGmail有効・認証利用可能状態
@@ -749,6 +750,29 @@ Weeklyなどの長期枠について、新しい利用期間の開始を`LongWin
 15. 履歴なし、選択期間内のデータなし、読み込み中、読み込み失敗を色だけに依存しない日本語で表示する。
 16. 履歴読み込み失敗は非致命とし、Codex監視、Windows通知、Gmail通知を継続する。
 
+### FR-025 匿名ntfyスマホ通知
+
+1. 公開サーバー`https://ntfy.sh/`へ、アカウント認証なしでスマホ通知を送信できる。
+2. セルフホストサーバー、ntfyアカウント、アクセストークン認証は対象外とする。
+3. Topicは暗号学的乱数生成器で128ビット以上のエントロピーを持つ安全な文字列として生成し、64文字以内とする。
+4. Topic本体は`settings.json`、`state.json`、ログ、例外、Release成果物へ平文保存しない。`%LOCALAPPDATA%\CodexUsageNotifier\auth\ntfy-topic.dat`へDPAPI `CurrentUser`で暗号化し、一時ファイルから原子的に置換する。
+5. Topicは画面で既定マスクし、利用者操作による表示、コピー、再生成を提供する。Topicを知る第三者が購読可能であることを明示する。
+6. 設定画面はアプリ導入、Topic生成、購読、テスト通知の4段階を示す。Android購読ディープリンクは表示層の専用生成処理へ分離する。QRコードは必須としない。
+7. テスト通知成功はntfy.shのHTTP受理を表し、端末到達を保証しない。本番通知状態、回復連番、履歴を変更しない。
+8. 本番通知はShortWindowRecovered、Early、Standard、Final、ResetCompleted、MonitoringFailureを対象とし、Windows/Gmailと独立して成功・失敗・再試行を管理する。
+9. タイトルに通知目的と残量を含め、本文先頭に次回リセットをローカル時刻・分精度で置く。本文には通知種別・段階、残量、LimitId、Position、Classification、期間、条件成立時刻、残り時間、完了判定理由を可能な範囲で含める。
+10. 同一取得の複数候補は1件のntfy通知へ集約する。短期回復では同じ正常取得の週間枠残量を補助表示し、未観測を0%として扱わない。
+11. HTTPは`https://ntfy.sh/`のルートへ`Content-Type: application/json`でPOSTし、JSONに`topic`、`title`、`message`、`priority: 3`を含める。TopicをURLへ含めず、payloadをログへ出力しない。
+12. `HttpClient`はDIでアプリ生存中再利用し、タイムアウトと`CancellationToken`を適用する。追加NuGetパッケージは導入しない。
+13. 一時ネットワーク障害、タイムアウト、HTTP 408、429、5xxだけを再試行する。それ以外の4xxとTopic不備は恒久失敗とする。
+14. 最大試行回数は初回と5分後以降の再試行1回の合計2回とする。専用再試行タイマーは設けず、次の正常取得を契機にする。
+15. 古い`InProgress`は5分後に試行回数を維持して再試行可能状態へ戻す。短期枠の閾値低下、警告段階の進行、利用期間の変化、24時間超過、Topic世代の変化では古い候補を`Expired`にする。
+16. 共通Quiet Hours中はntfyを送らず、試行回数を増やさない。終了後の正常取得で候補の有効性を再判定する。
+17. `NtfyNotificationEnabled`の初期値はfalseとし、Topic未生成では有効設定を保存できない。falseからtrueまたはTopic再生成を新しい配送境界とし、それ以前の候補を後送しない。
+18. Topic再生成は旧Topic世代の保留・再試行を即時に無効化し、通知設定をfalseへ戻す。利用者は新Topicを購読し、テスト後に再度有効化する。
+19. 状態画面にntfyの有効状態と直近配送結果を表示する。失敗はCodex監視、Windows、Gmailを停止させない。
+20. ntfyへ送るのは利用枠通知情報だけとし、プロンプト、会話、ソースコード、OAuth情報を含めない。
+
 ## 7. 非機能要件
 
 ### NFR-001 信頼性
@@ -772,6 +796,7 @@ Weeklyなどの長期枠について、新しい利用期間の開始を`LongWin
 - OAuthトークンはDPAPI CurrentUserで暗号化し、平文ファイルデータストアを使用しない。
 - OAuthクライアント設定、認証情報、および実トークン値をGit追跡対象にしない。
 - 認証情報をViewModel、`AppSettings`、画面表示用モデルへ露出しない。
+- 匿名ntfy TopicをDPAPI CurrentUserで保護し、平文を設定、状態、ログ、例外、Release成果物へ含めない。
 
 ### NFR-003 性能
 
@@ -785,7 +810,7 @@ Weeklyなどの長期枠について、新しい利用期間の開始を`LongWin
 
 ### NFR-004 保守性
 
-- Codex通信、通知判定、Windows通知、Gmail通知、永続化を分離する。
+- Codex通信、通知判定、Windows通知、Gmail通知、ntfy通知、永続化を分離する。
 - 外部サービスはインターフェース越しに利用する。
 - 各クラス、メソッド、プロパティに日本語コメントを付ける。
 - 公開APIと複雑な判定処理には、目的と前提条件をコメントする。
@@ -856,12 +881,20 @@ Weeklyなどの長期枠について、新しい利用期間の開始を`LongWin
 | GmailLastAttemptedAtUtc | DateTimeOffset? | Gmail通知の最終送信試行時刻 |
 | GmailNextRetryAtUtc | DateTimeOffset? | Gmail通知の次回再試行時刻 |
 | GmailFailureKind | GmailDeliveryFailureKind | None、Transient、Authentication、Permanent、Interruptedの安全な失敗分類 |
+| NtfyDeliveryStatus | DeliveryStatus | ntfy通知状態 |
+| NtfyAttemptCount | int | ntfy通知の累計送信試行回数。最大2 |
+| NtfyLastAttemptedAtUtc | DateTimeOffset? | ntfy通知の最終送信試行時刻 |
+| NtfyNextRetryAtUtc | DateTimeOffset? | 一時障害時の5分後以降の再試行時刻 |
+| NtfyFailureKind | NtfyDeliveryFailureKind | None、Transient、Permanent、Interruptedの安全な失敗分類 |
+| NtfyTopicGenerationId | string? | Topic再生成を検出する非秘密の世代ID。Topic本体ではない |
 | DeferredUntilUtc | DateTimeOffset? | 保留終了時刻 |
 | ResetCompletionReason | ResetCompletionReason? | ResetTimeAdvancedまたはUsageDropInference |
 
-永続化キーはLimitId、Position、WindowDurationMinutes、RecoveryWindowId、NotificationType、NotificationStageの組み合わせとする。送信先ごとの成功・失敗を別々に保持し、一方の失敗によって成功済みの送信先へ重複送信しない。
+永続化キーはLimitId、Position、WindowDurationMinutes、RecoveryWindowId、NotificationType、NotificationStageの組み合わせとする。Windows、Gmail、ntfyの成功・失敗を別々に保持し、一方の失敗によって成功済みの送信先へ重複送信しない。
 
 `ApplicationState`はこれらの候補別状態とは別に、`GmailProductionDeliveryStartedAtUtc: DateTimeOffset?`と`GmailDeliveryEnabledSinceUtc: DateTimeOffset?`を保持する。前者は初回Phase 4C起動時だけ現在UTC時刻を設定し、後者はGmailのfalseからtrueへの変更または再認証成功時に更新する。Phase 4B以前、Gmail無効期間、認証失効・認証解除期間の通知は、保存済み`ConditionMetAtUtc`がいずれかの境界より前なら本番配送しない。設定と認証状態の変化を次の正常取得でも検出できるよう、直近のGmail有効状態と認証利用可否を機密情報を含まない状態として保存する。
+
+ntfyについては`NtfyDeliveryEnabledSinceUtc`、`NtfyDeliveryEnabledLastObserved`、`NtfyTopicGenerationId`と直近配送結果を`ApplicationState`へ保存する。`NtfyTopicGenerationId`はTopic本体を含まない世代識別子であり、再生成前や無効期間に成立した候補を新Topicへ後送しないために使用する。監視障害通知についても送信済み、試行回数、最終試行時刻、次回再試行時刻、失敗分類を保持する。Version 5ではVersion 4からこれらを未設定・未試行値で追加する。
 
 ### 8.4 RateLimitRecoveryState
 
@@ -919,6 +952,7 @@ Weeklyなどの長期枠について、新しい利用期間の開始を`LongWin
 | WindowsNotificationEnabled | true |
 | GmailNotificationEnabled | false。認証済みかつGmailRecipientが有効な場合だけtrueを保存可能。本番配送と再試行はPhase 4C-1／4C-2で実装済み |
 | GmailRecipient | null。入力時はメールアドレス形式 |
+| NtfyNotificationEnabled | false。DPAPI保護Topicが存在する場合だけtrueを保存可能 |
 | QuietHoursEnabled | true |
 | QuietHoursStart | 00:00 |
 | QuietHoursEnd | 07:00 |
@@ -995,7 +1029,8 @@ Weeklyなどの長期枠について、新しい利用期間の開始を`LongWin
    └─ 通知可能
           ├─ Windows未送信・再試行可能候補を1件のバルーンへ集約
           ├─ Gmail開始境界以降の未試行候補を1通のメールへ集約
-          ├─ WindowsとGmailを独立して配送
+          ├─ ntfy開始境界以降の未試行候補を1件へ集約
+          ├─ Windows、Gmail、ntfyを独立して配送
           └─ 候補ごとのチャネル別結果を状態保存
 
 通知禁止時間終了
@@ -1003,7 +1038,7 @@ Weeklyなどの長期枠について、新しい利用期間の開始を`LongWin
    ├─ 利用枠を再取得
    ├─ リセット前通知は段階の期限と残量を再判定
    ├─ 期限切れのリセット前通知は未送信チャネルをExpiredへ変更
-   └─ リセット完了通知は新しい期間を確認してからWindows／Gmailへ配送
+   └─ リセット完了通知は新しい期間を確認してからWindows／Gmail／ntfyへ配送
 ```
 
 ## 10. 受け入れ条件
@@ -1334,6 +1369,21 @@ Weeklyなどの長期枠について、新しい利用期間の開始を`LongWin
 - 履歴読み取りと追記・保守を同じ排他で直列化し、読み取りによってJSONLを変更しない。
 - 使用率推移追加によってstate/settings/usage-historyのschema、通知判定、Windows／Gmail配送状態が変化しない。
 
+### AC-040 匿名ntfyスマホ通知
+
+- アカウントなしで安全なTopicを生成し、既定マスク、表示、コピー、再生成を操作できる。
+- Topicは128ビット以上のエントロピー、安全な文字、64文字以内を満たし、settings/state/log/Releaseへ平文保存されない。
+- DPAPI CurrentUser保護ファイルを同一ユーザーで読み戻せ、破損時も監視を停止しない。
+- `https://ntfy.sh/`ルートへTopicをURLに含めず、JSONのtopic/title/message/priority=3をPOSTできる。
+- 5種の利用枠通知でタイトルに用途と残量、本文先頭に次回リセット、本文にGmail相当の利用枠詳細を含められる。
+- 2xxを成功、408/429/5xx、タイムアウト、ネットワーク障害を一時失敗、それ以外の4xxと不正Topicを恒久失敗に分類できる。
+- 初回失敗から5分後以降に1回だけ再試行し、合計2回を超えない。古いInProgressを再起動後に回復できる。
+- Quiet Hours中は試行回数を増やさず、終了後に有効な候補だけを配送する。
+- Topic再生成前、無効期間、期限切れ段階、無効な回復・期間の通知を後送しない。
+- Windows、Gmail、ntfyの配送成功・失敗・再試行が相互の状態を変更しない。
+- テスト通知はHTTP受理と端末到達を区別し、本番通知状態、回復連番、履歴を変更しない。
+- 設定画面に4段階の導入手順とプライバシー説明、状態画面に有効状態と直近結果を表示できる。
+
 ## 11. 単体テスト対象
 
 最低限、次を単体テストする。
@@ -1523,6 +1573,16 @@ Weeklyなどの長期枠について、新しい利用期間の開始を`LongWin
 183. 同じ新しいリセット期間の通知済み状態による重複候補抑止
 184. 再起動後に保存済みの同じ新期間を取得した場合の重複候補抑止
 185. 予定時刻前のリセットをQuiet Hours中に検出した場合の保留、終了後送信、および重複抑止
+186. ntfy Topicの暗号学的生成、重複、文字種、長さ、エントロピー
+187. DPAPI保護Topicの保存・読込・非平文・破損耐性
+188. 全5通知種別のntfyタイトル、本文先頭の次回リセット、詳細情報
+189. ntfy HTTPルートPOST、JSON Content-Type、topic/title/message/priority=3、およびTopic非URL化
+190. HTTP 2xx、400、401、404、408、429、5xx、タイムアウト、ネットワーク障害の分類
+191. Windows、Gmail、ntfyの各有効・無効、部分成功、成功済みチャネル非再送
+192. Quiet Hours保留・解除・期限切れ、5分再試行、最大2回、古いInProgress復旧
+193. Topic再生成による旧候補失効と新Topic切替
+194. ntfyテスト通知による本番状態・回復連番・履歴の非変更
+195. Topic未生成時の有効化抑止、既定マスク、表示・コピー・再生成、状態カード表示
 
 ## 12. 実装上の設計方針
 
@@ -1544,6 +1604,11 @@ IGmailApiClient
 IGoogleGmailMessageGateway
 IGmailMimeMessageFactory
 IGmailTestMailSender
+INtfyTopicGenerator
+INtfyTopicStore
+INtfyTopicConfigurationStatusProvider
+INtfyNotificationSender
+INtfyTestNotificationService
 IUsageHistoryRepository
 IUsageHistoryReader
 IUsageHistoryMaintenance
@@ -1851,6 +1916,18 @@ Phase 5Cは表示と利用者向け文書だけを対象とする。state/settin
 - 正常取得スナップショットの即時反映と重複抑止
 
 Phase 5Dは既存履歴の参照と状態画面表示だけを対象とする。NuGet chart libraryを追加せず、state/settings/usage-history schema、履歴保持期間、通知判定、Windows／Gmail配送、およびRelease workflowは変更しない。
+
+### Phase 5E：匿名ntfyスマホ通知
+
+- アカウント不要の公開ntfy.sh向けオンボーディング
+- 160ビットの暗号学的乱数TopicとDPAPI CurrentUser保護ストア
+- Topicの既定マスク、表示、コピー、再生成、Android購読ディープリンク
+- 状態を変更しないテスト通知と、本番候補のntfy集約配送
+- Windows／Gmailと独立した候補別状態、Quiet Hours、5分後1回再試行、再起動復旧
+- Topic再生成・無効期間・候補期限切れによる古い通知の後送防止
+- 状態画面の有効状態と直近配送結果
+
+Phase 5Eではセルフホストntfy、ntfyアカウント・トークン認証、QRコード、専用スマートフォンアプリを実装しない。既存のCodex取得、通知判定、Windows/Gmail配送、OAuth、履歴形式、保持期間は変更しない。
 
 ## 16. 未決事項
 
