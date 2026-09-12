@@ -10,6 +10,14 @@ namespace CodexUsageNotifier.Tests.Infrastructure.Ntfy;
 [TestClass]
 public sealed class NtfyNotificationSenderTests
 {
+    /// <summary>ntfy送信のためだけに配布環境でHttp.Jsonを追加ロードしないことを検証します。</summary>
+    [TestMethod]
+    public void SenderAssembly_DoesNotRequireHttpJson()
+    {
+        Assert.IsFalse(typeof(NtfyNotificationSender).Assembly.GetReferencedAssemblies()
+            .Any(assembly => assembly.Name == "System.Net.Http.Json"));
+    }
+
     /// <summary>TopicをURLへ含めず、ルートへpriority 3のJSONをPOSTすることを検証します。</summary>
     [TestMethod]
     public async Task SendAsync_ValidMessage_PostsJsonToRoot()
@@ -22,6 +30,7 @@ public sealed class NtfyNotificationSenderTests
         Assert.AreEqual(new Uri("https://ntfy.sh/"), handler.RequestUri);
         Assert.AreEqual(HttpMethod.Post, handler.Method);
         Assert.AreEqual("application/json", handler.ContentType);
+        Assert.AreEqual("utf-8", handler.CharSet);
         using JsonDocument json = JsonDocument.Parse(handler.Body!);
         Assert.AreEqual("secret-topic", json.RootElement.GetProperty("topic").GetString());
         Assert.AreEqual("週間枠", json.RootElement.GetProperty("title").GetString());
@@ -85,6 +94,9 @@ public sealed class NtfyNotificationSenderTests
         /// <summary>Content-Typeを取得します。</summary>
         public string? ContentType { get; private set; }
 
+        /// <summary>日本語本文の送信文字コードを取得します。</summary>
+        public string? CharSet { get; private set; }
+
         /// <summary>JSON本文を取得します。</summary>
         public string? Body { get; private set; }
 
@@ -94,6 +106,7 @@ public sealed class NtfyNotificationSenderTests
             RequestUri = request.RequestUri;
             Method = request.Method;
             ContentType = request.Content?.Headers.ContentType?.MediaType;
+            CharSet = request.Content?.Headers.ContentType?.CharSet;
             Body = request.Content is null ? null : await request.Content.ReadAsStringAsync(cancellationToken);
             return new HttpResponseMessage(status);
         }

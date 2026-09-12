@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http;
-using System.Net.Http.Json;
+using System.Text;
+using System.Text.Json;
 using CodexUsageNotifier.Application.Ntfy;
 using CodexUsageNotifier.Domain.Models;
 
@@ -30,9 +31,12 @@ public sealed class NtfyNotificationSender : INtfyNotificationSender
         }
         try
         {
-            using HttpResponseMessage response = await httpClient.PostAsJsonAsync(
-                Endpoint,
-                new { topic = topic.Value, title = message.Title, message = message.Body, priority = 3 },
+            // 配布環境でHttp.Jsonを追加ロードせず、既存のJSON基盤でUTF-8要求を生成します。
+            string json = JsonSerializer.Serialize(
+                new { topic = topic.Value, title = message.Title, message = message.Body, priority = 3 });
+            using StringContent content = new(json, Encoding.UTF8, "application/json");
+            using HttpResponseMessage response = await httpClient.PostAsync(
+                Endpoint, content,
                 cancellationToken).ConfigureAwait(false);
             if (response.IsSuccessStatusCode)
             {
