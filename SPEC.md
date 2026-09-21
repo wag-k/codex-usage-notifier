@@ -696,7 +696,7 @@ Weeklyなどの長期枠について、新しい利用期間の開始を`LongWin
 
 1. `resetsAt`到達時は、初期値として60秒後に利用枠を再取得する。
 2. タイマーが`resetsAt`へ到達しただけでは、リセット完了または通知済みと確定しない。
-3. 前回と今回の正常取得について、同一のLimitId、Position、WindowDurationMinutesを比較し、次のいずれかを確認した場合に新しいリセット期間と判定する。前回の`resetsAt`へ到達済みかどうかだけを判定の前提にしない。
+3. 前回と今回の正常取得について、同一のLimitId、Position、WindowDurationMinutesを比較する。前回の残量が99%以下で今回の残量が増えたことを必須条件とし、初回観測や100%が続く場合は通知しない。この条件を満たし、次のいずれかを確認した場合に新しいリセット期間と判定する。前回の`resetsAt`へ到達済みかどうかだけを判定の前提にしない。
    - `resetsAt`が前回値から1分以上将来へ進んだ場合は`ResetTimeAdvanced`とする。1分未満の差はApp Serverの秒単位の時刻補正として無視する。
    - 前回の正常取得から`usedPercent`が設定値`ResetInferenceUsageDropPoints`以上低下した場合は`UsageDropInference`とする。
    - 両方が成立する場合は`ResetTimeAdvanced`を優先し、同じ期間について2つの候補を生成しない。
@@ -1133,7 +1133,7 @@ ntfyについては`NtfyDeliveryEnabledSinceUtc`、`NtfyDeliveryEnabledLastObser
 
 - リセット予定時刻へ到達しただけでは通知済み状態にならない。
 - リセット予定時刻後に利用枠を再取得する。
-- 前回のリセット予定時刻より早い取得でも、同一利用枠の`resetsAt`が1分以上将来へ進んだ場合、`ResetTimeAdvanced`を理由として最初の観測でリセット完了通知候補になる。
+- 前回残量が99%以下で今回増加していれば、前回のリセット予定時刻より早い取得でも、同一利用枠の`resetsAt`が1分以上将来へ進んだ場合、`ResetTimeAdvanced`を理由として最初の観測でリセット完了通知候補になる。
 - `resetsAt`の進行と使用率低下が同時に成立する場合は`ResetTimeAdvanced`を優先し、同じ期間について候補を1つだけ生成する。
 - `resetsAt`の1分未満の進行だけではリセット完了通知候補にならない。
 - 前回と今回の正常取得で同一利用枠の`usedPercent`が50ポイント以上低下した場合、`resetsAt`の有無にかかわらず`UsageDropInference`を理由としてリセット完了通知候補になる。

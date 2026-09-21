@@ -289,7 +289,7 @@ public static class RateLimitNotificationPolicy
     }
 
     /// <summary>
-    /// 前回と今回の正常取得値からリセット完了理由を判定します。
+    /// 前回残量99%以下からの増加を前提に、正常取得値からリセット完了理由を判定します。
     /// </summary>
     /// <param name="currentSnapshot">現在の正常取得結果です。</param>
     /// <param name="previousSnapshot">直前の正常取得結果です。</param>
@@ -304,7 +304,9 @@ public static class RateLimitNotificationPolicy
         RateLimitWindow? previousWindow,
         int usageDropPoints)
     {
-        if (previousSnapshot is null || previousWindow is null)
+        if (previousSnapshot is null || previousWindow is null
+            || previousWindow.RemainingPercent > 99D
+            || currentWindow.RemainingPercent <= previousWindow.RemainingPercent)
         {
             return null;
         }

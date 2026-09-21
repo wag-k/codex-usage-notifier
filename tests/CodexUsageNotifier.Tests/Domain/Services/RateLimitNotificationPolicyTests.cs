@@ -12,6 +12,54 @@ public sealed class RateLimitNotificationPolicyTests
     private static readonly DateTimeOffset NowUtc = new(2026, 8, 5, 0, 0, 0, TimeSpan.Zero);
 
     /// <summary>
+    /// 時刻進行だけでは通知せず、99%以下から実際に残量が増えた場合だけ完了を通知します。
+    /// </summary>
+    [TestMethod]
+    [DataRow(100D, 100D, false)]
+    [DataRow(99.5D, 100D, false)]
+    [DataRow(99D, 99D, false)]
+    [DataRow(99D, 98D, false)]
+    [DataRow(99D, 100D, true)]
+    [DataRow(98D, 99D, true)]
+    public void Evaluate_WeeklyResetAdvance_RequiresRecoveryFromAtMost99Percent(
+        double previousRemaining, double currentRemaining, bool expected)
+    {
+        RateLimitWindow previous = CreateWindow(
+            "codex", RateLimitPosition.Primary, RateLimitClassification.Weekly,
+            10080, previousRemaining, NowUtc.AddDays(7));
+        RateLimitWindow current = CreateWindow(
+            "codex", RateLimitPosition.Primary, RateLimitClassification.Weekly,
+            10080, currentRemaining, NowUtc.AddDays(7).AddMinutes(1));
+
+        RateLimitNotificationEvaluation result = Evaluate(
+            [current], CreateSnapshot([previous], NowUtc.AddMinutes(-1)));
+
+        Assert.AreEqual(expected, result.Candidates.Any(candidate =>
+            candidate.NotificationType == RateLimitNotificationType.LongWindowResetCompleted));
+    }
+
+    /// <summary>
+    /// 100%のまま予定時刻が毎回進んでも、取得ごとに新しい完了通知を作らないことを検証します。
+    /// </summary>
+    [TestMethod]
+    public void Evaluate_WeeklyFullRemainingWithRepeatedResetAdvance_DoesNotNotify()
+    {
+        UsageSnapshot? previous = null;
+        for (int index = 0; index < 5; index++)
+        {
+            DateTimeOffset observedAt = NowUtc.AddHours(index);
+            RateLimitWindow current = CreateWindow(
+                "codex", RateLimitPosition.Primary, RateLimitClassification.Weekly,
+                10080, 100, observedAt.AddDays(7));
+            RateLimitNotificationEvaluation result = Evaluate(
+                [current], previous, capturedAtUtc: observedAt);
+
+            Assert.AreEqual(0, result.Candidates.Count);
+            previous = CreateSnapshot([current], observedAt);
+        }
+    }
+
+    /// <summary>
     /// FiveHour回復通知とWeekly早期通知を同じ取得から同時に候補化できることを検証します。
     /// </summary>
     [TestMethod]
