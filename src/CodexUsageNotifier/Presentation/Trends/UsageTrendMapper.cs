@@ -57,7 +57,7 @@ public static class UsageTrendMapper
     }
 
     /// <summary>
-    /// 1取得内の指定分類から最初の有効な使用率を系列へ追加します。
+    /// 1取得内の有効な使用率を追加します。週間系列はcodexだけを対象にします。
     /// </summary>
     private static void AddFirstObservation(
         UsageHistoryEntry entry,
@@ -67,6 +67,8 @@ public static class UsageTrendMapper
     {
         RateLimitObservation? observation = entry.RateLimits.FirstOrDefault(candidate =>
             candidate.Classification == classification
+            && (classification != RateLimitClassification.Weekly
+                || string.Equals(candidate.LimitId, "codex", StringComparison.Ordinal))
             && double.IsFinite(candidate.UsedPercent));
         if (observation is null)
         {

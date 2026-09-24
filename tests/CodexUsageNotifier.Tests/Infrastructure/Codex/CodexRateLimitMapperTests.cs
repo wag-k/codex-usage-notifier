@@ -10,6 +10,48 @@ namespace CodexUsageNotifier.Tests.Infrastructure.Codex;
 [TestClass]
 public sealed class CodexRateLimitMapperTests
 {
+    /// <summary>予備枠が辞書順で先行しても通常週間枠と通知補助残量を選ぶことを検証します。</summary>
+    [TestMethod]
+    public void Map_ReservePrecedesCodex_SelectsCodexWeekly()
+    {
+        CodexRateLimitResponse response = Deserialize("""
+            { "rateLimitsByLimitId": {
+                "codex": { "secondary": { "usedPercent": 35, "windowDurationMins": 10080 } },
+                "base_model_inference": {
+                    "primary": { "usedPercent": 0, "windowDurationMins": 10080 }
+                }
+            } }
+            """);
+        UsageSnapshot snapshot = CodexRateLimitMapper.Map(response, UsageCheckTrigger.Manual, DateTimeOffset.UnixEpoch);
+
+        Assert.AreEqual("base_model_inference", snapshot.RateLimits[0].LimitId);
+        Assert.AreEqual("codex", snapshot.WeeklyCandidate?.LimitId);
+        Assert.AreEqual(65D, snapshot.WeeklyCandidate?.RemainingPercent);
+        Assert.AreEqual(65D, CodexUsageNotifier.Application.Notifications.RateLimitNotificationDisplayContext
+            .FromSnapshot(snapshot).WeeklyRemainingPercent);
+    }
+
+    /// <summary>通常週間枠がないときに別枠やcodexの短期枠で代用しないことを検証します。</summary>
+    [TestMethod]
+    [DataRow("base_model_inference", 10080)]
+    [DataRow("other", 10080)]
+    [DataRow("codex", 300)]
+    public void Map_NoCodexWeekly_LeavesWeeklyUnobserved(string limitId, int durationMinutes)
+    {
+        CodexRateLimitResponse response = new()
+        {
+            RateLimitsByLimitId = new()
+            {
+                [limitId] = new() { Primary = new() { UsedPercent = 0, WindowDurationMins = durationMinutes } },
+            },
+        };
+
+        UsageSnapshot snapshot = CodexRateLimitMapper.Map(response, UsageCheckTrigger.Manual, DateTimeOffset.UnixEpoch);
+
+        Assert.IsNull(snapshot.WeeklyCandidate);
+        Assert.AreEqual(1, snapshot.RateLimits.Count);
+    }
+
     /// <summary>
     /// primaryとsecondaryを位置として保持し、ウィンドウ長だけで分類することを検証します。
     /// </summary>

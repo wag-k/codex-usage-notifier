@@ -735,7 +735,7 @@ Weeklyなどの長期枠について、新しい利用期間の開始を`LongWin
 
 1. 状態画面の利用枠カードの後、通知状態カードの前へ使用率推移グラフを表示する。
 2. データ源は既存の`usage-history.jsonl`とし、履歴・状態・設定の保存スキーマを変更しない。
-3. FiveHourとWeeklyを別系列として同時表示し、Unknownは表示対象外とする。
+3. FiveHourとWeeklyを別系列として同時表示し、Unknownは表示対象外とする。Weeklyは`limitId=codex`の観測値だけを使用し、Luna予備枠など別IDの値を混入させない。codex週間枠がない取得では週間の点を生成しない。保存済み履歴にも同じ選択を適用し、元ファイルは書き換えない。
 4. 縦軸は`UsedPercent`の0～100%固定とし、残量へ反転しない。
 5. FiveHourは緑の破線、Weeklyは青の実線とし、直線で結んで平滑化しない。
 6. 24時間、7日、30日、90日の期間切替を提供し、既定値は7日とする。
@@ -839,7 +839,7 @@ Weeklyなどの長期枠について、新しい利用期間の開始を`LongWin
 | CapturedAtUtc | DateTimeOffset | 取得時刻 |
 | RateLimits | IReadOnlyList&lt;RateLimitWindow&gt; | App Serverから取得したすべての利用枠 |
 | FiveHourCandidate | RateLimitWindow? | 最初に観測された300分枠。存在しない場合はnull |
-| WeeklyCandidate | RateLimitWindow? | 最初に観測された10080分枠。存在しない場合はnull |
+| WeeklyCandidate | RateLimitWindow? | `limitId=codex`の10080分枠。存在しない場合はnullとし、別IDの週間枠で代用しない |
 | ResetCredits | int? | App Serverの`rateLimitResetCredits.availableCount`由来の利用可能リセットクレジット数。JSON互換性のため内部名を維持し、通常の周期的リセット回数とは解釈しない |
 | Trigger | UsageCheckTrigger | 取得契機 |
 

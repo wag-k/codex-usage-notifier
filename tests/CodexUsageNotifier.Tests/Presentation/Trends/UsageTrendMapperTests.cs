@@ -11,6 +11,30 @@ public sealed class UsageTrendMapperTests
 {
     private static readonly DateTimeOffset NowUtc = new(2026, 8, 31, 12, 0, 0, TimeSpan.Zero);
 
+    /// <summary>保存順に依存せずcodexの週間使用率を復元し、予備枠だけの点を混入させません。</summary>
+    [TestMethod]
+    [DataRow(true)]
+    [DataRow(false)]
+    public void Map_ReserveAndCodex_UsesOnlyCodexWeekly(bool reserveFirst)
+    {
+        RateLimitObservation reserve = new()
+        {
+            LimitId = "base_model_inference",
+            Classification = RateLimitClassification.Weekly,
+            WindowDurationMinutes = 10080,
+            UsedPercent = 0,
+        };
+        RateLimitObservation codex = CreateObservation(RateLimitClassification.Weekly, 35);
+        UsageTrendHistory result = UsageTrendMapper.Map(
+            [CreateEntry(NowUtc.AddHours(-1), reserve),
+             CreateEntry(NowUtc, reserveFirst ? [reserve, codex] : [codex, reserve])],
+            TimeZoneInfo.Utc);
+
+        Assert.AreEqual(1, result.WeeklyPoints.Count);
+        Assert.AreEqual(35D, result.WeeklyPoints.Single().UsedPercent);
+        Assert.AreEqual(NowUtc, result.WeeklyPoints.Single().CapturedAtUtc);
+    }
+
     /// <summary>使用率0%と100%を補正せず表示系列へ保持することを検証します。</summary>
     [TestMethod]
     [DataRow(0D)]
