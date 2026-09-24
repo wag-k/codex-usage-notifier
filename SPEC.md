@@ -1890,7 +1890,7 @@ Phase 5Aではインストーラー、MSIX、MSI、ClickOnce、GitHub Actions、
 ### Phase 5B：配布とCI
 
 - LocalAppDataファイル排他によるログオンセッション横断のユーザー単位単一インスタンス
-- `VersionPrefix=0.5.2`を既定とするAssembly、状態画面、App Server、配布物のバージョン一元化
+- `VersionPrefix=0.5.3`を既定とするAssembly、状態画面、App Server、配布物のバージョン一元化
 - アプリ・テストの`packages.lock.json`とlocked restore
 - 最小`contents: read`権限、公式Action完全長SHA固定のWindows GitHub Actions CI
 - direct/transitive NuGet脆弱性JSON検査を含むRelease品質ゲート
