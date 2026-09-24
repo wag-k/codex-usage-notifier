@@ -557,10 +557,7 @@ public sealed class StatusViewModel : INotifyPropertyChanged, IUsageStatusSink
             "5時間枠（短期枠）",
             snapshot.FiveHourCandidate,
             snapshot.CapturedAtUtc);
-        WeeklyCard = RateLimitCardViewModel.Create(
-            "週間枠",
-            snapshot.WeeklyCandidate,
-            snapshot.CapturedAtUtc);
+        WeeklyCard = RateLimitCardViewModel.CreateWeekly(snapshot);
         AllRateLimits = FormatAllRateLimits(
             snapshot,
             state,

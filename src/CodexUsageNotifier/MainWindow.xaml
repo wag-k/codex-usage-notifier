@@ -119,7 +119,8 @@
                                    Text="{Binding ClassificationText}" />
                         <TextBlock FontSize="14"
                                    FontWeight="SemiBold"
-                                   Text="{Binding UsedPercentText}" />
+                                   Text="{Binding UsedPercentText}"
+                                   TextWrapping="Wrap" />
                         <TextBlock Margin="0,7,0,0"
                                    Foreground="#344054"
                                    Text="{Binding ResetAtText}"

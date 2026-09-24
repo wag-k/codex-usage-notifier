@@ -50,9 +50,11 @@ public sealed class RateLimitGmailRetryProcessorTests
         Assert.AreEqual(0, context.GmailSender.SendCallCount);
     }
 
-    /// <summary>初回失敗から60分後の正常取得で1回だけ再試行することを検証します。</summary>
+    /// <summary>60分後に1回だけ再試行し、補助週間残量にはcodex枠だけを使用します。</summary>
     [TestMethod]
-    public async Task ProcessAsync_AfterRetryDeadline_RetriesOnce()
+    [DataRow("codex", "63%")]
+    [DataRow("team", "未観測")]
+    public async Task ProcessAsync_AfterRetryDeadline_RetriesOnce(string weeklyLimitId, string expectedWeekly)
     {
         RateLimitWindow window = CreateFiveHourWindow("codex", NowUtc.AddHours(5), 99);
         TestContext context = CreateContext(CreateRetryState(window, NowUtc.AddMinutes(-60)));
@@ -60,12 +62,12 @@ public sealed class RateLimitGmailRetryProcessorTests
         NotificationProcessingResult result = await context.Processor.ProcessAsync(
             CreateSnapshot(
                 NowUtc,
-                [window, CreateWeeklyWindow("team", NowUtc.AddDays(7), 63)]),
+                [window, CreateWeeklyWindow(weeklyLimitId, NowUtc.AddDays(7), 63)]),
             CreateSettings(windowsEnabled: false),
             CancellationToken.None);
 
         Assert.AreEqual(1, context.GmailSender.SendCallCount);
-        StringAssert.Contains(context.GmailSender.Messages.Single().Body, "週間枠の残量: 63%");
+        StringAssert.Contains(context.GmailSender.Messages.Single().Body, $"週間枠の残量: {expectedWeekly}");
         Assert.AreEqual(2, result.State.RateLimitNotificationStates.Single().GmailAttemptCount);
         Assert.AreEqual(DeliveryStatus.Succeeded, result.State.RateLimitNotificationStates.Single().GmailDeliveryStatus);
     }

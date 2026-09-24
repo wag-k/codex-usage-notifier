@@ -63,21 +63,41 @@ public sealed class RateLimitCardViewModel
     public DashboardVisualState VisualState { get; init; }
 
     /// <summary>
+    /// 通常の週間枠と、同じ取得で観測したLuna予備枠の使用率からカードを生成します。
+    /// 予備枠の存在は取得結果に基づき、利用可能性や自動切替は推測しません。
+    /// </summary>
+    public static RateLimitCardViewModel CreateWeekly(UsageSnapshot snapshot)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+        RateLimitWindow? reserve = snapshot.RateLimits.FirstOrDefault(window =>
+            string.Equals(window.LimitId, "base_model_inference", StringComparison.Ordinal)
+            && window.Classification == RateLimitClassification.Weekly);
+        double? reserveUsedPercent = reserve is not null
+            && double.IsFinite(reserve.UsedPercent)
+            && reserve.UsedPercent is >= 0D and <= 100D
+                ? reserve.UsedPercent
+                : null;
+        return Create("週間枠", snapshot.WeeklyCandidate, snapshot.CapturedAtUtc, reserveUsedPercent);
+    }
+
+    /// <summary>
     /// 観測結果からダッシュボード用カードを生成します。
     /// </summary>
     /// <param name="title">カードの表示タイトルです。</param>
     /// <param name="window">観測した利用枠です。未観測の場合はnullです。</param>
     /// <param name="capturedAtUtc">利用枠を取得したUTC時刻です。</param>
+    /// <param name="lunaReserveUsedPercent">観測したLuna予備使用率です。未観測時はnullです。</param>
     /// <returns>画面表示専用のカードです。</returns>
     public static RateLimitCardViewModel Create(
         string title,
         RateLimitWindow? window,
-        DateTimeOffset capturedAtUtc)
+        DateTimeOffset capturedAtUtc,
+        double? lunaReserveUsedPercent = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(title);
         if (window is null)
         {
-            return CreateUnobserved(title);
+            return CreateUnobserved(title, lunaReserveUsedPercent);
         }
 
         double? remainingPercent = UsageRingValue.Normalize(window.RemainingPercent);
@@ -89,7 +109,7 @@ public sealed class RateLimitCardViewModel
             RemainingPercent = remainingPercent,
             UsedPercent = usedPercent,
             RemainingPercentText = FormatPercent(remainingPercent),
-            UsedPercentText = $"使用率 {FormatPercent(usedPercent)}",
+            UsedPercentText = FormatUsedPercent(usedPercent, lunaReserveUsedPercent),
             ResetAtText = window.ResetsAtUtc?.ToLocalTime().ToString(
                 "yyyy/MM/dd HH:mm",
                 CultureInfo.CurrentCulture) ?? "リセット時刻未取得",
@@ -104,8 +124,9 @@ public sealed class RateLimitCardViewModel
     /// 未観測状態のカードを生成します。
     /// </summary>
     /// <param name="title">カードの表示タイトルです。</param>
+    /// <param name="lunaReserveUsedPercent">通常枠が未観測でも取得できたLuna予備使用率です。</param>
     /// <returns>ゼロ残量とは区別された未観測カードです。</returns>
-    public static RateLimitCardViewModel CreateUnobserved(string title)
+    public static RateLimitCardViewModel CreateUnobserved(string title, double? lunaReserveUsedPercent = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(title);
         return new RateLimitCardViewModel
@@ -115,13 +136,22 @@ public sealed class RateLimitCardViewModel
             RemainingPercent = null,
             UsedPercent = null,
             RemainingPercentText = "--",
-            UsedPercentText = "使用率 --",
+            UsedPercentText = FormatUsedPercent(null, lunaReserveUsedPercent),
             ResetAtText = "未観測",
             RemainingTimeText = "利用枠をまだ取得していません",
             ClassificationText = "未観測",
             Classification = null,
             VisualState = DashboardVisualState.Unobserved,
         };
+    }
+
+    /// <summary>通常枠の使用率に、有効な観測値がある場合だけLuna予備使用率を併記します。</summary>
+    private static string FormatUsedPercent(double? usedPercent, double? reserveUsedPercent)
+    {
+        string suffix = reserveUsedPercent is >= 0D and <= 100D
+            ? $"（Luna予備 {FormatPercent(reserveUsedPercent)}）"
+            : string.Empty;
+        return $"使用率 {FormatPercent(usedPercent)}{suffix}";
     }
 
     /// <summary>残量からダッシュボード表示状態を決定します。</summary>

@@ -22,10 +22,11 @@ public sealed class UsageSnapshot
         window => window.Classification == RateLimitClassification.FiveHour);
 
     /// <summary>
-    /// 最初に観測された10080分の週間枠候補を取得します。
+    /// codexの10080分週間枠を取得します。他の利用枠だけの場合は未観測を表すnullです。
     /// </summary>
     public RateLimitWindow? WeeklyCandidate => RateLimits.FirstOrDefault(
-        window => window.Classification == RateLimitClassification.Weekly);
+        window => window.Classification == RateLimitClassification.Weekly
+            && string.Equals(window.LimitId, "codex", StringComparison.Ordinal));
 
     /// <summary>
     /// App Serverが返した利用可能なrate-limit reset credit数を取得または設定します。
