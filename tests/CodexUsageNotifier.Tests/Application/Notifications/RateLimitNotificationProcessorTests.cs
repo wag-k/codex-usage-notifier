@@ -133,6 +133,38 @@ namespace CodexUsageNotifier.Tests.Application.Notifications;
     }
 
     /// <summary>
+    /// 毎回の再起動と予定時刻の進行を挟んでも、99%から100%へ回復した取得だけで通知することを検証します。
+    /// </summary>
+    [TestMethod]
+    public async Task ProcessAsync_WeeklyFullRecoveryAcrossRestarts_NotifiesOncePerRecovery()
+    {
+        DateTimeOffset startUtc = new(2026, 8, 30, 8, 0, 0, TimeSpan.Zero);
+        InMemoryStateRepository repository = new(new ApplicationState { InitialSetupCompleted = true });
+        RecordingWindowsNotificationSender sender = new();
+        double[] remainingPercents = [100, 100, 99, 100, 100, 99, 100, 100];
+        int[] expectedSendCounts = [0, 0, 0, 1, 1, 1, 2, 2];
+        AppSettings settings = AppSettings.CreateDefault() with { QuietHoursEnabled = false };
+
+        for (int index = 0; index < remainingPercents.Length; index++)
+        {
+            DateTimeOffset nowUtc = startUtc.AddHours(index);
+            using ApplicationStateStore stateStore = new(repository);
+            RateLimitNotificationProcessor processor = CreateProcessor(
+                stateStore, sender, new MutableTimeProvider(nowUtc));
+            RateLimitWindow window = CreateWeeklyWindow(remainingPercents[index], nowUtc.AddDays(7));
+
+            NotificationProcessingResult result = await processor.ProcessAsync(
+                CreateSnapshot(window, nowUtc), settings, CancellationToken.None);
+
+            Assert.AreEqual(expectedSendCounts[index], sender.SendCount, $"取得番号: {index}");
+            Assert.AreEqual(expectedSendCounts[index], result.State.RateLimitNotificationStates.Count);
+            Assert.IsTrue(result.State.RateLimitNotificationStates.All(state =>
+                state.NotificationType == RateLimitNotificationType.LongWindowResetCompleted
+                && state.WindowsDeliveryStatus == DeliveryStatus.Succeeded));
+        }
+    }
+
+    /// <summary>
     /// 同一取得で複数候補が成立してもWindows通知を1件だけ送り、各候補を成功として保存することを検証します。
     /// </summary>
     [TestMethod]
