@@ -102,7 +102,7 @@ Project: https://github.com/dotnet/runtime
 Package license source: NuGet nuspec, LICENSE.TXT, THIRD-PARTY-NOTICES.TXT
 -------------------------------------------------------------------------------
 Component: System.Security.Cryptography.Pkcs
-Version: 8.0.1
+Version: 8.0.2
 Copyright: Microsoft Corporation. All rights reserved.
 License: MIT
 Project: https://github.com/dotnet/runtime
