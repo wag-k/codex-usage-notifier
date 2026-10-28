@@ -20,6 +20,8 @@
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="8.0.1" />
     <PackageReference Include="Microsoft.Extensions.Logging" Version="8.0.1" />
     <PackageReference Include="MimeKit" Version="4.17.0" />
+    <!-- MimeKit経由の依存を、既知のDoS脆弱性が修正された.NET 8互換版へ固定します。 -->
+    <PackageReference Include="System.Security.Cryptography.Pkcs" Version="8.0.2" />
     <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="8.0.0" />
   </ItemGroup>
 

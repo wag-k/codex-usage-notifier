@@ -12,7 +12,7 @@ public sealed class RateLimitNotificationPolicyTests
     private static readonly DateTimeOffset NowUtc = new(2026, 8, 5, 0, 0, 0, TimeSpan.Zero);
 
     /// <summary>
-    /// 時刻進行だけでは通知せず、99%以下から実際に残量が増えた場合だけ完了を通知します。
+    /// 時刻進行があっても、99%以下から100%へ回復した場合だけ完了を通知します。
     /// </summary>
     [TestMethod]
     [DataRow(100D, 100D, false)]
@@ -20,8 +20,10 @@ public sealed class RateLimitNotificationPolicyTests
     [DataRow(99D, 99D, false)]
     [DataRow(99D, 98D, false)]
     [DataRow(99D, 100D, true)]
-    [DataRow(98D, 99D, true)]
-    public void Evaluate_WeeklyResetAdvance_RequiresRecoveryFromAtMost99Percent(
+    [DataRow(98D, 99D, false)]
+    [DataRow(99D, 99.99D, false)]
+    [DataRow(0D, 100D, true)]
+    public void Evaluate_WeeklyResetAdvance_RequiresFullRecoveryFromAtMost99Percent(
         double previousRemaining, double currentRemaining, bool expected)
     {
         RateLimitWindow previous = CreateWindow(
@@ -30,6 +32,28 @@ public sealed class RateLimitNotificationPolicyTests
         RateLimitWindow current = CreateWindow(
             "codex", RateLimitPosition.Primary, RateLimitClassification.Weekly,
             10080, currentRemaining, NowUtc.AddDays(7).AddMinutes(1));
+
+        RateLimitNotificationEvaluation result = Evaluate(
+            [current], CreateSnapshot([previous], NowUtc.AddMinutes(-1)));
+
+        Assert.AreEqual(expected, result.Candidates.Any(candidate =>
+            candidate.NotificationType == RateLimitNotificationType.LongWindowResetCompleted));
+    }
+
+    /// <summary>時刻情報がなくても、推定閾値以上の回復と残量100%の両方を要求します。</summary>
+    [TestMethod]
+    [DataRow(20D, 70D, false)]
+    [DataRow(49D, 99D, false)]
+    [DataRow(49D, 99.99D, false)]
+    [DataRow(50D, 100D, true)]
+    [DataRow(51D, 100D, false)]
+    public void Evaluate_WeeklyUsageDrop_RequiresFullRecovery(
+        double previousRemaining, double currentRemaining, bool expected)
+    {
+        RateLimitWindow previous = CreateWindow(
+            "codex", RateLimitPosition.Primary, RateLimitClassification.Weekly,
+            10080, previousRemaining, resetsAtUtc: null);
+        RateLimitWindow current = WithRemaining(previous, currentRemaining);
 
         RateLimitNotificationEvaluation result = Evaluate(
             [current], CreateSnapshot([previous], NowUtc.AddMinutes(-1)));
@@ -318,7 +342,7 @@ public sealed class RateLimitNotificationPolicyTests
     }
 
     /// <summary>
-    /// リセット時刻のない長期枠で使用率が50ポイント低下すると推定完了候補になることを検証します。
+    /// リセット時刻のない長期枠で50ポイント回復して100%になると推定完了候補になることを検証します。
     /// </summary>
     [TestMethod]
     public void Evaluate_NoResetLongWindow_FiftyPointDropInfersReset()
@@ -328,9 +352,9 @@ public sealed class RateLimitNotificationPolicyTests
             RateLimitPosition.Primary,
             RateLimitClassification.Weekly,
             10080,
-            20,
+            50,
             resetsAtUtc: null);
-        RateLimitWindow current = WithRemaining(previous, 70);
+        RateLimitWindow current = WithRemaining(previous, 100);
 
         RateLimitNotificationEvaluation result = Evaluate(
             [current],
@@ -343,7 +367,7 @@ public sealed class RateLimitNotificationPolicyTests
     }
 
     /// <summary>
-    /// リセット時刻のない長期枠で使用率低下が49ポイント以下なら完了候補にならないことを検証します。
+    /// リセット時刻のない長期枠では100%へ回復しても49ポイントの増加だけでは推定しないことを検証します。
     /// </summary>
     [TestMethod]
     public void Evaluate_NoResetLongWindow_FortyNinePointDropDoesNotInferReset()
@@ -353,9 +377,9 @@ public sealed class RateLimitNotificationPolicyTests
             RateLimitPosition.Primary,
             RateLimitClassification.Weekly,
             10080,
-            20,
+            51,
             resetsAtUtc: null);
-        RateLimitWindow current = WithRemaining(previous, 69);
+        RateLimitWindow current = WithRemaining(previous, 100);
 
         RateLimitNotificationEvaluation result = Evaluate(
             [current],
@@ -366,7 +390,7 @@ public sealed class RateLimitNotificationPolicyTests
     }
 
     /// <summary>
-    /// 設定モデルの使用率低下推定閾値がリセット完了判定へ使用されることを検証します。
+    /// 100%へ回復した場合の使用率低下推定に設定モデルの閾値を使用することを検証します。
     /// </summary>
     [TestMethod]
     public void Evaluate_CustomUsageDropThreshold_UsesConfiguredPoints()
@@ -376,9 +400,9 @@ public sealed class RateLimitNotificationPolicyTests
             RateLimitPosition.Primary,
             RateLimitClassification.Weekly,
             10080,
-            20,
+            60,
             resetsAtUtc: null);
-        RateLimitWindow current = WithRemaining(previous, 60);
+        RateLimitWindow current = WithRemaining(previous, 100);
 
         RateLimitNotificationEvaluation result = Evaluate(
             [current],
@@ -392,7 +416,7 @@ public sealed class RateLimitNotificationPolicyTests
     }
 
     /// <summary>
-    /// リセット時刻が進んだ場合はResetTimeAdvanced理由の完了候補になることを検証します。
+    /// 100%へ回復してリセット時刻が進んだ場合はResetTimeAdvanced理由の完了候補になることを検証します。
     /// </summary>
     [TestMethod]
     public void Evaluate_ResetTimeAdvanced_RecordsReason()
@@ -409,7 +433,7 @@ public sealed class RateLimitNotificationPolicyTests
             RateLimitPosition.Primary,
             RateLimitClassification.Weekly,
             10080,
-            99,
+            100,
             NowUtc.AddDays(7));
 
         RateLimitNotificationEvaluation result = Evaluate(

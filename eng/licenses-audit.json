@@ -23,6 +23,7 @@
     { "id": "Microsoft.Extensions.DependencyInjection", "version": "8.0.1", "dependencyType": "Direct", "license": "MIT", "distributedInRelease": true },
     { "id": "Microsoft.Extensions.Logging", "version": "8.0.1", "dependencyType": "Direct", "license": "MIT", "distributedInRelease": true },
     { "id": "MimeKit", "version": "4.17.0", "dependencyType": "Direct", "license": "MIT", "distributedInRelease": true },
+    { "id": "System.Security.Cryptography.Pkcs", "version": "8.0.2", "dependencyType": "Direct", "license": "MIT", "distributedInRelease": true },
     { "id": "System.Security.Cryptography.ProtectedData", "version": "8.0.0", "dependencyType": "Direct", "license": "MIT", "distributedInRelease": true },
     { "id": "BouncyCastle.Cryptography", "version": "2.6.2", "dependencyType": "Transitive", "license": "MIT", "distributedInRelease": true },
     { "id": "Google.Apis", "version": "1.75.0", "dependencyType": "Transitive", "license": "Apache-2.0", "distributedInRelease": true },
@@ -33,8 +34,7 @@
     { "id": "Microsoft.Extensions.Primitives", "version": "8.0.0", "dependencyType": "Transitive", "license": "MIT", "distributedInRelease": true },
     { "id": "Newtonsoft.Json", "version": "13.0.4", "dependencyType": "Transitive", "license": "MIT", "distributedInRelease": true },
     { "id": "System.CodeDom", "version": "7.0.0", "dependencyType": "Transitive", "license": "MIT", "distributedInRelease": true },
-    { "id": "System.Management", "version": "7.0.2", "dependencyType": "Transitive", "license": "MIT", "distributedInRelease": true },
-    { "id": "System.Security.Cryptography.Pkcs", "version": "8.0.1", "dependencyType": "Transitive", "license": "MIT", "distributedInRelease": true }
+    { "id": "System.Management", "version": "7.0.2", "dependencyType": "Transitive", "license": "MIT", "distributedInRelease": true }
   ],
   "buildAndTestOnlyPackages": [
     { "id": "Microsoft.NET.Test.Sdk", "version": "17.12.0", "dependencyType": "Direct", "license": "MIT", "distributedInRelease": false },
